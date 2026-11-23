@@ -194,6 +194,8 @@ JSON
   fi
   ok "build complete → ./artex"
 
+  warn "native mode runs agents as YOUR user with no sandbox: they can read ~/.ssh, keys, config and DB credentials."
+  warn "artex refuses to start unsandboxed unless ARTEX_ALLOW_UNSANDBOXED=1 is set (see SECURITY.md). Prefer Docker."
   info "starting... (Ctrl-C to exit)"
   ./artex
 }

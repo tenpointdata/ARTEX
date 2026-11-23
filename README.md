@@ -446,6 +446,11 @@ cp config.example.json config.json   # fill in the database connection
 Start with `start.sh` / `start.bat`, not `./artex`: it is a daemon script that restarts the process
 after a backoff. To keep it in the background: `nohup ./start.sh >artex.log 2>&1 &`.
 
+> **Native runs are unsandboxed.** Agent isolation needs Linux and a root server (the Docker image).
+> Anywhere else ARTEX refuses to start unless you set `ARTEX_ALLOW_UNSANDBOXED=1`, because agents then
+> run as your user and can read your keys, config and database credentials (see SECURITY.md). After
+> replacing the binary, stop `start.sh` and start it again: it will not relaunch a changed binary after a crash.
+
 #### Verifying a release
 
 Each release attaches `SHA256SUMS` and a CycloneDX SBOM, `artex-<tag>.cdx.json` (Go modules in the
@@ -594,7 +599,7 @@ Chat, goal decomposition, and side questions are stored on the same task and are
 The per-worker average is not restored (usage rows have no run boundary), so the estimate starts
 from the defaults until a worker finishes in this process.
 
-**Common flags**: `./start.sh -addr :8787 -proxy 127.0.0.1:8788` (`-addr` frontend/API, `-proxy` traffic
+**Common flags**: `./start.sh -addr 127.0.0.1:8787 -proxy 127.0.0.1:8788` (`-addr` frontend/API, `-proxy` traffic
 recording proxy). The proxy is unauthenticated, so it only binds loopback: a host-less `:8788` becomes
 `127.0.0.1:8788` and other hosts are refused unless `ARTEX_PROXY_ALLOW_NONLOOPBACK=1`. Upstream TLS
 certificates are verified against system roots; set `ARTEX_CAPTURE_INSECURE_UPSTREAM=1` to capture
