@@ -3,6 +3,7 @@
 package server
 
 import (
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -26,6 +27,7 @@ func newIsolationRootFixture(t *testing.T) *isolationRootFixture {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { os.RemoveAll(filepath.SplitList(os.Getenv("PATH"))[0]) })
+	useExecutorRunnableProbe(t, f.tmp)
 	keyDir := filepath.Join(f.data, "..", filepath.Base(f.data)+"-keys")
 	if err := os.Mkdir(keyDir, 0o700); err != nil {
 		t.Fatal(err)
@@ -42,6 +44,38 @@ func newIsolationRootFixture(t *testing.T) *isolationRootFixture {
 		t.Fatal(err)
 	}
 	return &isolationRootFixture{execRootFixture: f, keyDir: keyDir, config: config}
+}
+
+// useExecutorRunnableProbe points the probe at a 0755 copy of the test binary in
+// dir. `go test` builds into a 0700 root-owned directory, so the executor, which
+// execs the probe after the shim drops privileges, cannot run os.Executable()
+// there; /app/artex in the image has no such problem.
+func useExecutorRunnableProbe(t *testing.T, dir string) {
+	t.Helper()
+	self, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	src, err := os.Open(self)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer src.Close()
+	bin := filepath.Join(dir, "probe.test")
+	dst, err := os.OpenFile(bin, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o755)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := io.Copy(dst, src); err != nil {
+		dst.Close()
+		t.Fatal(err)
+	}
+	if err := dst.Close(); err != nil {
+		t.Fatal(err)
+	}
+	prev := isolationProbeBinary
+	isolationProbeBinary = func() (string, error) { return bin, nil }
+	t.Cleanup(func() { isolationProbeBinary = prev })
 }
 
 func (f *isolationRootFixture) targets() IsolationTargets {
@@ -129,6 +163,7 @@ func TestPrepareExecPrivilegeOwnsKeysAndConfigAsRoot(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { os.RemoveAll(filepath.SplitList(os.Getenv("PATH"))[0]) })
+	useExecutorRunnableProbe(t, f.tmp)
 	if err := IsolationSelfTest(f.priv, IsolationTargets{DataDir: f.data, KeyDir: keyDir, ConfigPath: config}); err != nil {
 		t.Fatalf("self-test after PrepareExecPrivilege: %v", err)
 	}
