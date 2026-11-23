@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/Autumn-27/norma/agentcore"
+	normacompaction "github.com/Autumn-27/norma/compaction"
 	"github.com/Autumn-27/norma/harness"
 	"github.com/Autumn-27/norma/llm"
 	"github.com/Autumn-27/norma/noaadapter"
@@ -146,8 +147,10 @@ func TestEnableNoaFailureKeepsBuiltInCompaction(t *testing.T) {
 	if len(warns) != 1 || !strings.Contains(warns[0], "falling back to built-in compaction") || !strings.Contains(warns[0], "archive dir unusable") {
 		t.Fatalf("warnings %q", warns)
 	}
-	if opts.Compaction != compaction || opts.Compactor != nil {
-		t.Fatalf("Compaction=%v Compactor=%v; the built-in compaction must stay", opts.Compaction, opts.Compactor)
+	// The built-in compaction stays in charge, as the framed host Compactor built
+	// from the same config (untrusted_compaction.go).
+	if _, ok := opts.Compactor.(*normacompaction.Compactor); !ok || opts.Compaction != nil {
+		t.Fatalf("Compaction=%v Compactor=%T; the built-in compaction must stay (framed)", opts.Compaction, opts.Compactor)
 	}
 	if opts.Provider != llm.Provider(inner) {
 		t.Fatalf("provider %T was wrapped although noa is off", opts.Provider)
