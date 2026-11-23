@@ -60,10 +60,28 @@ See `docs/ARCHITECTURE.md` for the code-level map. Summary:
 ## Current state
 
 **2026-11-23** — Fixes for the High and Medium findings from the 2026-11-23 security audit are on the
-local branch `ej/20261123-145205-6a3af6` (not pushed). It covers audit findings #1–#16 except as listed
-under Open work. `go build ./...`, `go vet ./...` and `go test ./...` pass on macOS. Not yet run: the
-Linux-root tests, the Docker egress iptables rules, the Postgres-backed tests and the web typecheck
-(card `c-dadc14`). Operator-facing changes:
+local branch `ej/20261123-145205-6a3af6` (not pushed), now also carried by `ej/20261123-152406-fccff3`
+with the verification fixes. It covers audit findings #1–#16 except as listed under Open work.
+Verified 2026-11-23 (card `c-dadc14`):
+- `go vet ./...` + `go test ./...` **as root on Linux** (golang:1.26.11-bookworm, arm64) with
+  `ARTEX_PG_DSN` set: all packages ok, including the `*AsRoot` executor/isolation tests,
+  `TestExecHomePerRunDirAsRoot` and the MCP uid-10002 split. Two test fixes were needed (commit
+  `fc8c3f9`): the isolation probe could not exec the `go test` binary from its 0700 build dir (also
+  broken on main), and `TestGateOffTaskIsUnchanged` still expected zero lookups with the gate off.
+- Docker egress: through the real `docker-compose.yml` (NET_ADMIN) on a slim image of the same
+  runtime base, `[artex] egress: installed` is logged, `-m owner`/`-m addrtype` load on bookworm's
+  nf_tables iptables 1.8.9, and the executor is refused for 169.254.169.254, 100.100.100.200, the
+  gateway, host.docker.internal (root reaches the host service) and :8787 on every local address,
+  while a LAN router, another container and the internet stay reachable. The full image did not
+  finish building on a slow link (`c-a6891b`).
+- Web: `npm ci` and `npx tsc --noEmit` clean. `npm run lint` fails with 84 errors, all already on main
+  and none in the changed files (`c-834a5a`). Headless Chromium: setup, login, Sign out over the
+  HttpOnly SameSite=Strict cookie work and `document.cookie` is empty, **but a token copied before
+  logout stays valid for 7 days** (`c-a0af33`).
+- The stock compose cannot start on Docker Desktop for Mac: bind mounts ignore permissions, so the
+  isolation self-test fails closed (also on main; `c-775dc2`). Use named volumes there.
+
+Operator-facing changes:
 - Native (non-Linux-root) starts now refuse unless `ARTEX_ALLOW_UNSANDBOXED=1` is set; `dev.sh` sets it.
 - A non-loopback `-addr` without TLS is refused. Use `-tls-cert`/`-tls-key` (or
   `ARTEX_TLS_CERT`/`ARTEX_TLS_KEY`), or set `ARTEX_ALLOW_INSECURE_BIND=1`; the Dockerfile sets that env.
@@ -96,9 +114,12 @@ Linux-root tests, the Docker egress iptables rules, the Postgres-backed tests an
    coverage against a codified methodology checklist, not only asset touch. Done = planner can
    read a methodology and the coverage graph shows checklist completion.
 
+Also for agents: **SEC: logout revocation** (S), card `c-a0af33`. Done = a replayed token after logout
+gets 401. **Docker Desktop named volumes** (S), card `c-775dc2`. Done = `docker compose up` starts on a Mac.
+
 **Human lane**
-- **SEC: verify on Linux/Docker** (card `c-dadc14`): Linux-root tests, the egress iptables rules,
-  Postgres tests and the web typecheck. Needed before the security branch goes anywhere public.
+- **Full-image Docker check** (card `c-a6891b`): needs a fast link for the recon-toolbox build; repeat
+  the egress probes and the login script there (the slim-image run passed).
 - Revisit tracking: E1–E10 are on the private Composite board (decided 2026-11-23, repo is public).
   File GitHub issues only if the repo goes private or you want them public.
 - Decide engagement-governance direction (E5): how formal the rules-of-engagement/authorization
@@ -112,7 +133,7 @@ Linux-root tests, the Docker egress iptables rules, the Postgres-backed tests an
 - **Toolchain:** Go (see `go.mod`), Node (web), Docker + Compose, PostgreSQL. Verified present
   locally: Go 1.27.1, Docker 29.4, Compose v5.1, Node v24.14.
 - **Build backend:** `go build ./...` (verified: exit 0).
-- **Web deps (not yet installed):** `cd web && npm ci`. **Embedded-UI build:** `./build.sh`.
+- **Web deps:** `cd web && npm ci`, then `npx tsc --noEmit` (clean) and `npm run lint` (84 known errors, `c-834a5a`). **Embedded-UI build:** `./build.sh`.
 - **Run (Docker):** `cp .env.example .env` (set `POSTGRES_PASSWORD`), `docker compose up -d --build`,
   open http://localhost:8787, setup token via `docker compose logs artex | grep "Setup token"`.
 - **Verify (reproduces CI):** `scripts/verify.sh` (fast set, no Docker); `--full` adds `go test -race`
@@ -135,7 +156,10 @@ Card ids in brackets:
 - **E8** [`c-5487e8`] Planner/worker evaluation suite (regression targets, prompt-version A/B via the benchmark gate).
 - **E9** [`c-73af97`] Frontend/UX pass (tables over cards, fewer-clicks triage workflow, live engagement dashboard).
 - **SEC** [`c-485de0`] MITM proxy upstream dials bypass the metadata/block checks (High follow-up to #1).
-- **SEC** [`c-dadc14`] Verify the security branch on Linux root, in Docker and against Postgres, plus the web typecheck.
+- **SEC** [`c-a0af33`] Logout does not revoke the session token (valid until the 7-day JWT TTL).
+- **SEC** [`c-775dc2`] Docker Desktop bind mounts defeat executor isolation; stock compose will not start on a Mac.
+- [`c-a6891b`] Repeat the egress/login check on the full image once it builds.
+- [`c-834a5a`] web: 84 pre-existing biome lint errors; `npm run lint` cannot gate CI yet.
 - **SEC** [`c-8d54d5`] Capture proxy: insecure upstream only for in-scope targets.
 - **SEC** [`c-c10f2c`] gorilla/websocket bump (GO-2026-6278).
 - **SEC** [`c-bd9a6d`] Residual gaps from the High/Medium fixes.
@@ -149,11 +173,24 @@ Card ids in brackets:
   "immutable surfaces" must never enter an automated search space.
 - **Migrations fix forward** — a published `db/migrations/*.sql` is never edited.
 - **Embedded UI** requires `-tags embedui`; a plain `go build` omits the web assets.
+- **Root tests on Linux:** run them as root in a container, e.g. `docker run --rm --cap-add NET_ADMIN
+  -v "$PWD":/src -w /src -e ARTEX_PG_DSN=postgres://… golang:1.26.11-bookworm go test ./...`. Without
+  root, the `*AsRoot` tests skip; without `ARTEX_PG_DSN`, the PG-backed tests skip (macOS runs miss both).
+- **Docker Desktop (Mac):** bind-mounted `data/`, `keys/` and `skills/` are writable by any uid in the
+  container, so the isolation self-test refuses to start. Use named volumes (`c-775dc2`).
+- **Egress probes:** as the executor, `/app/artex __artex-exec-drop 10001 10001 -- curl …`; rule hits
+  show up in `iptables -L ARTEX_EGRESS -v -n -x`.
 - **Secrets** are AES-256-GCM sealed with per-column AAD; losing the key (`keys/secret.key` or
   `ARTEX_SECRET_KEY`) loses stored secrets.
 
 ## Decisions
 
+- **2026-11-23** — c-dadc14: the security branch's always-on metadata check resolves each name the
+  platform dials (gate on or off); `TestGateOffTaskIsUnchanged` now asserts one lookup per platform
+  connection instead of none, since this is the intended behaviour, not a regression. The isolation
+  probe binary became a test hook (`isolationProbeBinary`) rather than being changed in production.
+  Logout revocation and the Docker Desktop bind-mount problem were filed as cards, not fixed here: both
+  predate the branch and need a design choice.
 - **2026-11-23** — Stood ARTEX up locally and registered it as a Composite project rather than
   forking/renaming; it stays an AGPL-3.0 fork under `tenpointdata`. Backend verified building; web
   install and Docker run deferred (not needed to produce the setup + plan deliverable).
