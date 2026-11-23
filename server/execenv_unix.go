@@ -23,10 +23,11 @@ import (
 // executorEnvNames are the server variables an agent process keeps: the search
 // path and locale, the temp directory, the non-interactive defaults Norma sets, the
 // proxy and CA trust variables the agents pass to their shells (agent.proxyEnv),
-// the browser location of the image (Dockerfile), and the shim's own non-secret
-// variables. HOME and XDG_CACHE_HOME are replaced by the executor's home.
+// the browser and nuclei-template locations of the image (Dockerfile), and the
+// shim's own non-secret variables. HOME and the XDG directories are replaced by the
+// home of the process (execpriv_home_unix.go).
 var executorEnvNames = nameSet(
-	"PATH", "HOME", "XDG_CACHE_HOME",
+	"PATH", "HOME", "XDG_CACHE_HOME", "XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_STATE_HOME",
 	"LANG", "LANGUAGE", "TERM", "TZ", "TMPDIR",
 	"LC_ALL", "LC_CTYPE", "LC_NUMERIC", "LC_TIME", "LC_COLLATE", "LC_MONETARY",
 	"LC_MESSAGES", "LC_PAPER", "LC_NAME", "LC_ADDRESS", "LC_TELEPHONE",
@@ -35,7 +36,7 @@ var executorEnvNames = nameSet(
 	"HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy",
 	"ALL_PROXY", "all_proxy", "NO_PROXY", "no_proxy", "NODE_USE_ENV_PROXY",
 	"SSL_CERT_FILE", "CURL_CA_BUNDLE", "REQUESTS_CA_BUNDLE", "GIT_SSL_CAINFO", "NODE_EXTRA_CA_CERTS",
-	"PLAYWRIGHT_BROWSERS_PATH",
+	"PLAYWRIGHT_BROWSERS_PATH", "NUCLEI_TEMPLATES_DIR", "DISABLE_NUCLEI_TEMPLATES_PUBLIC_DOWNLOAD",
 	envExecBash, envExecUID, envExecGID, envExecHome,
 )
 

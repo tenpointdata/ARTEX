@@ -27,9 +27,10 @@ const (
 	envExecHome = "ARTEX_EXEC_HOME"
 )
 
-// execHomeDir is the executor's home under the data directory. The server's HOME
-// (/root in the image) is not writable for the executor, so caches of npm, go, pip,
-// bbot or Playwright would fail there.
+// execHomeDir is the root-owned directory under the data directory that holds the
+// homes of agent processes that do not run in a run directory (execpriv_home_unix.go).
+// The server's HOME (/root in the image) is not writable for the executor, so caches
+// of npm, go, pip, bbot or Playwright would fail there.
 const execHomeDir = "exec-home"
 
 func execPrivilegeSupported() bool { return true }
@@ -38,7 +39,8 @@ func serverIsRoot() bool { return os.Geteuid() == 0 }
 
 // applyExecCredential runs c as the executor identity. The server's own children
 // (custom tools) use it directly; the Norma children go through the shims. Call it
-// after c.Env is set: it points HOME and XDG_CACHE_HOME at the executor's home.
+// after c.Env and c.Dir are set: it points HOME and the XDG directories at the home
+// of c.Dir's run directory (execHomeFor).
 func applyExecCredential(c *exec.Cmd, p ExecPrivilege) {
 	if !p.Enabled {
 		return
@@ -47,49 +49,17 @@ func applyExecCredential(c *exec.Cmd, p ExecPrivilege) {
 		c.SysProcAttr = &syscall.SysProcAttr{}
 	}
 	c.SysProcAttr.Credential = &syscall.Credential{Uid: p.UID, Gid: p.GID, Groups: []uint32{p.GID}}
-	if home := execHomeEnv(); home != nil {
+	home, err := execHomeFor(c.Dir, p.UID, p.GID, true)
+	if err != nil {
+		log.Printf("[exec] no home for the agent process in %s: %v", c.Dir, err)
+		return
+	}
+	if home != "" {
 		if c.Env == nil {
 			c.Env = os.Environ()
 		}
-		c.Env = append(c.Env, home...) // later entries win in exec.Cmd
+		c.Env = append(c.Env, homeEnv(home)...) // later entries win in exec.Cmd
 	}
-}
-
-// execHomeEnv returns HOME and XDG_CACHE_HOME for an executor process, or nil when
-// PrepareExecPrivilege has not set up the home.
-func execHomeEnv() []string {
-	home := os.Getenv(envExecHome)
-	if home == "" {
-		return nil
-	}
-	return []string{"HOME=" + home, "XDG_CACHE_HOME=" + filepath.Join(home, ".cache")}
-}
-
-// prepareExecHome creates the executor's home, owned by the executor, and records
-// its path for the shims and applyExecCredential.
-func prepareExecHome(p ExecPrivilege, dataDir string) error {
-	abs, err := filepath.Abs(dataDir)
-	if err != nil {
-		return err
-	}
-	home := filepath.Join(abs, execHomeDir)
-	if err := os.MkdirAll(home, 0o700); err != nil {
-		return err
-	}
-	fi, err := os.Lstat(home)
-	if err != nil {
-		return err
-	}
-	if !fi.IsDir() {
-		return fmt.Errorf("%s is not a directory", home)
-	}
-	if err := os.Lchown(home, int(p.UID), int(p.GID)); err != nil {
-		return err
-	}
-	if err := os.Chmod(home, 0o700); err != nil {
-		return err
-	}
-	return os.Setenv(envExecHome, home)
 }
 
 // execScriptDir is the directory under the data directory that custom-tool scripts
@@ -267,6 +237,9 @@ func prepareExecScript(p ExecPrivilege, path string) error {
 // already there and the executor can write in it or replace it.
 func PrepareExecPrivilege(p *ExecPrivilege, dataDir, keyDir, configPath string) error {
 	if !p.Enabled {
+		// No drop: the keys and the config still become 0600, so other local users
+		// cannot read them. Agent processes run as the server's user and can.
+		restrictSecretModes(keyDir, configPath)
 		return nil
 	}
 	gid := int(p.GID)
@@ -285,7 +258,7 @@ func PrepareExecPrivilege(p *ExecPrivilege, dataDir, keyDir, configPath string) 
 	} else {
 		log.Printf("[exec] the agent's file tools keep the server's identity on this platform: only their path confinement applies")
 	}
-	if err := prepareExecHome(*p, dataDir); err != nil {
+	if err := prepareExecHome(dataDir); err != nil {
 		return fmt.Errorf("prepare the executor home: %w", err)
 	}
 	scriptDir, err := prepareExecScriptDir(*p, dataDir)
@@ -329,6 +302,37 @@ func PrepareExecPrivilege(p *ExecPrivilege, dataDir, keyDir, configPath string) 
 	syscall.Umask(0o002)
 	log.Printf("[exec] agent processes run as uid %d gid %d; the run directories under %s are shared with that group", p.UID, p.GID, tasks)
 	return nil
+}
+
+// secretFiles lists the key files and the config file the server keeps secret.
+func secretFiles(keyDir, configPath string) []string {
+	var out []string
+	if keyDir != "" {
+		out = append(out, filepath.Join(keyDir, "jwt.key"), filepath.Join(keyDir, "secret.key"))
+	}
+	if configPath != "" {
+		out = append(out, configPath)
+	}
+	return out
+}
+
+// restrictSecretModes sets each existing secret file that group or others can
+// access to 0600, without changing its owner. A file it cannot change is logged,
+// not fatal: the server's user may not own it. The keys are created 0600 already
+// (auth.go, db/secrets.go); a config.json written by install.sh or by hand
+// follows the umask.
+func restrictSecretModes(keyDir, configPath string) {
+	for _, path := range secretFiles(keyDir, configPath) {
+		fi, err := os.Stat(path)
+		if err != nil || fi.Mode().Perm()&0o077 == 0 {
+			continue
+		}
+		if err := os.Chmod(path, 0o600); err != nil {
+			log.Printf("[exec] %s is mode %v and could not be set to 0600: %v", path, fi.Mode().Perm(), err)
+			continue
+		}
+		log.Printf("[exec] %s set to 0600 (was %v): it holds a key or the database DSN", path, fi.Mode().Perm())
+	}
 }
 
 // ownByRoot makes root the owner of a key or config file that another user owns:
@@ -682,7 +686,7 @@ func runBashShim(argv []string) {
 	if err != nil {
 		shimFail(err)
 	}
-	if err := enterExecutor(uid, gid); err != nil {
+	if err := enterExecutor(uid, gid, true); err != nil {
 		shimFail(err)
 	}
 	shimExec(os.Getenv(envExecBash), argv)
@@ -691,16 +695,25 @@ func runBashShim(argv []string) {
 // enterExecutor drops to uid and gid. When this call performs the switch (not in a
 // nested shell already running as the executor, whose environment the agent may
 // have set), the environment is first rebuilt from the allowlist (execenv_unix.go)
-// and HOME and XDG_CACHE_HOME move to the executor's home.
-func enterExecutor(uid, gid int) error {
+// and HOME and the XDG directories move to a home of this process
+// (execHomeFor): the run directory's when runDirHome is set and the working
+// directory is a run directory, a fresh one otherwise.
+func enterExecutor(uid, gid int, runDirHome bool) error {
 	if os.Getuid() != uid || os.Getgid() != gid {
 		if err := sealExecutorEnv(); err != nil {
 			return err
 		}
-		for _, kv := range execHomeEnv() {
-			k, v, _ := strings.Cut(kv, "=")
-			if err := os.Setenv(k, v); err != nil {
-				return err
+		cwd, _ := os.Getwd()
+		home, err := execHomeFor(cwd, uint32(uid), uint32(gid), runDirHome)
+		if err != nil {
+			return err
+		}
+		if home != "" {
+			for _, kv := range homeEnv(home) {
+				k, v, _ := strings.Cut(kv, "=")
+				if err := os.Setenv(k, v); err != nil {
+					return err
+				}
 			}
 		}
 	}
@@ -726,7 +739,8 @@ func runDropShim(args []string) {
 		}
 		target = resolved
 	}
-	if err := enterExecutor(uid, gid); err != nil {
+	// An MCP server serves every task: it gets a fresh home, never a run directory's.
+	if err := enterExecutor(uid, gid, false); err != nil {
 		shimFail(err)
 	}
 	shimExec(target, args[3:])
