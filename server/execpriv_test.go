@@ -68,10 +68,42 @@ func TestExecDropCommandWrapsForShim(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []string{execDropArg, "10001", "10002", "--", "npx", "-y", "pkg"}
+	// The MCP server runs as the uid next to the executor's, in the executor group:
+	// an agent shell (uid 10001) cannot read its /proc/<pid>/environ.
+	want := []string{execDropArg, "10002", "10002", "--", "npx", "-y", "pkg"}
 	if !reflect.DeepEqual(args, want) {
 		t.Fatalf("args = %v, want %v", args, want)
 	}
+	p.MCPUID = 20000
+	if _, args, _ = execDropCommand(p, "npx", nil); args[1] != "20000" {
+		t.Fatalf("configured MCP uid not used: %v", args)
+	}
+}
+
+func TestMCPUIDNeverEqualsExecutor(t *testing.T) {
+	for _, c := range []struct {
+		p    ExecPrivilege
+		want uint32
+	}{
+		{ExecPrivilege{UID: 10001}, 10002},
+		{ExecPrivilege{UID: 1<<31 - 1}, 1<<31 - 2},
+		{ExecPrivilege{UID: 10001, MCPUID: 10001}, 10002},
+		{ExecPrivilege{UID: 10001, MCPUID: 30000}, 30000},
+	} {
+		if got := c.p.mcpUID(); got != c.want || got == c.p.UID {
+			t.Errorf("%+v: mcpUID = %d, want %d", c.p, got, c.want)
+		}
+	}
+}
+
+func TestResolveExecPrivilegeMCPUIDEnv(t *testing.T) {
+	for _, bad := range []string{"0", "-3", "x", "10001"} {
+		t.Setenv(MCPUIDEnv, bad)
+		if _, err := ResolveExecPrivilege(DefaultExecUID, DefaultExecGID, false); err == nil {
+			t.Errorf("%s=%s: want an error", MCPUIDEnv, bad)
+		}
+	}
+	t.Setenv(MCPUIDEnv, "")
 }
 
 func TestWithExecPrivilegeSetsServerField(t *testing.T) {

@@ -2,6 +2,7 @@ package server
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"mime/multipart"
@@ -130,7 +131,7 @@ func (s *Server) wsList(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 400, "not a directory")
 		return
 	}
-	ents, err := os.ReadDir(abs)
+	ents, err := wsReadDirConfined(cp)
 	if err != nil {
 		writeErr(w, 500, safeFSErr(err))
 		return
@@ -168,9 +169,15 @@ func (s *Server) wsRead(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	abs := cp.realPath
-	fi, err := os.Stat(abs)
+	f, err := wsOpenConfined(cp)
 	if err != nil {
 		writeErr(w, 404, "file does not exist")
+		return
+	}
+	defer f.Close()
+	fi, err := f.Stat()
+	if err != nil {
+		writeErr(w, 500, safeFSErr(err))
 		return
 	}
 	if fi.IsDir() {
@@ -181,7 +188,7 @@ func (s *Server) wsRead(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 200, map[string]any{"path": s.wsRel(abs), "size": fi.Size(), "too_large": true, "binary": true})
 		return
 	}
-	data, err := os.ReadFile(abs)
+	data, err := io.ReadAll(io.LimitReader(f, maxWorkspaceRead+1))
 	if err != nil {
 		writeErr(w, 500, safeFSErr(err))
 		return
@@ -209,15 +216,12 @@ func (s *Server) wsWrite(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	abs := cp.realPath
-	if fi, err := os.Stat(abs); err == nil && fi.IsDir() {
-		writeErr(w, 400, "target is a directory")
-		return
-	}
-	if err := os.MkdirAll(filepath.Dir(abs), 0o755); err != nil {
-		writeErr(w, 500, safeFSErr(err))
-		return
-	}
-	if err := os.WriteFile(abs, []byte(req.Content), 0o644); err != nil {
+	// Root-confined: a symlink swapped in after the check cannot lead the write out.
+	if err := wsWriteConfined(cp, []byte(req.Content)); err != nil {
+		if errors.Is(err, errWorkspaceIsDir) {
+			writeErr(w, 400, err.Error())
+			return
+		}
 		writeErr(w, 500, safeFSErr(err))
 		return
 	}
@@ -239,7 +243,7 @@ func (s *Server) wsMkdir(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	abs := cp.realPath
-	if err := os.MkdirAll(abs, 0o755); err != nil {
+	if err := wsMkdirConfined(cp); err != nil {
 		writeErr(w, 500, safeFSErr(err))
 		return
 	}
@@ -268,7 +272,9 @@ func (s *Server) wsDelete(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 404, "path does not exist")
 		return
 	}
-	if err := os.RemoveAll(cp.entryPath); err != nil {
+	// Root-confined: a directory swapped for a symlink after the check is not
+	// followed out of the workspace.
+	if err := wsRemoveConfined(cp); err != nil {
 		writeErr(w, 500, safeFSErr(err))
 		return
 	}
@@ -282,8 +288,13 @@ func (s *Server) wsDownload(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 400, "invalid path")
 		return
 	}
-	abs := cp.realPath
-	fi, err := os.Stat(abs)
+	f, err := wsOpenConfined(cp)
+	if err != nil {
+		writeErr(w, 404, "file does not exist")
+		return
+	}
+	defer f.Close()
+	fi, err := f.Stat()
 	if err != nil || fi.IsDir() {
 		writeErr(w, 404, "file does not exist")
 		return
@@ -291,7 +302,7 @@ func (s *Server) wsDownload(w http.ResponseWriter, r *http.Request) {
 	name := filepath.Base(cp.entryPath)
 	// RFC 5987 filename* keeps non-ASCII names intact; plain filename is the fallback.
 	w.Header().Set("Content-Disposition", "attachment; filename=\""+sanitizeFilename(name)+"\"; filename*=UTF-8''"+url.PathEscape(name))
-	http.ServeFile(w, r, abs)
+	http.ServeContent(w, r, name, fi.ModTime(), f)
 }
 
 // POST /api/workspace/upload?path=<dir> — multipart form field "file" (one or more).
@@ -331,7 +342,7 @@ func (s *Server) wsUpload(w http.ResponseWriter, r *http.Request) {
 			writeErr(w, 400, "invalid path")
 			return
 		}
-		if err := saveUpload(hdr, dest.realPath); err != nil {
+		if err := wsSaveUploadConfined(hdr, dest); err != nil {
 			writeErr(w, 500, safeFSErr(err))
 			return
 		}

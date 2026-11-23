@@ -54,25 +54,62 @@ func TestEnforceIsolation(t *testing.T) {
 		}
 	}
 
-	// Degraded without any flag: Linux not root (the systemd unit, dev.sh), Windows,
-	// macOS (root or not). The banner says why and what is exposed.
-	for _, c := range []struct {
+	// A host that cannot isolate (Linux not root, Windows, macOS root or not) fails
+	// closed: no start without the operator's opt-in, and the error names it.
+	hosts := []struct {
 		goos string
 		p    ExecPrivilege
-	}{{"linux", off}, {"windows", off}, {"darwin", off}, {"darwin", root}} {
-		out = captureLog(t, func() { st, err = EnforceIsolation(c.goos, c.p, cause, false) })
-		if err != nil || st.Mode != IsolationDegraded || st.Reason != cause.Error() {
-			t.Fatalf("%s drop=%v: status %+v err %v, want a degraded start", c.goos, c.p.Enabled, st, err)
-		}
-		for _, want := range []string{banner, "cannot isolate agents", cause.Error(), "keys", "database"} {
-			if !strings.Contains(out, want) {
-				t.Errorf("%s drop=%v: banner lacks %q:\n%s", c.goos, c.p.Enabled, want, out)
+	}{{"linux", off}, {"windows", off}, {"darwin", off}, {"darwin", root}}
+	for _, v := range []string{"", "0", "no"} {
+		t.Setenv(AllowUnsandboxedEnv, v)
+		for _, c := range hosts {
+			out = captureLog(t, func() { st, err = EnforceIsolation(c.goos, c.p, cause, false) })
+			if err == nil || st.Mode != "" {
+				t.Fatalf("%s drop=%v %s=%q: status %+v err %v, want a refused start", c.goos, c.p.Enabled, AllowUnsandboxedEnv, v, st, err)
+			}
+			for _, want := range []string{AllowUnsandboxedEnv + "=1", cause.Error(), "unsandboxed", "start.sh"} {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("%s: refusal lacks %q: %v", c.goos, want, err)
+				}
+			}
+			if strings.Contains(out, banner) {
+				t.Errorf("%s: a refused start logged the degraded banner:\n%s", c.goos, out)
 			}
 		}
-		if strings.Contains(out, "DEVELOPMENT ONLY") {
-			t.Errorf("%s drop=%v: the degraded banner is not the escape's:\n%s", c.goos, c.p.Enabled, out)
+	}
+
+	// With the opt-in (the environment variable, or the development flag) the host
+	// starts degraded, and the banner says why and exactly what is exposed.
+	for _, optIn := range []struct {
+		env    string
+		escape bool
+	}{{"1", false}, {"true", false}, {"", true}} {
+		t.Setenv(AllowUnsandboxedEnv, optIn.env)
+		for _, c := range hosts {
+			out = captureLog(t, func() { st, err = EnforceIsolation(c.goos, c.p, cause, optIn.escape) })
+			if err != nil || st.Mode != IsolationDegraded || st.Reason != cause.Error() {
+				t.Fatalf("%s drop=%v opt-in %+v: status %+v err %v, want a degraded start", c.goos, c.p.Enabled, optIn, st, err)
+			}
+			for _, want := range []string{banner, "UNSANDBOXED", "cannot isolate agents", AllowUnsandboxedEnv, cause.Error(),
+				"jwt.key", "secret.key", "database", "approval rules", "artex binary", "start.sh", "SSH keys"} {
+				if !strings.Contains(out, want) {
+					t.Errorf("%s drop=%v: banner lacks %q:\n%s", c.goos, c.p.Enabled, want, out)
+				}
+			}
+			if strings.Contains(out, "DEVELOPMENT ONLY") {
+				t.Errorf("%s drop=%v: the degraded banner is not the escape's:\n%s", c.goos, c.p.Enabled, out)
+			}
 		}
 	}
+	t.Setenv(AllowUnsandboxedEnv, "")
+
+	// The environment opt-in does not replace the development escape where
+	// isolation is expected and broken (Linux, root, drop on).
+	t.Setenv(AllowUnsandboxedEnv, "1")
+	if _, err = EnforceIsolation("linux", root, cause, false); err == nil {
+		t.Fatalf("linux root with %s=1: want the start refused", AllowUnsandboxedEnv)
+	}
+	t.Setenv(AllowUnsandboxedEnv, "")
 
 	// A passing self-test starts isolated, escape or not, without a banner.
 	for _, escape := range []bool{false, true} {

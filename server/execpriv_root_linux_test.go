@@ -87,7 +87,8 @@ func newExecRootFixture(t *testing.T) *execRootFixture {
 	}
 	// The run directory of task 1's main agent, created as the agent creates it.
 	work := agent.EnsureRunDir(dataDir, 1, 0)
-	return &execRootFixture{priv: priv, tmp: tmp, data: dataDir, home: filepath.Join(dataDir, execHomeDir), secret: secret, work: work}
+	// Bash and custom tools in a run directory use that run directory's home.
+	return &execRootFixture{priv: priv, tmp: tmp, data: dataDir, home: filepath.Join(work, runHomeName), secret: secret, work: work}
 }
 
 // probe is the shell script each path runs as the executor.
@@ -100,27 +101,64 @@ if mkdir -p "$XDG_CACHE_HOME/probe" && echo ok > "$XDG_CACHE_HOME/probe/x"; then
 `, f.secret, os.Getpid())
 }
 
+// check asserts the probe of the Bash shim or a custom tool: the executor uid and
+// the home of the run directory.
 func (f *execRootFixture) check(t *testing.T, path, out string) {
 	t.Helper()
+	f.checkAs(t, path, out, DefaultExecUID, f.home)
+}
+
+// checkAs asserts a probe that ran as uid with the home directory home. A home
+// that ends in a separator is a prefix: a fresh home below exec-home.
+func (f *execRootFixture) checkAs(t *testing.T, path, out string, uid uint32, home string) {
+	t.Helper()
 	for _, want := range []string{
-		fmt.Sprintf("uid=%d gid=%d groups=%d", DefaultExecUID, DefaultExecGID, DefaultExecGID),
+		fmt.Sprintf("uid=%d gid=%d groups=%d", uid, DefaultExecGID, DefaultExecGID),
 		"secret=denied",
 		"environ=denied",
-		"home=" + f.home + " cache=" + filepath.Join(f.home, ".cache"),
 		"cache=written",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("%s: want %q in the probe output:\n%s", path, want, out)
 		}
 	}
-	fi, err := os.Stat(filepath.Join(f.home, ".cache", "probe", "x"))
+	got := ""
+	for _, line := range strings.Split(out, "\n") {
+		if h, ok := strings.CutPrefix(line, "home="); ok {
+			got, _, _ = strings.Cut(h, " cache=")
+			if !strings.HasSuffix(line, " cache="+filepath.Join(got, ".cache")) {
+				t.Errorf("%s: XDG_CACHE_HOME is not below HOME: %s", path, line)
+			}
+		}
+	}
+	if !homeMatches(got, home) {
+		t.Fatalf("%s: HOME=%q, want %q", path, got, home)
+	}
+	fi, err := os.Stat(filepath.Join(got, ".cache", "probe", "x"))
 	if err != nil {
 		t.Fatalf("%s: cache file missing: %v", path, err)
 	}
-	if st := fi.Sys().(*syscall.Stat_t); st.Uid != DefaultExecUID {
-		t.Errorf("%s: cache file owned by uid %d, want %d", path, st.Uid, DefaultExecUID)
+	if st := fi.Sys().(*syscall.Stat_t); st.Uid != uid {
+		t.Errorf("%s: cache file owned by uid %d, want %d", path, st.Uid, uid)
+	}
+	hi, err := os.Lstat(got)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st := hi.Sys().(*syscall.Stat_t); !hi.IsDir() || st.Uid != uid || hi.Mode().Perm()&0o007 != 0 {
+		t.Errorf("%s: home %s is %v uid %d, want a directory of uid %d closed to others", path, got, hi.Mode(), st.Uid, uid)
 	}
 	t.Logf("%s probe output:\n%s", path, out)
+}
+
+// homeMatches compares a HOME with the wanted one; a wanted home ending in a
+// separator is a prefix.
+func homeMatches(got, want string) bool {
+	if strings.HasSuffix(want, string(filepath.Separator)) {
+		rest, ok := strings.CutPrefix(got, want)
+		return ok && rest != "" && !strings.Contains(rest, string(filepath.Separator))
+	}
+	return got == want
 }
 
 // Norma's Bash tool runs exec.Command("bash"): the PATH shim drops and execs bash.
@@ -257,7 +295,9 @@ func TestExecutorMCPStdioAsRoot(t *testing.T) {
 	if err != nil {
 		t.Fatalf("%v\n%s", err, out)
 	}
-	f.check(t, "mcp stdio", string(out))
+	// The MCP server runs as its own uid, in a fresh home under exec-home: never the
+	// executor's uid, so an agent shell cannot read its environment.
+	f.checkAs(t, "mcp stdio", string(out), f.priv.mcpUID(), filepath.Join(f.data, execHomeDir)+string(filepath.Separator))
 }
 
 // The directory of Norma's background-task output is created when absent. A symlink
@@ -765,7 +805,7 @@ func checkExecutorEnv(t *testing.T, path, out, home string, want ...string) {
 			t.Errorf("%s: %s reached the executor", path, k)
 		}
 	}
-	if got["HOME"] != home {
+	if !homeMatches(got["HOME"], home) {
 		t.Errorf("%s: HOME=%q, want %q", path, got["HOME"], home)
 	}
 	for _, k := range append([]string{"PATH"}, want...) {
@@ -837,7 +877,7 @@ for k, v in os.environ.items():
 	if err != nil {
 		t.Fatalf("%v\n%s", err, b)
 	}
-	checkExecutorEnv(t, "mcp stdio", string(b), f.home, "MCP_TOKEN")
+	checkExecutorEnv(t, "mcp stdio", string(b), filepath.Join(f.data, execHomeDir)+string(filepath.Separator), "MCP_TOKEN")
 	if envNames(string(b))["MCP_TOKEN"] != "configured" {
 		t.Errorf("mcp stdio: the configured MCP_TOKEN did not cross:\n%s", b)
 	}
@@ -859,23 +899,95 @@ func TestPrepareExecPrivilegeSetsFileToolIdentityAsRoot(t *testing.T) {
 	}
 }
 
-// applyExecCredential sets the credential and the executor's HOME; the later env
-// entry wins in exec.Cmd. Runs without root: nothing is started.
+// applyExecCredential sets the credential and the home of the run directory; the
+// later env entry wins in exec.Cmd. Nothing is started.
 func TestApplyExecCredentialSetsExecutorHome(t *testing.T) {
-	t.Setenv(envExecHome, "/data/exec-home")
+	f := newExecRootFixture(t)
 	c := exec.Command("true")
+	c.Dir = f.work
 	c.Env = []string{"HOME=/root", "KEEP=1"}
-	applyExecCredential(c, ExecPrivilege{Enabled: true, UID: 10001, GID: 10002})
-	if cr := c.SysProcAttr.Credential; cr == nil || cr.Uid != 10001 || cr.Gid != 10002 {
+	applyExecCredential(c, f.priv)
+	if cr := c.SysProcAttr.Credential; cr == nil || cr.Uid != DefaultExecUID || cr.Gid != DefaultExecGID {
 		t.Fatalf("credential = %+v", c.SysProcAttr.Credential)
 	}
-	want := []string{"HOME=/root", "KEEP=1", "HOME=/data/exec-home", "XDG_CACHE_HOME=/data/exec-home/.cache"}
+	want := append([]string{"HOME=/root", "KEEP=1"}, homeEnv(f.home)...)
 	if strings.Join(c.Env, "|") != strings.Join(want, "|") {
 		t.Fatalf("env = %v, want %v", c.Env, want)
+	}
+	fi, err := os.Lstat(f.home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st := fi.Sys().(*syscall.Stat_t); !fi.IsDir() || st.Uid != DefaultExecUID || fi.Mode().Perm() != 0o700 {
+		t.Fatalf("run home: %v uid %d, want a 0700 directory of the executor", fi.Mode(), st.Uid)
 	}
 	disabled := exec.Command("true")
 	applyExecCredential(disabled, ExecPrivilege{})
 	if disabled.SysProcAttr != nil || disabled.Env != nil {
 		t.Fatal("a disabled privilege must leave the command unchanged")
+	}
+}
+
+// Every task gets its own home, and a home the agent planted is not trusted: a
+// symlink at <run dir>/.artex-home is neither followed nor chowned through, and the
+// process gets a fresh home under exec-home instead. exec-home itself is root-owned
+// and emptied at every start.
+func TestExecHomePerRunDirAsRoot(t *testing.T) {
+	f := newExecRootFixture(t)
+	base := filepath.Join(f.data, execHomeDir)
+	fi, err := os.Lstat(base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st := fi.Sys().(*syscall.Stat_t); !fi.IsDir() || st.Uid != 0 || fi.Mode().Perm() != 0o711 {
+		t.Fatalf("exec-home: %v uid %d, want root 0711", fi.Mode(), st.Uid)
+	}
+
+	other := agent.EnsureRunDir(f.data, 2, 7)
+	h1, err := execHomeFor(f.work, DefaultExecUID, DefaultExecGID, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	h2, err := execHomeFor(other, DefaultExecUID, DefaultExecGID, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if h1 != filepath.Join(f.work, runHomeName) || h2 != filepath.Join(other, runHomeName) {
+		t.Fatalf("homes %q and %q, want one per run directory", h1, h2)
+	}
+
+	// A planted symlink to a root-only directory.
+	target := filepath.Join(f.data, "root-only")
+	if err := os.Mkdir(target, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	planted := agent.EnsureRunDir(f.data, 3, 0)
+	if err := os.Symlink(target, filepath.Join(planted, runHomeName)); err != nil {
+		t.Fatal(err)
+	}
+	h3, err := execHomeFor(planted, DefaultExecUID, DefaultExecGID, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if filepath.Dir(h3) != base {
+		t.Fatalf("home with a planted symlink = %q, want a fresh one under %s", h3, base)
+	}
+	if ti, _ := os.Stat(target); ti.Sys().(*syscall.Stat_t).Uid != 0 || ti.Mode().Perm() != 0o700 {
+		t.Fatalf("the symlink target changed: %v uid %d", ti.Mode(), ti.Sys().(*syscall.Stat_t).Uid)
+	}
+
+	// Not a run directory: a fresh home each time.
+	a, errA := execHomeFor(f.data, DefaultExecUID, DefaultExecGID, true)
+	b, errB := execHomeFor(f.work, DefaultExecUID, DefaultExecGID, false)
+	if errA != nil || errB != nil || a == b || filepath.Dir(a) != base || filepath.Dir(b) != base {
+		t.Fatalf("fresh homes %q %q (%v %v), want two distinct ones under %s", a, b, errA, errB, base)
+	}
+
+	// A restart empties exec-home.
+	if err := prepareExecHome(f.data); err != nil {
+		t.Fatal(err)
+	}
+	if entries, err := os.ReadDir(base); err != nil || len(entries) != 0 {
+		t.Fatalf("exec-home after a restart holds %v (%v), want it empty", entries, err)
 	}
 }
