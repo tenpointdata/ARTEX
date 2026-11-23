@@ -36,6 +36,10 @@ type targetStore interface {
 	// BlockRules returns the asset block rules that apply to the scope: the
 	// global ones and, for a task, its own. Allow rules play no role in the gate.
 	BlockRules(scope db.TargetScopeRef) ([]db.AssetInterceptRule, error)
+	// AllowRules returns the asset allow rules of the scope: a task's own.
+	// They play no role in the gate but one: an exact_ip or cidr allow rule
+	// lifts the metadata deny for the addresses it names (metadataBlock).
+	AllowRules(scope db.TargetScopeRef) ([]db.AssetInterceptRule, error)
 	// ActivePins returns the active pins that may cover (host, port) in scope,
 	// the pin on the exact port first.
 	ActivePins(scope db.TargetScopeRef, host string, port int) ([]*db.TargetPin, error)
@@ -45,9 +49,16 @@ type targetStore interface {
 	LogDecision(db.TargetDecision) error
 }
 
+// dbTargetStore is the store of an Interceptor built on a database. Built on
+// none (New(nil), the store-less interceptor of tests and tools), it has no
+// rules and records nothing: the always-on checks then apply the metadata
+// deny alone. The pins and exemptions need a database.
 type dbTargetStore struct{ d *db.DB }
 
 func (s dbTargetStore) BlockRules(scope db.TargetScopeRef) ([]db.AssetInterceptRule, error) {
+	if s.d == nil {
+		return nil, nil
+	}
 	rules, err := s.d.ListAssetInterceptRules()
 	if err != nil || scope.TaskID == 0 {
 		return rules, err
@@ -57,6 +68,14 @@ func (s dbTargetStore) BlockRules(scope db.TargetScopeRef) ([]db.AssetInterceptR
 		return nil, err
 	}
 	return append(rules, block...), nil
+}
+
+func (s dbTargetStore) AllowRules(scope db.TargetScopeRef) ([]db.AssetInterceptRule, error) {
+	if s.d == nil || scope.TaskID == 0 {
+		return nil, nil
+	}
+	_, allow, err := s.d.Assets().TaskInterceptRulesSplit(scope.TaskID)
+	return allow, err
 }
 
 func (s dbTargetStore) ActivePins(scope db.TargetScopeRef, host string, port int) ([]*db.TargetPin, error) {
@@ -72,6 +91,9 @@ func (s dbTargetStore) Exemptions() ([]db.TargetExemption, string, error) {
 }
 
 func (s dbTargetStore) LogDecision(r db.TargetDecision) error {
+	if s.d == nil {
+		return nil
+	}
 	_, err := s.d.LogTargetDecision(r)
 	return err
 }
@@ -97,7 +119,7 @@ func (i *Interceptor) CheckTargets(ctx context.Context, scope TargetScope, toolN
 	if len(declared.targets) == 0 {
 		return nil, TargetResult{}
 	}
-	c := &targetCheck{i: i, ctx: ctx, scope: scope, tool: toolName, input: input, urls: declared.urls}
+	c := &targetCheck{i: i, ctx: ctx, scope: scope, tool: toolName, input: input, urls: declared.urls, connect: connectTool(toolName)}
 	return c.run(declared.targets)
 }
 
@@ -115,6 +137,12 @@ type targetCheck struct {
 	// fresh makes every lookup skip the cache: the decision of a connection
 	// (dialTarget) compares the answer it is about to dial.
 	fresh bool
+	// connect marks a target the platform itself connects to (a dial, a
+	// redirect hop, the URL of WebFetch), as opposed to one a command names:
+	// its addresses are held to the metadata deny (metadataBlock). A command
+	// can carry a metadata address as an SSRF payload for the target, so the
+	// targets a command declares are not.
+	connect bool
 	// checked is what the run decided about each target, read by dialTarget.
 	checked []*checkedTarget
 }
@@ -163,36 +191,9 @@ func (c *targetCheck) run(targets []Target) ([]TargetRequest, TargetResult) {
 		return c.block(TargetGateUnavailable, "gate_unavailable", first, "the exemption list could not be read: "+err.Error())
 	}
 
-	// Block rules come first, and an exempt or pinned host that matches one is
-	// blocked. They are matched on what the call declares before anything is
-	// resolved: a hit there costs no lookup, for any target of the call.
-	//
-	// URL rules (exact_url, fuzzy_url) are matched once per decision, on the
-	// URLs as the call writes them. That is a known limit: exact_url compares
-	// the string as written, so another case, encoding (%2F), a trailing slash,
-	// an added query or /./ does not match, and fuzzy_url is evaded by encoding
-	// the substring; a command can also build its URL at run time. To keep an
-	// agent away from a host, a domain, IP or CIDR rule is the one to write.
-	if rule, u, hit := db.MatchAssetInterceptRules(rules, nil, nil, c.urls); hit {
-		ct := &checkedTarget{Target: targets[0]}
-		if t, ok := NormalizeTarget(u); ok {
-			ct.Target = t
-		}
-		return c.block(TargetRuleBlocked, "rule_blocked", ct, fmt.Sprintf("%s is blocked by an asset rule. %s", u, rule.Reason()))
-	}
-	// Then the declared form of every target: the name as written, the IP
-	// literal, the range.
-	checked := make([]*checkedTarget, len(targets))
-	c.checked = checked
-	for n, t := range targets {
-		ct := &checkedTarget{Target: t}
-		checked[n] = ct
-		if t.Kind != TargetDomain {
-			ct.ips, ct.resolver, ct.resolvedAt = []string{t.Host}, literalResolver, time.Now().UTC()
-		}
-		if rule, hit := blockRule(rules, ct); hit {
-			return c.block(TargetRuleBlocked, "rule_blocked", ct, fmt.Sprintf("%s is blocked by an asset rule. %s", t, rule.Reason()))
-		}
+	checked, res := c.declaredRules(rules, targets)
+	if res.Code != "" {
+		return nil, res
 	}
 	// Only then are the names resolved, and the rules matched on the addresses.
 	// A name the configuration exempts is never resolved.
@@ -204,6 +205,11 @@ func (c *targetCheck) run(targets []Target) ([]TargetRequest, TargetResult) {
 		if rule, hit := blockRule(rules, ct); hit {
 			return c.block(TargetRuleBlocked, "rule_blocked", ct, fmt.Sprintf("%s is blocked by an asset rule. %s", ct.Target, rule.Reason()))
 		}
+	}
+	// A connection the platform opens never reaches a metadata address, pin or
+	// no pin, unless an allow rule names it (see metadataBlock).
+	if res := c.metadataBlock(); res.Code != "" {
+		return nil, res
 	}
 
 	i.mu.RLock()
@@ -295,6 +301,44 @@ func (c *targetCheck) run(targets []Target) ([]TargetRequest, TargetResult) {
 	return unpinned, TargetResult{}
 }
 
+// declaredRules matches the block rules on what the call declares, before
+// anything is resolved: a hit there costs no lookup, for any target of the
+// call. It returns the targets to check further, the literals with their
+// address filled in, and sets c.checked to them.
+//
+// URL rules (exact_url, fuzzy_url) are matched once per decision, on the
+// URLs as the call writes them. That is a known limit: exact_url compares
+// the string as written, so another case, encoding (%2F), a trailing slash,
+// an added query or /./ does not match, and fuzzy_url is evaded by encoding
+// the substring; a command can also build its URL at run time. To keep an
+// agent away from a host, a domain, IP or CIDR rule is the one to write.
+func (c *targetCheck) declaredRules(rules []db.AssetInterceptRule, targets []Target) ([]*checkedTarget, TargetResult) {
+	if rule, u, hit := db.MatchAssetInterceptRules(rules, nil, nil, c.urls); hit {
+		ct := &checkedTarget{Target: targets[0]}
+		if t, ok := NormalizeTarget(u); ok {
+			ct.Target = t
+		}
+		_, res := c.block(TargetRuleBlocked, "rule_blocked", ct, fmt.Sprintf("%s is blocked by an asset rule. %s", u, rule.Reason()))
+		return nil, res
+	}
+	// Then the declared form of every target: the name as written, the IP
+	// literal, the range.
+	checked := make([]*checkedTarget, len(targets))
+	c.checked = checked
+	for n, t := range targets {
+		ct := &checkedTarget{Target: t}
+		checked[n] = ct
+		if t.Kind != TargetDomain {
+			ct.ips, ct.resolver, ct.resolvedAt = []string{t.Host}, literalResolver, time.Now().UTC()
+		}
+		if rule, hit := blockRule(rules, ct); hit {
+			_, res := c.block(TargetRuleBlocked, "rule_blocked", ct, fmt.Sprintf("%s is blocked by an asset rule. %s", t, rule.Reason()))
+			return nil, res
+		}
+	}
+	return checked, TargetResult{}
+}
+
 // resolve fills the addresses of a name. fresh skips the cache.
 func (c *targetCheck) resolve(ct *checkedTarget, fresh bool) {
 	ct.resolver = c.i.resolve.name()
@@ -320,6 +364,9 @@ func (c *targetCheck) block(code, outcome string, ct *checkedTarget, reason stri
 // log writes one decided row of the gate. Best effort: a failed write never
 // changes the outcome of the call.
 func (c *targetCheck) log(status, reason, configDigest string, targets ...db.InterceptTarget) {
+	if c.i.targets == nil {
+		return
+	}
 	action := "deny"
 	if status == "allowed" {
 		action = "allow"

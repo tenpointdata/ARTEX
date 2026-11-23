@@ -19,6 +19,7 @@ import (
 type fakeStore struct {
 	mu     sync.Mutex
 	rules  []db.AssetInterceptRule
+	allow  []db.AssetInterceptRule
 	pins   []*db.TargetPin
 	exempt []db.TargetExemption
 	fail   map[string]error // by method name
@@ -35,6 +36,10 @@ func (s *fakeStore) read(method string) error {
 
 func (s *fakeStore) BlockRules(db.TargetScopeRef) ([]db.AssetInterceptRule, error) {
 	return s.rules, s.read("BlockRules")
+}
+
+func (s *fakeStore) AllowRules(db.TargetScopeRef) ([]db.AssetInterceptRule, error) {
+	return s.allow, s.read("AllowRules")
 }
 
 func (s *fakeStore) ActivePins(_ db.TargetScopeRef, host string, port int) ([]*db.TargetPin, error) {
@@ -776,6 +781,11 @@ func TestStoredExemptionVoidOnPrivateOrLoopback(t *testing.T) {
 			g.store.exempt = seeded
 			g.res.set(e.Host, ips...)
 			url := fmt.Sprintf("http://%s:%d/", e.Host, e.Port)
+			if slices.ContainsFunc(ips, isMetadataIP) {
+				// The metadata deny comes before the exemption and any request.
+				g.blocked(name+" "+e.Host, TargetRuleBlocked, g.fetch(url))
+				continue
+			}
 			req := g.requests(name+" "+e.Host, g.fetch(url))
 			if !req.ExemptVoid || req.Reason != "no_pin" {
 				t.Errorf("%s %s: request = %+v, want a void exemption", name, e.Host, req)
@@ -824,6 +834,10 @@ func TestStoredExemptionOnIPLiteral(t *testing.T) {
 		host := ip
 		if strings.Contains(ip, ":") {
 			host = "[" + ip + "]"
+		}
+		if isMetadataIP(ip) {
+			g.blocked(ip, TargetRuleBlocked, g.fetch("http://"+host+":8080/"))
+			continue
 		}
 		req := g.requests(ip, g.fetch("http://"+host+":8080/"))
 		if !req.ExemptVoid {

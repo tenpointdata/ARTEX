@@ -10,8 +10,6 @@ import (
 	"strconv"
 	"strings"
 	"time"
-
-	"github.com/Autumn-27/artex/db"
 )
 
 // The HTTP clients the platform owns (WebFetch and the custom http tool)
@@ -37,7 +35,9 @@ var baseDial = (&net.Dialer{Timeout: 30 * time.Second, KeepAlive: 30 * time.Seco
 // Such a client never dials without one: a scope missing at the dial means the
 // context value was lost on the way, and the dial fails with
 // TARGET_GATE_UNAVAILABLE. A client built without a scope (the operator's test
-// endpoint) dials as before, and so does every client while the gate is off.
+// endpoint) dials as before. While the gate is off, a scope that carries its
+// Interceptor still gets the always-on checks (dialUngated): the asset block
+// rules and the metadata deny, on a fresh lookup whose addresses are dialled.
 func PinnedDialer(toolName string, scoped bool) func(ctx context.Context, network, addr string) (net.Conn, error) {
 	return func(ctx context.Context, network, addr string) (net.Conn, error) {
 		scope, ok := TargetScopeFromContext(ctx)
@@ -48,7 +48,7 @@ func PinnedDialer(toolName string, scoped bool) func(ctx context.Context, networ
 			return baseDial(ctx, network, addr)
 		case scope.Enabled == nil || !scope.Enabled():
 			if scope.Interceptor != nil {
-				return scope.Interceptor.baseDialer()(ctx, network, addr)
+				return scope.Interceptor.dialUngated(ctx, scope, toolName, network, addr)
 			}
 			return baseDial(ctx, network, addr)
 		case scope.Interceptor == nil:
@@ -89,7 +89,7 @@ func (i *Interceptor) dialTarget(ctx context.Context, scope TargetScope, toolNam
 	blocked := func(res TargetResult) error {
 		return &dialError{code: res.Code, target: t.String(), reason: res.Reason}
 	}
-	c := &targetCheck{i: i, ctx: ctx, scope: scope, tool: toolName, input: input, fresh: true}
+	c := &targetCheck{i: i, ctx: ctx, scope: scope, tool: toolName, input: input, fresh: true, connect: true}
 	unpinned, res := c.run([]Target{t})
 	if res.Code != "" {
 		return nil, blocked(res)
@@ -211,9 +211,10 @@ func IsTargetBlocked(err error) (string, bool) {
 // CONNECT destination, reusing the same policy functions as PinnedDialer:
 //   - When ctx carries an enabled TargetScope, delegates directly to dialTarget
 //     (asset block rules, exemptions, fresh DNS resolution, and pin checks).
-//   - Otherwise enforces global asset block rules (domain, IP, and CIDR, before
-//     and after fresh DNS resolution) and dials only the resolved addresses that
-//     passed those rules.
+//   - Otherwise runs the always-on checks (dialUngated): the asset block rules
+//     (global, and the task's when ctx carries a scope) before and after a
+//     fresh DNS resolution, and the metadata deny, then dials only the
+//     resolved addresses that passed.
 func (i *Interceptor) DialSOCKS5(ctx context.Context, network, addr string) (net.Conn, error) {
 	if i == nil {
 		return baseDial(ctx, network, addr)
@@ -221,35 +222,7 @@ func (i *Interceptor) DialSOCKS5(ctx context.Context, network, addr string) (net
 	if scope, ok := TargetScopeFromContext(ctx); ok && scope.Enabled != nil && scope.Enabled() {
 		return i.dialTarget(ctx, scope, "socks5", network, addr)
 	}
-	t, err := addrTarget(network, addr)
-	if err != nil {
-		return nil, &dialError{code: TargetGateUnavailable, target: addr, reason: "the address of the connection could not be read (" + err.Error() + ")"}
-	}
-	if i.targets == nil {
-		return i.baseDialer()(ctx, network, addr)
-	}
-	rules, err := i.targets.BlockRules(db.TargetScopeRef{})
-	if err != nil {
-		return nil, &dialError{code: TargetGateUnavailable, target: t.String(), reason: "the asset rules could not be read: " + err.Error()}
-	}
-	ct := &checkedTarget{Target: t}
-	if t.Kind != TargetDomain {
-		ct.ips, ct.resolver, ct.resolvedAt = []string{t.Host}, literalResolver, time.Now().UTC()
-	}
-	if rule, hit := blockRule(rules, ct); hit {
-		return nil, &dialError{code: TargetRuleBlocked, target: t.String(), reason: fmt.Sprintf("%s is blocked by an asset rule. %s", t, rule.Reason())}
-	}
-	if t.Kind == TargetDomain {
-		c := &targetCheck{i: i, ctx: ctx, tool: "socks5", fresh: true}
-		c.resolve(ct, true)
-		if ct.err != nil {
-			return nil, ct.err
-		}
-		if rule, hit := blockRule(rules, ct); hit {
-			return nil, &dialError{code: TargetRuleBlocked, target: t.String(), reason: fmt.Sprintf("%s is blocked by an asset rule. %s", t, rule.Reason())}
-		}
-	}
-	return i.dialAddrs(ctx, network, ct.ips, t.Port)
+	return i.dialUngated(ctx, ungatedScope(ctx), "socks5", network, addr)
 }
 
 // PinnedUDP4Resolver returns a per-datagram IPv4 destination resolver that
@@ -291,31 +264,12 @@ func (i *Interceptor) ResolveUDP4(ctx context.Context, addr string) (*net.UDPAdd
 	if err != nil {
 		return nil, &dialError{code: TargetGateUnavailable, target: addr, reason: "the address of the datagram could not be read (" + err.Error() + ")"}
 	}
-	if i.targets == nil {
-		return resolvePlainUDP4(ctx, addr)
-	}
-	rules, err := i.targets.BlockRules(db.TargetScopeRef{})
+	input, _ := json.Marshal(map[string]string{"udp": addr})
+	ips, err := i.ungatedTarget(ctx, ungatedScope(ctx), "socks5-udp", input, t)
 	if err != nil {
-		return nil, &dialError{code: TargetGateUnavailable, target: t.String(), reason: "the asset rules could not be read: " + err.Error()}
+		return nil, err
 	}
-	ct := &checkedTarget{Target: t}
-	if t.Kind != TargetDomain {
-		ct.ips, ct.resolver, ct.resolvedAt = []string{t.Host}, literalResolver, time.Now().UTC()
-	}
-	if rule, hit := blockRule(rules, ct); hit {
-		return nil, &dialError{code: TargetRuleBlocked, target: t.String(), reason: fmt.Sprintf("%s is blocked by an asset rule. %s", t, rule.Reason())}
-	}
-	if t.Kind == TargetDomain {
-		c := &targetCheck{i: i, ctx: ctx, tool: "socks5-udp", fresh: true}
-		c.resolve(ct, true)
-		if ct.err != nil {
-			return nil, ct.err
-		}
-		if rule, hit := blockRule(rules, ct); hit {
-			return nil, &dialError{code: TargetRuleBlocked, target: t.String(), reason: fmt.Sprintf("%s is blocked by an asset rule. %s", t, rule.Reason())}
-		}
-	}
-	return firstIPv4UDPAddr(ct.ips, t.Port)
+	return firstIPv4UDPAddr(ips, t.Port)
 }
 
 func (i *Interceptor) resolveTargetUDP4(ctx context.Context, scope TargetScope, toolName, addr string) (*net.UDPAddr, error) {
@@ -329,7 +283,7 @@ func (i *Interceptor) resolveTargetUDP4(ctx context.Context, scope TargetScope, 
 	blocked := func(res TargetResult) error {
 		return &dialError{code: res.Code, target: t.String(), reason: res.Reason}
 	}
-	c := &targetCheck{i: i, ctx: ctx, scope: scope, tool: toolName, input: input, fresh: true}
+	c := &targetCheck{i: i, ctx: ctx, scope: scope, tool: toolName, input: input, fresh: true, connect: true}
 	unpinned, res := c.run([]Target{t})
 	if res.Code != "" {
 		return nil, blocked(res)

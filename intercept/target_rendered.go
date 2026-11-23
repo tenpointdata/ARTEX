@@ -27,13 +27,22 @@ const renderedPasses = 3
 // is blocked with TARGET_GATE_UNAVAILABLE: the call is not executed and no
 // approval is requested.
 //
-// The result is empty when the tool may run. With the gate off, or with no
-// scope in ctx (the operator's test endpoint), it returns at once: nothing is
-// parsed, resolved, read or written.
+// The result is empty when the tool may run. With no scope in ctx (the
+// operator's test endpoint) it returns at once. With the gate off only the
+// always-on checks run (the asset block rules and the metadata deny, see
+// target_egress.go), and a URL whose target cannot be read passes: the client
+// fails on it.
 func GateRenderedURL(ctx context.Context, toolName, rawURL string) TargetResult {
 	scope, on := renderedScope(ctx)
 	if !on {
-		return TargetResult{}
+		t, err := urlTarget(rawURL)
+		if scope.Interceptor == nil || err != nil {
+			return TargetResult{}
+		}
+		input := renderedInput("url", rawURL)
+		c := &targetCheck{i: scope.Interceptor, ctx: WithCall(ctx, toolName, input), scope: scope, tool: toolName, input: input,
+			urls: []string{rawURL}, connect: true}
+		return c.ungated([]Target{t})
 	}
 	input := renderedInput("url", rawURL)
 	t, err := urlTarget(rawURL)
@@ -50,17 +59,26 @@ func GateRenderedURL(ctx context.Context, toolName, rawURL string) TargetResult 
 // shell removes the quotes before the command runs. A command that names no
 // target passes, as it does in Bash: what a command hides is advisory (D9).
 //
-// The result is empty when the tool may run. With the gate off, or with no
-// scope in ctx, it returns at once.
+// The result is empty when the tool may run. With no scope in ctx it returns
+// at once; with the gate off only the asset block rules apply to the targets
+// the command names.
 func GateRenderedCommand(ctx context.Context, toolName, command string, readings ...string) TargetResult {
-	scope, on := renderedScope(ctx)
-	if !on {
+	scope, ok := TargetScopeFromContext(ctx)
+	if !ok {
 		return TargetResult{}
 	}
 	var l targetList
-	l.scan(command)
+	l.scanCommand(command)
 	for _, r := range readings {
-		l.scan(r)
+		l.scanCommand(r)
+	}
+	if _, on := renderedScope(ctx); !on {
+		if scope.Interceptor == nil || len(l.targets) == 0 {
+			return TargetResult{}
+		}
+		input := renderedInput("command", command)
+		c := &targetCheck{i: scope.Interceptor, ctx: WithCall(ctx, toolName, input), scope: scope, tool: toolName, input: input, urls: l.urls}
+		return c.ungated(l.targets)
 	}
 	return gateRendered(ctx, scope, toolName, renderedInput("command", command), l.targets, l.urls)
 }
