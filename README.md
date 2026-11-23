@@ -582,8 +582,11 @@ Chat, goal decomposition, and side questions are stored on the same task and are
 The per-worker average is not restored (usage rows have no run boundary), so the estimate starts
 from the defaults until a worker finishes in this process.
 
-**Common flags**: `./start.sh -addr :8787 -proxy :8788` (`-addr` frontend/API, `-proxy` traffic
-recording proxy).
+**Common flags**: `./start.sh -addr :8787 -proxy 127.0.0.1:8788` (`-addr` frontend/API, `-proxy` traffic
+recording proxy). The proxy is unauthenticated, so it only binds loopback: a host-less `:8788` becomes
+`127.0.0.1:8788` and other hosts are refused unless `ARTEX_PROXY_ALLOW_NONLOOPBACK=1`. Upstream TLS
+certificates are verified against system roots; set `ARTEX_CAPTURE_INSECURE_UPSTREAM=1` to capture
+targets with self-signed certificates. The traffic index directory is owner-only (0700/0600).
 
 ### External PostgreSQL
 

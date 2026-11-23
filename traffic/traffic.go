@@ -295,10 +295,23 @@ type Traffic struct {
 
 // Open initializes the traffic tree, blob store and SQLite index under dir.
 func Open(dir, addr string) (*Traffic, error) {
-	for _, d := range []string{dir, filepath.Join(dir, "_index"), filepath.Join(dir, "_ca")} {
+	addr, err := ResolveListenAddr(addr)
+	if err != nil {
+		return nil, err
+	}
+	for _, d := range []string{dir, filepath.Join(dir, "_ca")} {
 		if err := os.MkdirAll(d, 0o755); err != nil {
 			return nil, err
 		}
+	}
+	// The index holds every captured cookie and auth header; only this process
+	// reads it. The agents' sandboxed account must not (the CA cert dir stays open).
+	indexDir := filepath.Join(dir, "_index")
+	if err := os.MkdirAll(indexDir, 0o700); err != nil {
+		return nil, err
+	}
+	if err := os.Chmod(indexDir, 0o700); err != nil {
+		return nil, fmt.Errorf("restrict the traffic index directory: %w", err)
 	}
 	blobsRoot := filepath.Join(dir, "_blobs")
 	if err := os.MkdirAll(blobsRoot, 0o700); err != nil {
@@ -326,10 +339,13 @@ func Open(dir, addr string) (*Traffic, error) {
 		db.Close()
 		return nil, err
 	}
+	restrictIndexFiles(index)
 
 	p, err := mproxy.NewProxy(&mproxy.Options{
-		Addr:        addr,
-		SslInsecure: true,
+		Addr: addr,
+		// Upstream certificates are verified (system roots) unless the operator
+		// opts out; go-mitmproxy exposes only a global switch, not per-host.
+		SslInsecure: InsecureUpstream(),
 		CaRootPath:  filepath.Join(dir, "_ca"),
 	})
 	if err != nil {
@@ -363,6 +379,52 @@ func Open(dir, addr string) (*Traffic, error) {
 	t.proxy = p
 	t.sweeping.Go(t.sweepSnapshots) // stops on t.closed; Close waits for it
 	return t, nil
+}
+
+// restrictIndexFiles makes the SQLite file and its -wal/-shm siblings owner-only.
+func restrictIndexFiles(index string) {
+	for _, suffix := range []string{"", "-wal", "-shm"} {
+		if err := os.Chmod(index+suffix, 0o600); err != nil && !os.IsNotExist(err) {
+			log.Printf("[traffic] failed to restrict %s: %v", index+suffix, err)
+		}
+	}
+}
+
+// InsecureUpstream reports whether the operator opted out of verifying upstream
+// TLS certificates (ARTEX_CAPTURE_INSECURE_UPSTREAM=1), needed to capture
+// pentest targets with self-signed certificates. Off by default.
+func InsecureUpstream() bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("ARTEX_CAPTURE_INSECURE_UPSTREAM"))) {
+	case "1", "true", "yes", "on":
+		return true
+	}
+	return false
+}
+
+// ResolveListenAddr makes the recording proxy loopback-only by default. A
+// host-less address (":8788") binds 127.0.0.1; a non-loopback host is refused
+// unless ARTEX_PROXY_ALLOW_NONLOOPBACK=1, because the proxy has no
+// authentication and would be an open relay onto the network.
+func ResolveListenAddr(addr string) (string, error) {
+	host, port, err := net.SplitHostPort(addr)
+	if err != nil {
+		return "", fmt.Errorf("invalid proxy listen address %q: %w", addr, err)
+	}
+	if host == "" {
+		return net.JoinHostPort("127.0.0.1", port), nil
+	}
+	if host == "localhost" {
+		return addr, nil
+	}
+	if ip := net.ParseIP(host); ip != nil && ip.IsLoopback() {
+		return addr, nil
+	}
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("ARTEX_PROXY_ALLOW_NONLOOPBACK"))) {
+	case "1", "true", "yes", "on":
+		log.Printf("[traffic] WARNING: recording proxy listening on non-loopback %s without authentication", addr)
+		return addr, nil
+	}
+	return "", fmt.Errorf("refusing to listen on non-loopback %q (unauthenticated proxy); set ARTEX_PROXY_ALLOW_NONLOOPBACK=1 to allow", addr)
 }
 
 // initIndex applies the schema on a single pinned connection. Pinning is what
