@@ -1,6 +1,6 @@
 # HANDOFF.md — ARTEX
 
-**Last updated:** 2026-11-23 13:37 MST, by claude-code: Stood ARTEX up locally as a Composite project and produced a comprehensive expansion plan. Earlier hand-offs are under Deltas and in `ej handoff log`.
+**Last updated:** 2026-11-23 15:14 MST, by claude-code: Fixed the High and Medium findings (#1–#16) from the 2026-11-23 ARTEX security audit on the local branch ej/20261123-145205-6a3af6. Earlier hand-offs are under Deltas and in `ej handoff log`.
 
 > Single entry point for whoever picks this up next (any agent or human), with no access to the
 > originating conversation. Read this first, then the sections of the code it points at.
@@ -84,15 +84,15 @@ Linux-root tests, the Docker egress iptables rules, the Postgres-backed tests an
 ## Triage (next handful)
 
 **Agents' lane**
-0. *(unclaimed)* — **SEC: proxy upstream dials skip the metadata check** (S), card `c-485de0`. Done = a
+1. *(unclaimed)* — **SEC: proxy upstream dials skip the metadata check** (S), card `c-485de0`. Done = a
    proxied request to 169.254.169.254 is refused, by a test.
-0b. *(unclaimed)* — **SEC: gorilla/websocket bump, GO-2026-6278** (XS), card `c-c10f2c`; needs network.
+2. *(unclaimed)* — **SEC: gorilla/websocket bump, GO-2026-6278** (XS), card `c-c10f2c`; needs network.
    Done = govulncheck clean.
-1. *(unclaimed)* — **E1 Client-grade reporting & deliverables** (M). Turn `report/` into
+3. *(unclaimed)* — **E1 Client-grade reporting & deliverables** (M). Turn `report/` into
    CVSS/EPSS-scored, remediation-bearing, standards-mapped deliverables (OWASP ASVS/WSTG, MITRE
    ATT&CK). Done = a report export with per-finding CVSS vector + remediation + framework tags,
    covered by tests. Card `c-8f9cca`.
-2. *(unclaimed)* — **E4 Methodology-driven coverage** (M), card `c-c0bb07`. Extend the coverage ledger to score
+4. *(unclaimed)* — **E4 Methodology-driven coverage** (M), card `c-c0bb07`. Extend the coverage ledger to score
    coverage against a codified methodology checklist, not only asset touch. Done = planner can
    read a methodology and the coverage graph shows checklist completion.
 
@@ -173,6 +173,7 @@ Card ids in brackets:
 ## Deltas
 
 <!-- composite:deltas · newest first; Composite rewrites this block on every merge (ej handoff merge / merge_handoff) -->
+- **2026-11-23 15:14 MST** · claude-code · `ej/20261123-145205-6a3af6` `7eaf424`→`e3a7fad` (19 commits) · `h-04e098` — Fixed the High and Medium findings (#1–#16) from the 2026-11-23 ARTEX security audit on the local branch ej/20261123-145205-6a3af6. The fixes cover scope/metadata egress checks, bare-host gating, strict allow rules, fail-closed native sandboxing, a symlink-safe file manager, per-run HOME, a separate MCP uid, an HttpOnly session cookie, TLS and an insecure-bind guard, capture-proxy TLS verification, permissions and loopback-only listening, a Docker egress iptables filter, install.sh hardening, framed compaction and agent-authored goal/hint provenance. go build, vet and test pass on macOS. **Next:** c-485de0: route the MITM proxy's upstream dials through the metadata/block check. c-dadc14: verify on Linux root, in Docker, against Postgres, and run the web tsc. c-c10f2c: websocket bump (needs network). Then c-8d54d5, c-bd9a6d and c-cc25b6. **Decided:** Fail closed with explicit env opt-outs. No metadata deny on Bash command text (SSRF payloads); enforce it at dial level instead. Block rules stay substring-matched; allow rules are strict. Follow-ups go on the private board because the repo is public. **Issues:** opened #c-485de0, #c-8d54d5, #c-bd9a6d, #c-c10f2c, #c-cc25b6, #c-dadc14.
 - **2026-11-23 13:37 MST** · claude-code · `main` at `81eafd0`, no commits · `h-e3d121` — Stood ARTEX up locally as a Composite project and produced a comprehensive expansion plan. Cloned tenpointdata/ARTEX to ~/Documents/Projects/ARTEX at 81eafd0; registered Composite project ARTEX; verified backend builds (go build ./... exit 0, Go 1.27.1); scaffolded AGENTS.md, CLAUDE.md (imports @AGENTS.md), and HANDOFF.md in standard form. Wrote the expansion plan & analysis as an Office doc. **Decided:** Kept ARTEX an AGPL-3.0 fork under tenpointdata rather than renaming. All proposed expansion is guardrail-preserving; no item touches the RSI.md immutable surfaces and Loop-C learning (E3) is gated behind that contract and the E8 benchmark. Deferred filing public issues pending owner decision. Expansion plan: Office doc o-b38b1ac0efa9 (#/office/o-b38b1ac0efa9).
 <!-- /composite:deltas -->
 
