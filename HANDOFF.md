@@ -59,17 +59,35 @@ See `docs/ARCHITECTURE.md` for the code-level map. Summary:
 
 ## Current state
 
-**2026-11-23** — Set up locally as a Composite project. Cloned `tenpointdata/ARTEX` to
-`~/Documents/Projects/ARTEX` at `81eafd0` (`main`). Registered as Composite project **ARTEX**.
-Backend **builds cleanly**: `go build ./...` → exit 0 (Go 1.27.1 toolchain; all modules fetched).
-Added `AGENTS.md`, `CLAUDE.md`, and this `HANDOFF.md` (handoff policy now resident in the repo).
-Web deps not yet installed and Docker stack not yet started (not required for the setup+plan
-deliverable; commands below). A comprehensive expansion plan & analysis was produced — see
-Decisions for the link. No application code changed.
+**2026-11-23** — Fixes for the High and Medium findings from the 2026-11-23 security audit are on the
+local branch `ej/20261123-145205-6a3af6` (not pushed). It covers audit findings #1–#16 except as listed
+under Open work. `go build ./...`, `go vet ./...` and `go test ./...` pass on macOS. Not yet run: the
+Linux-root tests, the Docker egress iptables rules, the Postgres-backed tests and the web typecheck
+(card `c-dadc14`). Operator-facing changes:
+- Native (non-Linux-root) starts now refuse unless `ARTEX_ALLOW_UNSANDBOXED=1` is set; `dev.sh` sets it.
+- A non-loopback `-addr` without TLS is refused. Use `-tls-cert`/`-tls-key` (or
+  `ARTEX_TLS_CERT`/`ARTEX_TLS_KEY`), or set `ARTEX_ALLOW_INSECURE_BIND=1`; the Dockerfile sets that env.
+- The session is now an HttpOnly, SameSite=Strict cookie (`__Host-` prefixed over TLS), so users log in
+  again once.
+- The capture proxy verifies upstream TLS; `ARTEX_CAPTURE_INSECURE_UPSTREAM=1` is the opt-out for
+  self-signed targets. A non-loopback `-proxy` needs `ARTEX_PROXY_ALLOW_NONLOOPBACK=1`.
+- Docker: the artex container has NET_ADMIN, and `egress.sh` denies the executor uid access to metadata,
+  the host gateway and the API port (`ARTEX_EGRESS_ALLOW`/`_DENY`/`_FILTER`). GHCR compose needs
+  `ARTEX_IMAGE_TAG`.
+- Cloud-metadata and link-local addresses are always denied for platform dials, redirects and WebFetch.
+  Block rules apply even with the gate off. Fuzzy allow rules match on name and address boundaries.
+- Main-agent writes carry origin `mainagent` and are framed as agent-authored. Norma compaction
+  summaries are framed as untrusted data.
+- Per-run executor HOME; MCP servers run as uid 10002 (`ARTEX_EXEC_MCP_UID`). The workspace file
+  manager uses `os.Root`.
 
 ## Triage (next handful)
 
 **Agents' lane**
+0. *(unclaimed)* — **SEC: proxy upstream dials skip the metadata check** (S), card `c-485de0`. Done = a
+   proxied request to 169.254.169.254 is refused, by a test.
+0b. *(unclaimed)* — **SEC: gorilla/websocket bump, GO-2026-6278** (XS), card `c-c10f2c`; needs network.
+   Done = govulncheck clean.
 1. *(unclaimed)* — **E1 Client-grade reporting & deliverables** (M). Turn `report/` into
    CVSS/EPSS-scored, remediation-bearing, standards-mapped deliverables (OWASP ASVS/WSTG, MITRE
    ATT&CK). Done = a report export with per-finding CVSS vector + remediation + framework tags,
@@ -79,6 +97,8 @@ Decisions for the link. No application code changed.
    read a methodology and the coverage graph shows checklist completion.
 
 **Human lane**
+- **SEC: verify on Linux/Docker** (card `c-dadc14`): Linux-root tests, the egress iptables rules,
+  Postgres tests and the web typecheck. Needed before the security branch goes anywhere public.
 - Revisit tracking: E1–E10 are on the private Composite board (decided 2026-11-23, repo is public).
   File GitHub issues only if the repo goes private or you want them public.
 - Decide engagement-governance direction (E5): how formal the rules-of-engagement/authorization
@@ -114,6 +134,12 @@ Card ids in brackets:
 - **E7** [`c-d60149`] Distributed/remote workers (queue-backed intents) for larger engagements; Helm chart.
 - **E8** [`c-5487e8`] Planner/worker evaluation suite (regression targets, prompt-version A/B via the benchmark gate).
 - **E9** [`c-73af97`] Frontend/UX pass (tables over cards, fewer-clicks triage workflow, live engagement dashboard).
+- **SEC** [`c-485de0`] MITM proxy upstream dials bypass the metadata/block checks (High follow-up to #1).
+- **SEC** [`c-dadc14`] Verify the security branch on Linux root, in Docker and against Postgres, plus the web typecheck.
+- **SEC** [`c-8d54d5`] Capture proxy: insecure upstream only for in-scope targets.
+- **SEC** [`c-c10f2c`] gorilla/websocket bump (GO-2026-6278).
+- **SEC** [`c-bd9a6d`] Residual gaps from the High/Medium fixes.
+- **SEC** [`c-cc25b6`] Low-severity audit items.
 - **E10** [`c-72dd9d`] Code-security testing lane (SAST/dependency ingest) feeding the same dual-graph + evidence model.
 
 ## Known issues and gotchas
@@ -136,6 +162,13 @@ Card ids in brackets:
   touches the `RSI.md` immutable surfaces, and Loop-C work (E3) is gated behind that contract.
 - **2026-11-23** — E1–E10 tracked on the private Composite ARTEX board instead of GitHub issues,
   because `tenpointdata/ARTEX` is public and the roadmap should not be published yet.
+
+- **2026-11-23** — Security fixes fail closed with explicit env opt-outs (`ARTEX_ALLOW_UNSANDBOXED`,
+  `ARTEX_ALLOW_INSECURE_BIND`, `ARTEX_CAPTURE_INSECURE_UPSTREAM`, `ARTEX_PROXY_ALLOW_NONLOOPBACK`) rather
+  than silent degradation. The metadata deny is not applied to Bash command text, because SSRF payloads
+  legitimately name 169.254.169.254; it is enforced at the dial level instead. Block rules keep substring
+  matching, since matching more is the safe direction; only allow rules became strict. Security
+  follow-ups are private board cards, not GitHub issues, because the repo is public.
 
 ## Deltas
 
