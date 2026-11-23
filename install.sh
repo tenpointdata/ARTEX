@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # ARTEX install script: 1) all-Docker  2) local build & run
 set -euo pipefail
+# Everything this script writes (.env, config.json) holds secrets: owner-only.
+umask 077
 cd "$(cd "$(dirname "$0")" && pwd)"
 
 info(){ printf '\033[36m[*]\033[0m %s\n' "$*"; }
@@ -8,7 +10,22 @@ ok(){   printf '\033[32m[+]\033[0m %s\n' "$*"; }
 warn(){ printf '\033[33m[!]\033[0m %s\n' "$*"; }
 die(){  printf '\033[31m[x]\033[0m %s\n' "$*" >&2; exit 1; }
 ask(){  local p="$1" d="${2:-}" a; read -rp "$p${d:+ [$d]}: " a; echo "${a:-$d}"; }
-rand(){ head -c 18 /dev/urandom | base64 | tr -dc 'A-Za-z0-9' | head -c 24; }
+rand(){
+  if command -v openssl >/dev/null 2>&1; then openssl rand -hex 16
+  else head -c 48 /dev/urandom | base64 | tr -dc 'A-Za-z0-9' | head -c 32; fi
+}
+# PG_IMAGE is the Postgres image docker-compose.yml uses, digest included.
+PG_IMAGE="$(sed -n 's/^[[:space:]]*image:[[:space:]]*\(postgres:[^[:space:]]*\).*/\1/p' docker-compose.yml | head -1)"
+[ -n "$PG_IMAGE" ] || PG_IMAGE='postgres:16-alpine@sha256:f2f98726820d0342055351c6e9d36e705f5bfffb3dd53ff556325114b08afb6d'
+# ask_secret re-asks until the answer is non-empty (the default is a random value).
+ask_secret(){
+  local p="$1" d="${2:-}" a
+  while :; do
+    a="$(ask "$p" "$d")"
+    [ -n "$a" ] && { printf '%s' "$a"; return; }
+    warn "an empty password is not accepted" >&2
+  done
+}
 # json_str prints $1 as a JSON string literal: backslash, double quote and the
 # control characters read -r can return are escaped.
 json_str(){
@@ -94,11 +111,12 @@ install_docker(){
   if [ ! -f .env ]; then
     cp .env.example .env 2>/dev/null || true
     local pw key
-    pw="$(ask 'Postgres password (press Enter to generate randomly)' "$(rand)")"
+    pw="$(ask_secret 'Postgres password (press Enter to generate randomly)' "$(rand)")"
     key="$(ask 'ANTHROPIC_API_KEY (may be empty, configure later in the UI)' '')"
     sed -i.bak "s|^POSTGRES_PASSWORD=.*|POSTGRES_PASSWORD=$(sed_repl "$pw")|" .env
     sed -i.bak "s|^ANTHROPIC_API_KEY=.*|ANTHROPIC_API_KEY=$(sed_repl "$key")|" .env
     rm -f .env.bak
+    chmod 600 .env
     ok ".env generated (POSTGRES_PASSWORD set)"
   else
     info "reusing existing .env"
@@ -117,22 +135,33 @@ install_local(){
   case "$(ask 'Choose' 1)" in
     2)
       ensure_docker
-      local pw; pw="$(ask 'Postgres password (press Enter for random)' "$(rand)")"
-      docker run -d --name artex-pg -p 5432:5432 \
-        -e POSTGRES_USER=artex -e POSTGRES_PASSWORD="$pw" -e POSTGRES_DB=artex \
-        -v artex-pg:/var/lib/postgresql/data postgres:16-alpine
+      local pw; pw="$(ask_secret 'Postgres password (press Enter for random)' "$(rand)")"
+      # The bootstrap superuser (postgres) gets a throwaway password and is reachable
+      # only over the container's local socket; ARTEX connects as a non-superuser
+      # role that owns the database. Published on loopback only.
+      docker run -d --name artex-pg -p 127.0.0.1:5432:5432 \
+        -e POSTGRES_PASSWORD="$(rand)" -e POSTGRES_HOST_AUTH_METHOD=scram-sha-256 \
+        -v artex-pg:/var/lib/postgresql/data "$PG_IMAGE" >/dev/null
+      local i=0
+      until docker exec artex-pg pg_isready -U postgres >/dev/null 2>&1; do
+        i=$((i+1)); [ "$i" -le 60 ] || die "PostgreSQL did not become ready"; sleep 1
+      done
+      local qpw="${pw//\'/\'\'}"
+      printf "CREATE ROLE artex LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE PASSWORD '%s';\nCREATE DATABASE artex OWNER artex;\n" "$qpw" \
+        | docker exec -i artex-pg psql -U postgres -v ON_ERROR_STOP=1 >/dev/null
       DB_HOST=127.0.0.1 DB_PORT=5432 DB_USER=artex DB_PASS="$pw" DB_NAME=artex DB_SSL=disable ;;
     *)
       DB_HOST="$(ask 'Database host' 127.0.0.1)"
       DB_PORT="$(ask 'Port' 5432)"
       DB_USER="$(ask 'User' artex)"
-      DB_PASS="$(ask 'Password' '')"
+      DB_PASS="$(ask_secret 'Password' '')"
       DB_NAME="$(ask 'Database name' artex)"
       DB_SSL="$(ask 'sslmode (disable/require)' disable)" ;;
   esac
 
   # generate config.json (string values JSON-escaped: a password may contain " or \)
   case "$DB_PORT" in (*[!0-9]*|'') die "port must be a number: $DB_PORT" ;; esac
+  ( umask 077; : > config.json )
   cat > config.json <<JSON
 {
   "database": {
@@ -145,7 +174,8 @@ install_local(){
   }
 }
 JSON
-  ok "config.json generated"
+  chmod 600 config.json
+  ok "config.json generated (mode 600)"
 
   # go environment check
   command -v go >/dev/null 2>&1 || die "Go not detected; please install Go (>=1.26) first: https://go.dev/dl/"
@@ -164,6 +194,8 @@ JSON
   fi
   ok "build complete → ./artex"
 
+  warn "native mode runs agents as YOUR user with no sandbox: they can read ~/.ssh, keys, config and DB credentials."
+  warn "artex refuses to start unsandboxed unless ARTEX_ALLOW_UNSANDBOXED=1 is set (see SECURITY.md). Prefer Docker."
   info "starting... (Ctrl-C to exit)"
   ./artex
 }

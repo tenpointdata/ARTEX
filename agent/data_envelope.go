@@ -91,15 +91,17 @@ func renderWorkerIntentAssets(assets any, env dataEnvelope) string {
 		env.wrap("intent_assets", string(js))
 }
 
-// operatorHintOrigin is the hint origin written by the operator: the main-agent
-// chat and the no-LLM steering fallback store "human" (see addOneHint).
+// operatorHintOrigin is the hint origin written by the operator: the no-LLM
+// steering fallback and the overview store "human". The main-agent chat writes
+// mainAgentOrigin (untrusted_provenance.go); its rows from before that change
+// still carry "human".
 const operatorHintOrigin = "human"
 
 // agentCredentialSource marks credentials written by an agent via save_task_credential.
 const agentCredentialSource = "agent"
 
 // renderOverviewSections splits a graph_overview snapshot by origin for a user
-// message: the operator block (task, goal nodes, the operator's own hints)
+// message: the operator block (task, the operator's goal nodes and own hints)
 // outside the envelope, the counters and the structured intent fields as plain
 // JSON, then the intent summaries, each derived field and the hints/credentials
 // of agent origin in their own frame. Pure: it reads only data and never modifies
@@ -108,12 +110,20 @@ func renderOverviewSections(data map[string]any, env dataEnvelope) string {
 	operator := map[string]any{}
 	rest := map[string]any{}
 	derived := map[string]any{}
-	var agentHints []map[string]any
+	var agentHints, agentGoals []map[string]any
 	var agentCreds []map[string]any
 	for k, v := range data {
 		switch k {
-		case "task", "goals":
+		case "task":
 			operator[k] = v
+		case "goals":
+			// Goals an agent registered (the main agent's set_goals) are agent
+			// suggestions, framed below; untyped input stays operator as before.
+			if own, agent := splitGoalsByOrigin(v); own != nil {
+				operator[k], agentGoals = own, agent
+			} else {
+				operator[k] = v
+			}
 		case "hints":
 			hs, _ := v.([]map[string]any)
 			own := make([]map[string]any, 0, len(hs))
@@ -208,6 +218,10 @@ func renderOverviewSections(data map[string]any, env dataEnvelope) string {
 	fields := append([]string(nil), overviewDerivedFields...)
 	if _, ok := derived["stagnation_warning"]; ok {
 		fields = append(fields, "stagnation_warning")
+	}
+	if len(agentGoals) > 0 {
+		derived["agent_goals"] = agentGoals
+		fields = append(fields, "agent_goals")
 	}
 	if len(agentHints) > 0 {
 		derived["agent_hints"] = agentHints

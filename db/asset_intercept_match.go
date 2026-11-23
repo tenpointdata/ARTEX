@@ -3,6 +3,7 @@ package db
 import (
 	"fmt"
 	"net"
+	"net/netip"
 	"net/url"
 	"strings"
 )
@@ -51,10 +52,21 @@ func (r AssetInterceptRule) Reason() string {
 // such as %2F, a trailing slash, an added query, /./), and fuzzy_url misses an
 // encoded form of its substring. At tool dispatch the string is the URL the
 // call declares (intercept, targetCheck.run).
-func matchOne(r AssetInterceptRule, domains, ips, urls []string) (string, bool) {
+//
+// strict selects the semantics of an allow rule: an allow rule widens what may
+// be reached, so its fuzzy kinds only match on name and address boundaries
+// (see matchStrict). A block rule (strict false) keeps the plain substring
+// semantics: matching more is the safe direction for a block.
+func matchOne(r AssetInterceptRule, domains, ips, urls []string, strict bool) (string, bool) {
 	p := strings.TrimSpace(r.Pattern)
 	if p == "" {
 		return "", false
+	}
+	if strict {
+		switch r.Kind {
+		case "fuzzy_domain", "fuzzy_ip", "fuzzy_url":
+			return matchStrict(r.Kind, p, domains, ips, urls)
+		}
 	}
 	switch r.Kind {
 	case "exact_domain":
@@ -65,7 +77,7 @@ func matchOne(r AssetInterceptRule, domains, ips, urls []string) (string, bool) 
 		}
 	case "exact_ip":
 		for _, ip := range ips {
-			if strings.TrimSpace(ip) == p {
+			if sameIP(ip, p) {
 				return ip, true
 			}
 		}
@@ -109,15 +121,122 @@ func matchOne(r AssetInterceptRule, domains, ips, urls []string) (string, bool) 
 	return "", false
 }
 
+// matchStrict is the boundary-aware form of the fuzzy kinds, used for allow
+// rules:
+//   - fuzzy_domain matches the domain itself and its subdomains: the host
+//     equals the pattern or ends with "." + pattern (a leading dot in the
+//     pattern is ignored). example.com matches api.example.com, not
+//     example.com.attacker.net or badexample.com.
+//   - fuzzy_ip is an address prefix that ends on an octet (IPv4) or group
+//     (IPv6) boundary: 203.0.113 and 203.0.113. match 203.0.113.99, and
+//     10.0.0.1 matches neither 110.0.0.1 nor 10.0.0.10.
+//   - fuzzy_url is a URL prefix that ends on a boundary of the URL: the end,
+//     or a "/", "?" or "#" (or ":" before the port) when the pattern ends in
+//     the authority. A pattern without a scheme is compared with the URL
+//     without its scheme. https://example.com matches https://example.com/x,
+//     not https://example.com.attacker.net/ or https://example.com@evil/.
+func matchStrict(kind, p string, domains, ips, urls []string) (string, bool) {
+	switch kind {
+	case "fuzzy_domain":
+		d := strings.Trim(strings.ToLower(p), ".")
+		if d == "" {
+			return "", false
+		}
+		for _, raw := range domains {
+			h := strings.TrimSuffix(strings.ToLower(strings.TrimSpace(raw)), ".")
+			if h == d || strings.HasSuffix(h, "."+d) {
+				return raw, true
+			}
+		}
+	case "fuzzy_ip":
+		for _, ip := range ips {
+			if ipPrefixMatch(strings.TrimSpace(ip), p) {
+				return ip, true
+			}
+		}
+	case "fuzzy_url":
+		for _, u := range urls {
+			if urlPrefixMatch(strings.TrimSpace(u), p) {
+				return u, true
+			}
+		}
+	}
+	return "", false
+}
+
+// sameIP reports whether a and b are the same address, whatever their
+// spelling (2001:DB8::1 and 2001:db8:0::1, an IPv4-mapped IPv6 form).
+func sameIP(a, b string) bool {
+	a, b = strings.TrimSpace(a), strings.TrimSpace(b)
+	x, errA := netip.ParseAddr(a)
+	y, errB := netip.ParseAddr(b)
+	if errA != nil || errB != nil {
+		return a == b
+	}
+	return x.Unmap().WithZone("") == y.Unmap().WithZone("")
+}
+
+// ipPrefixMatch reports whether p is a prefix of ip that ends on an octet or
+// group boundary.
+func ipPrefixMatch(ip, p string) bool {
+	ip, p = strings.ToLower(ip), strings.ToLower(p)
+	if p == "" || !strings.HasPrefix(ip, p) {
+		return false
+	}
+	if len(ip) == len(p) || strings.ContainsRune(".:", rune(p[len(p)-1])) {
+		return true
+	}
+	return strings.ContainsRune(".:", rune(ip[len(p)]))
+}
+
+// urlPrefixMatch reports whether p is a prefix of u that ends on a boundary
+// of u; see matchStrict.
+func urlPrefixMatch(u, p string) bool {
+	lu, lp := strings.ToLower(u), strings.ToLower(p)
+	if !strings.Contains(lp, "://") {
+		if _, rest, ok := strings.Cut(lu, "://"); ok {
+			lu = rest
+		}
+	}
+	if lp == "" || !strings.HasPrefix(lu, lp) {
+		return false
+	}
+	if len(lu) == len(lp) || strings.ContainsRune("/?#", rune(lp[len(lp)-1])) {
+		return true
+	}
+	next := lu[len(lp)]
+	if next == '/' || next == '?' || next == '#' {
+		return true
+	}
+	// Still inside the authority: only a port may follow the host.
+	_, afterScheme, _ := strings.Cut(lp, "://")
+	if afterScheme == "" {
+		afterScheme = lp
+	}
+	return next == ':' && !strings.ContainsAny(afterScheme, "/?#")
+}
+
 // MatchAssetInterceptRules returns the first enabled rule matching the given
 // domain/IP/URL candidates, plus the concrete matched value.
 // Used by insert_assets to match raw input (assetInputItem not yet persisted).
 func MatchAssetInterceptRules(rules []AssetInterceptRule, domains, ips, urls []string) (AssetInterceptRule, string, bool) {
+	return matchRules(rules, domains, ips, urls, false)
+}
+
+// MatchAssetAllowRules is MatchAssetInterceptRules for allow (whitelist)
+// rules: the fuzzy kinds match on boundaries only, so that an allow rule for
+// example.com does not also allow example.com.attacker.net, and one for
+// 10.0.0.1 does not allow 110.0.0.1.
+func MatchAssetAllowRules(rules []AssetInterceptRule, domains, ips, urls []string) (AssetInterceptRule, string, bool) {
+	return matchRules(rules, domains, ips, urls, true)
+}
+
+func matchRules(rules []AssetInterceptRule, domains, ips, urls []string, strict bool) (AssetInterceptRule, string, bool) {
 	for _, r := range rules {
 		if !r.Enabled {
 			continue
 		}
-		if v, ok := matchOne(r, domains, ips, urls); ok {
+		if v, ok := matchOne(r, domains, ips, urls, strict); ok {
 			return r, v, true
 		}
 	}
@@ -201,7 +320,7 @@ func EvaluateAssetGate(blockRules, allowRules []AssetInterceptRule, domains, ips
 		return AssetGateDecision{Allowed: false, Reason: rule.Reason()}
 	}
 	if hasEnabledRule(allowRules) {
-		if _, _, ok := MatchAssetInterceptRules(allowRules, domains, ips, urls); !ok {
+		if _, _, ok := MatchAssetAllowRules(allowRules, domains, ips, urls); !ok {
 			return AssetGateDecision{Allowed: false, Reason: "Not in the task's allowed (whitelist) scope; testing is not permitted"}
 		}
 	}

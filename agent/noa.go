@@ -33,6 +33,11 @@ func noaWarn(session string) func(string) {
 // it reports via onWarn and falls back to the built-in compaction. On success it clears
 // opts.Compaction, avoiding agentcore's "two context managers set at once" warning.
 func enableNoa(opts *agentcore.Options, enabled func() bool, archiveRoot, sessionID string, onWarn func(string)) {
+	// Every agent (worker, planner, main agent, chat) calls this right before
+	// agentcore.NewSession, so it is the one place that sees the final context
+	// manager choice. When the built-in compaction stays in charge (noa off or
+	// failed), its summaries are framed as untrusted data (untrusted_compaction.go).
+	defer frameBuiltinCompaction(opts)
 	if enabled == nil || !enabled() {
 		return
 	}

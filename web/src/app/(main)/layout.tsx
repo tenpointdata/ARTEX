@@ -34,15 +34,21 @@ export default function Layout({ children }: Readonly<{ children: ReactNode }>) 
   // protected UI (or its API calls) flashes for a logged-out visitor.
   const [authed, setAuthed] = React.useState(false);
   React.useEffect(() => {
-    if (auth.getToken()) {
-      setAuthed(true);
-    } else {
-      // When the client-side guard sees a logged-out state, the cookie must be cleared too: otherwise proxy.ts, going
-      // by "cookie exists" alone, would bounce us from /login back to the main UI and ping-pong with this guard
-      // in an infinite redirect → blank screen (triggered when cookie and localStorage disagree).
-      auth.clearToken();
-      window.location.href = "/login";
-    }
+    let cancelled = false;
+    void auth.isAuthenticated().then(async (ok) => {
+      if (cancelled) return;
+      if (ok) {
+        setAuthed(true);
+      } else {
+        // Clear a stale cookie server-side too: otherwise proxy.ts, going by "cookie exists"
+        // alone, would bounce us from /login back to the main UI in an infinite redirect.
+        await auth.logout();
+        window.location.href = "/login";
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   const defaultOpen = typeof document === "undefined" ? true : getClientCookie("sidebar_state") !== "false";

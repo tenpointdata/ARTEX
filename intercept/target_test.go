@@ -233,8 +233,11 @@ func TestExtractDoesNotTreatFileNamesAsHosts(t *testing.T) {
 // connection. Each asserts that no target is extracted, which is the gap. They
 // change only if that decision changes.
 
+// A bare name in the arguments of a known network tool is read (see
+// TestExtractBareHostOfNetworkTool); a single-label name, a name passed to any
+// other program, or one a script builds is not.
 func TestBypass_BareHostnameNotExtracted(t *testing.T) {
-	for _, cmd := range []string{"nmap app.example.com", "ping -c1 app.example.com", "curl app.example.com/login", "ssh root@app.example.com", "nc db 5432"} {
+	for _, cmd := range []string{"nc db 5432", "python3 scan.py app.example.com", "T=app.example.com; nmap $T"} {
 		wantTargets(t, cmd, targetsOf("Bash", command(cmd)))
 	}
 }

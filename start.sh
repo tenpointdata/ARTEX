@@ -19,6 +19,21 @@ BIN=./artex
 
 MAX_DELAY=60
 
+# Egress filter for the executor uid (metadata, host gateway, API port); see egress.sh.
+# Never fatal: it logs loudly and carries on when the rules cannot be installed.
+if [ -f ./egress.sh ]; then
+	. ./egress.sh
+	egress_apply "$@" || echo "[artex] egress: WARNING: filter setup failed" >&2
+fi
+
+# The binary this script was started with. A crash relaunch refuses a binary that
+# changed while it ran: when agent processes run unsandboxed (ARTEX_ALLOW_UNSANDBOXED=1,
+# see SECURITY.md) they share this user and could replace ./artex, then crash the
+# server to have their copy started. To run a new build (update.sh), stop artex and
+# start this script again.
+fingerprint() { cksum < "$BIN" 2>/dev/null; }
+started_with=$(fingerprint)
+
 child=0
 stopping=0
 
@@ -63,6 +78,10 @@ while :; do
 		*)
 			echo "[artex] abnormal exit (code=$code), restarting in ${delay}s" >&2
 			sleep "$delay"
+			if [ "$(fingerprint)" != "$started_with" ]; then
+				echo "[artex] $BIN changed since this script started it; not relaunching an unverified binary. Start ./start.sh again to run the new build." >&2
+				exit 1
+			fi
 			delay=$((delay * 2))
 			[ "$delay" -gt "$MAX_DELAY" ] && delay=$MAX_DELAY
 			;;

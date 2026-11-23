@@ -14,8 +14,9 @@ trap cleanup EXIT INT TERM
 # Run this script as your own user: the backend then starts with agent isolation degraded, which it logs in a
 # banner and shows in the web UI (agents run as you and can read the keys, config and database credentials).
 # Agent isolation needs Linux and a root server; use the Docker image for it. As root, a failed isolation
-# self-test stops the start (server/isolation.go).
-go run ./cmd/artex -addr :8787 -proxy 127.0.0.1:8788 &
+# self-test stops the start (server/isolation.go). An unsandboxed start must be opted into explicitly, so this
+# development script sets ARTEX_ALLOW_UNSANDBOXED=1; never use it against targets that could be hostile.
+ARTEX_ALLOW_UNSANDBOXED=1 go run ./cmd/artex -addr 127.0.0.1:8787 -proxy 127.0.0.1:8788 &
 
 # Frontend hot reload (Vite/Next dev server, /api reverse-proxied to :8787).
 ( cd web && npm run dev ) &

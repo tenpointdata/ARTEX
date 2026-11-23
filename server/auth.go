@@ -278,8 +278,8 @@ func extractToken(r *http.Request) string {
 	if h := r.Header.Get("Authorization"); strings.HasPrefix(h, "Bearer ") {
 		return strings.TrimPrefix(h, "Bearer ")
 	}
-	if c, err := r.Cookie("artex_token"); err == nil && c.Value != "" {
-		return c.Value
+	if v := sessionCookieValue(r); v != "" {
+		return v
 	}
 	return r.URL.Query().Get("token")
 }
@@ -291,8 +291,7 @@ func cookieAuthenticated(r *http.Request) bool {
 	if strings.HasPrefix(r.Header.Get("Authorization"), "Bearer ") {
 		return false
 	}
-	c, err := r.Cookie("artex_token")
-	return err == nil && c.Value != ""
+	return sessionCookieValue(r) != ""
 }
 
 // sameOrigin reports whether the browser states that the request comes from a
@@ -529,6 +528,7 @@ func (s *Server) authInit(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 500, "token generation failed")
 		return
 	}
+	s.setSession(w, r, tok)
 	writeJSON(w, 200, map[string]any{"token": tok})
 }
 
@@ -675,5 +675,6 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request, getSetting func(s
 		writeErr(w, 500, "token generation failed")
 		return
 	}
+	s.setSession(w, r, tok)
 	writeJSON(w, 200, map[string]any{"token": tok})
 }

@@ -5,6 +5,7 @@ import (
 	"log"
 	"os"
 	"strconv"
+	"strings"
 	"sync"
 )
 
@@ -37,6 +38,12 @@ type ExecPrivilege struct {
 	Enabled bool
 	UID     uint32
 	GID     uint32
+	// MCPUID is the uid of stdio MCP servers. It differs from UID so that an agent
+	// shell cannot read the environment of an MCP server (/proc/<pid>/environ needs
+	// the same uid), where the secrets configured for that server are. The group
+	// stays GID, so both share the run directories. Zero means the default,
+	// see mcpUID.
+	MCPUID uint32
 	// ScriptDir is where custom-tool scripts are written for the executor to run.
 	// PrepareExecPrivilege creates it and sets it: root-owned, outside the workspace
 	// tree the executor can write.
@@ -56,6 +63,13 @@ func ResolveExecPrivilege(uid, gid int, explicit bool) (ExecPrivilege, error) {
 		return ExecPrivilege{}, fmt.Errorf("-exec-uid and -exec-gid must name an unprivileged id (got uid %d, gid %d; 0 is root)", uid, gid)
 	}
 	p := ExecPrivilege{Enabled: true, UID: uint32(uid), GID: uint32(gid)}
+	if v := strings.TrimSpace(os.Getenv(MCPUIDEnv)); v != "" {
+		m, err := strconv.Atoi(v)
+		if err != nil || m <= 0 || m > 1<<31-1 || m == uid {
+			return ExecPrivilege{}, fmt.Errorf("%s=%q must name an unprivileged uid other than -exec-uid %d", MCPUIDEnv, v, uid)
+		}
+		p.MCPUID = uint32(m)
+	}
 	if !execPrivilegeSupported() {
 		return p.unavailable(explicit, "the privilege drop is not supported on this platform")
 	}
@@ -63,6 +77,21 @@ func ResolveExecPrivilege(uid, gid int, explicit bool) (ExecPrivilege, error) {
 		return p.unavailable(explicit, "the server is not root, so it cannot start agent processes as another user")
 	}
 	return p, nil
+}
+
+// MCPUIDEnv overrides the uid stdio MCP servers run as (default: -exec-uid + 1).
+const MCPUIDEnv = "ARTEX_EXEC_MCP_UID"
+
+// mcpUID is the uid stdio MCP servers run as: MCPUID when set, otherwise the uid
+// next to UID (UID+1, or UID-1 at the top of the range). It is never UID.
+func (p ExecPrivilege) mcpUID() uint32 {
+	if p.MCPUID != 0 && p.MCPUID != p.UID {
+		return p.MCPUID
+	}
+	if p.UID >= 1<<31-1 {
+		return p.UID - 1
+	}
+	return p.UID + 1
 }
 
 // unavailable answers a drop that cannot be applied: an error when the operator asked
@@ -94,9 +123,10 @@ func WithExecPrivilege(p ExecPrivilege) Option {
 	return func(s *Server) { s.execPriv = p }
 }
 
-// execDropCommand returns the command line that runs command as the executor
-// identity. The MCP stdio client starts its command with exec.Command and offers no
-// credential, so the command becomes the server binary in drop mode (RunExecShim).
+// execDropCommand returns the command line that runs an MCP stdio command as the
+// MCP identity (mcpUID, the executor group). The MCP stdio client starts its
+// command with exec.Command and offers no credential, so the command becomes the
+// server binary in drop mode (RunExecShim).
 func execDropCommand(p ExecPrivilege, command string, args []string) (string, []string, error) {
 	if !p.Enabled {
 		return command, args, nil
@@ -105,6 +135,6 @@ func execDropCommand(p ExecPrivilege, command string, args []string) (string, []
 	if err != nil {
 		return "", nil, fmt.Errorf("locate the server binary for the privilege drop: %w", err)
 	}
-	out := []string{execDropArg, execIDString(p.UID), execIDString(p.GID), "--", command}
+	out := []string{execDropArg, execIDString(p.mcpUID()), execIDString(p.GID), "--", command}
 	return self, append(out, args...), nil
 }

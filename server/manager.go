@@ -2037,8 +2037,8 @@ func (t *Task) NotifyFinding(intentID int64, summary string) {
 }
 
 // NotifyGoal records that one OR MORE goals were added in a single set_goals call —
-// by the human via the main agent — then wakes the planner, so the next round spells
-// out "the human added N goals: ..." instead of the planner having to spot new open goals in
+// by the main agent (origin "mainagent", rendered as agent-authored, not operator) or
+// the operator — then wakes the planner, so the next round spells out the new goals instead of the planner having to spot new open goals in
 // the overview. One call → one trigger event (one set_goals batch counts as a single event, no per-goal spam).
 // The event survives an early-returning terminal round (drain happens after the gate),
 // so a set_goals that revives a done task still surfaces it once the task is running.
@@ -2053,7 +2053,7 @@ func (t *Task) NotifyGoal(texts []string) {
 }
 
 // NotifyHint records that one OR MORE hints were added in a single add_hint call —
-// by the human via the main agent (origin "human"), or by cross-task orchestration
+// by the main agent (origin "mainagent", agent-authored), or by cross-task orchestration
 // (origin "orchestrator") — then wakes the planner, so the next round is told who
 // added N strategy hints and looks at them directly instead of having to spot the
 // new hint folded into the graph overview.

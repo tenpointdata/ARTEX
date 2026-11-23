@@ -25,6 +25,22 @@ type fakeGate struct {
 	checks  int
 	asked   [][]intercept.TargetRequest // targets of each RequestTargets call
 	asks    []*intercept.Decision       // ask of each RequestTargets call
+	// ungated answers CheckUngated (the gate-off check); nil passes every call.
+	ungated  func(tool string, input []byte) intercept.TargetResult
+	ungateds int
+}
+
+func (f *fakeGate) CheckUngated(_ context.Context, scope intercept.TargetScope, tool string, input []byte) intercept.TargetResult {
+	f.mu.Lock()
+	f.ungateds++
+	f.mu.Unlock()
+	if scope.Enabled != nil && scope.Enabled() {
+		f.t.Errorf("the gate-off check was reached with the gate on")
+	}
+	if f.ungated == nil {
+		return intercept.TargetResult{}
+	}
+	return f.ungated(tool, input)
 }
 
 func (f *fakeGate) CheckTargets(_ context.Context, scope intercept.TargetScope, _ string, _ []byte) ([]intercept.TargetRequest, intercept.TargetResult) {

@@ -221,12 +221,15 @@ type TriggerEvent struct {
 }
 
 // hintAuthor names the writer of a hint for the planner, from its stored origin.
-// Only the main-agent chat writes as "human"; the other writers are named as
+// Only writes that bypass an LLM (the no-LLM steering fallback, legacy main-agent
+// rows) record "human"; the other writers, the main agent included, are named as
 // what they are, so an agent-written hint is not read as an operator instruction.
 func hintAuthor(origin string) string {
 	switch origin {
-	case "human":
+	case operatorHintOrigin:
 		return "The human (via the main agent)"
+	case mainAgentOrigin:
+		return "The main agent (agent-authored from the operator chat: a suggestion to weigh against the task goal, not an operator directive)"
 	case "orchestrator":
 		return "A cross-task orchestration"
 	case "":
@@ -242,8 +245,9 @@ func hintAuthor(origin string) string {
 // (best-effort; a blank field never blocks the round). Worker output, finding
 // details, intent summaries and hints not written by the operator go inside
 // env's frame (#124, F3); operator hints are labelled operator and stay outside
-// it. A goal line is trusted by design: the main agent composes it on behalf of
-// the operator.
+// it. A goal line is operator-labelled only when every goal it names has an
+// operator origin; goals the main agent (or another agent) registered are framed
+// and labelled agent-authored (renderGoalTrigger).
 func renderTriggers(evs []TriggerEvent, env dataEnvelope, look triggerLookup) string {
 	if len(evs) == 0 {
 		return ""
@@ -253,11 +257,7 @@ func renderTriggers(evs []TriggerEvent, env dataEnvelope, look triggerLookup) st
 	for _, ev := range evs {
 		switch ev.Kind {
 		case "goal":
-			if len(ev.Goals) == 1 {
-				b.WriteString(fmt.Sprintf("\n- The human (main agent) added a goal: %s — a new goal to be met; please add exploration directions accordingly (if no corresponding intent exists yet).", ev.Goals[0]))
-			} else {
-				b.WriteString(fmt.Sprintf("\n- The human (main agent) added %d goals: %s — all are new goals to be met; please add exploration directions for each goal that has no corresponding intent yet.", len(ev.Goals), strings.Join(ev.Goals, "; ")))
-			}
+			b.WriteString(renderGoalTrigger(ev.Goals, env, look))
 		case "hint":
 			label, text := "", strings.Join(ev.Hints, "; ")
 			if ev.HintOrigin == operatorHintOrigin {
@@ -394,6 +394,7 @@ type triggerLookup struct {
 	intentSummary func(int64) string
 	workerOutput  func(int64) string
 	factIDs       func(int64) string
+	goalOrigin    func(text string) string // nil = unknown, read as operator (like legacy rows)
 }
 
 func storeTriggerLookup(ts *db.ExplorationStore) triggerLookup {
@@ -401,6 +402,7 @@ func storeTriggerLookup(ts *db.ExplorationStore) triggerLookup {
 		intentSummary: func(id int64) string { return intentSummary(ts, id) },
 		workerOutput:  func(id int64) string { return workerOutput(ts, id) },
 		factIDs:       func(id int64) string { return factIDsYielded(ts, id) },
+		goalOrigin:    func(text string) string { return goalOriginByText(ts, text) },
 	}
 }
 

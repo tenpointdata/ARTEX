@@ -25,9 +25,11 @@ const maxRedirects = 10
 // from the context of the request, which net/http keeps on every hop: the
 // target scope of the session and the Interceptor that owns its gate.
 //
-// With the gate off, or with no scope in the context (the operator's test
-// endpoint), it only applies the limit of 10 hops: nothing is parsed, resolved,
-// read or written, and the client behaves as with the default policy.
+// With no scope in the context (the operator's test endpoint) it only applies
+// the limit of 10 hops, and the client behaves as with the default policy.
+// With the gate off it also runs the always-on checks on a hop that leaves the
+// host of the original request (checkUngatedHop): the asset block rules and
+// the metadata deny. A hop the gate-off checks pass is followed.
 //
 // A hop no pin or exemption covers is not followed, and the policy never waits:
 // the fetch has its own deadline, which a human decision does not fit in. The
@@ -44,7 +46,10 @@ func RedirectCheck(toolName string) func(req *http.Request, via []*http.Request)
 		ctx := req.Context()
 		scope, on := renderedScope(ctx)
 		if !on {
-			return nil
+			if scope.Interceptor == nil {
+				return nil
+			}
+			return checkUngatedHop(ctx, scope, toolName, req.URL.String(), via[0].URL.String(), via[len(via)-1].URL.String())
 		}
 		return checkRedirectHop(ctx, scope, toolName, req.URL.String(), via[len(via)-1].URL.String())
 	}
@@ -70,7 +75,7 @@ func checkRedirectHop(ctx context.Context, scope TargetScope, toolName, hop, fro
 		origin = o.String()
 	}
 	ctx = WithCall(ctx, toolName, input)
-	c := &targetCheck{i: i, ctx: ctx, scope: scope, tool: toolName, input: input, urls: []string{hop}, redirectFrom: origin}
+	c := &targetCheck{i: i, ctx: ctx, scope: scope, tool: toolName, input: input, urls: []string{hop}, redirectFrom: origin, connect: true}
 	unpinned, res := c.run([]Target{t})
 	if res.Code == "" && len(unpinned) > 0 {
 		// Wait bound 0: the request is found or created, and the call does not wait.
