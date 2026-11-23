@@ -271,6 +271,9 @@ type Traffic struct {
 	// transparent-passthrough paths honor it (go-mitmproxy's getUpstreamConn),
 	// so no host escapes it. Hot-swappable at runtime via SetUpstreamProxy.
 	upstream atomic.Pointer[url.URL]
+	// gate is the loopback proxy every upstream dial goes through when upstream
+	// is nil, so the platform's egress checks apply to them (upstream_gate.go).
+	gate *upstreamGate
 	// rewriteRules is the compiled snapshot of the rewrite rules, replaced as a
 	// whole by SetRewriteRules and applied by the sink (rewrite_flow.go).
 	rewriteRules atomic.Pointer[rewrite.Set]
@@ -368,7 +371,17 @@ func Open(dir, addr string) (*Traffic, error) {
 	// a direct dial. When a global egress proxy IS configured (SetUpstreamProxy),
 	// every captured request — intercepted AND transparently tunneled — is
 	// forwarded through it instead, so no host leaks the real source IP.
-	p.SetUpstreamProxy(func(*http.Request) (*url.URL, error) { return t.upstream.Load(), nil })
+	//
+	// "Directly" means through the upstream gate (upstream_gate.go): go-mitmproxy
+	// has no dial hook, so its upstream is a loopback proxy that dials with the
+	// platform's checks (SetUpstreamDialer), never a bare net.Dialer.
+	gate, err := startUpstreamGate(nil)
+	if err != nil {
+		db.Close()
+		return nil, fmt.Errorf("start the upstream gate: %w", err)
+	}
+	t.gate = gate
+	p.SetUpstreamProxy(t.upstreamFor)
 	// Fail-open: MITM every host by default, EXCEPT ones a prior request proved we
 	// can't intercept without breaking (see maybePassthrough). Those are tunneled
 	// transparently so the request still reaches the target instead of being killed.
@@ -641,6 +654,9 @@ func (t *Traffic) Close() error {
 	t.transparentMu.Unlock()
 	if tsrv != nil {
 		_ = tsrv.Close()
+	}
+	if t.gate != nil {
+		t.gate.close()
 	}
 	t.reaping.Wait()
 	t.sweeping.Wait()
