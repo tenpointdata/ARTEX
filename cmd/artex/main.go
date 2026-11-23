@@ -100,6 +100,8 @@ func run() int {
 	var (
 		addr    = flag.String("addr", "127.0.0.1:8787", "HTTP listen address")
 		dataDir = flag.String("data", filepath.Join(config.BaseDir(), "data"), "runtime data directory: traffic index, task files, transcripts (default: data/ next to the executable)")
+		tlsCert = flag.String("tls-cert", os.Getenv(envTLSCert), "TLS certificate file (PEM); with -tls-key serves HTTPS (env ARTEX_TLS_CERT)")
+		tlsKey  = flag.String("tls-key", os.Getenv(envTLSKey), "TLS private key file (PEM) (env ARTEX_TLS_KEY)")
 		proxy   = flag.String("proxy", "127.0.0.1:8788", "traffic recording proxy address (empty to disable)")
 		// Identity of every agent process (Bash, the shell, custom tools, MCP stdio).
 		// A negative uid turns the drop off; 0 (root) is refused.
@@ -114,7 +116,16 @@ func run() int {
 	// to the frontend top bar.
 	server.BuildVersion = version
 
+	useTLS, bindWarn, err := checkListenSecurity(*addr, *tlsCert, *tlsKey, os.Getenv(envAllowInsecure) == "1")
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "artex:", err)
+		return 2
+	}
+
 	printBanner(*addr)
+	if bindWarn != "" {
+		log.Printf("WARNING: %s", bindWarn)
+	}
 
 	// capture backend logs into the in-memory sink (still to stderr) so the /logs
 	// page can show a live log stream. Do this first, to catch startup logs too.
@@ -223,10 +234,19 @@ func run() int {
 		ReadTimeout:       30 * time.Minute,
 		IdleTimeout:       2 * time.Minute,
 	}
+	if useTLS {
+		httpSrv.TLSConfig = serverTLSConfig()
+	}
 
 	go func() {
 		log.Printf("ARTEX %s backend listening on %s (data=%s, workers=%d)", version, *addr, *dataDir, mgr.Workers())
-		if err := httpSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		var err error
+		if useTLS {
+			err = httpSrv.ListenAndServeTLS(*tlsCert, *tlsKey)
+		} else {
+			err = httpSrv.ListenAndServe()
+		}
+		if err != nil && err != http.ErrServerClosed {
 			log.Fatalf("serve: %v", err)
 		}
 	}()

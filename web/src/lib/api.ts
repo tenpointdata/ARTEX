@@ -124,9 +124,10 @@ import type {
 // Combined file data per attachment upload; matches maxChatUpload in server/chatupload.go.
 const MAX_CHAT_UPLOAD_BYTES = 512 * 1024 * 1024;
 
+// The session is an HttpOnly cookie the browser attaches by itself; scripts hold no token.
+// Kept as a function so the Authorization-header call sites below stay inert.
 function getToken(): string | null {
-  if (typeof window === "undefined") return null;
-  return localStorage.getItem("artex_token");
+  return null;
 }
 
 // ApiError is what http() throws for a non-2xx response: the message is the
@@ -154,8 +155,6 @@ export async function http<T>(path: string, init?: RequestInit): Promise<T> {
   });
   if (r.status === 401) {
     if (typeof window !== "undefined") {
-      localStorage.removeItem("artex_token");
-      document.cookie = "artex_token=; path=/; max-age=0";
       window.location.href = "/login";
     }
     throw new Error(t("Unauthorized"));
@@ -192,9 +191,10 @@ export async function http<T>(path: string, init?: RequestInit): Promise<T> {
 // to the Go backend on :8787, whose CORS is open.
 //
 // Override either default with NEXT_PUBLIC_SSE_BASE (set it to "" to force same-origin).
-// A same-origin stream sends the artex_token cookie. The query token is added only
-// when base is non-empty, which is the dev connection to :8787: that origin cannot
-// send the cookie.
+// A same-origin stream sends the HttpOnly session cookie. The dev connection to :8787 is
+// cross-origin, so the browser does not send the cookie there and the stream is refused
+// (scripts hold no token to put in the URL); in dev run the UI against the backend's
+// own port, or set NEXT_PUBLIC_SSE_BASE="" and accept the rewrite's buffering.
 // mockReport returns a canned Markdown report for the demo.
 function mockReport(_task?: string): string {
   return `# ARTEX Penetration Test Report — Acme Corp
@@ -958,8 +958,6 @@ export const api = {
     });
     if (r.status === 401) {
       if (typeof window !== "undefined") {
-        localStorage.removeItem("artex_token");
-        document.cookie = "artex_token=; path=/; max-age=0";
         window.location.href = "/login";
       }
       throw new Error(t("Unauthorized"));
