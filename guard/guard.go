@@ -1,8 +1,11 @@
 // Package guard implements the safety boundary layer (docs §11): an audit log,
 // user-configured intercept-rule evaluation, and Observer/G5 failure attribution.
 // Every tool call passes through the PreToolUse hook before executing.
-// (The RoE authorization-scope mechanism was removed; a replacement may be added
-// later.) Destructive/exfil gating is no longer hard-coded here — it lives in the
+// (The RoE authorization-scope mechanism was removed. With the target gate off,
+// the default, the always-on egress checks of intercept stand in its place:
+// the asset block rules apply to the targets every tool declares, and the
+// platform's own connections never reach a cloud-metadata address; see
+// intercept/target_egress.go.) Destructive/exfil gating is no longer hard-coded here — it lives in the
 // DB intercept rules (seeded as ordinary [built-in] rules, so users can disable or
 // delete them), evaluated via applyIntercept.
 package guard
@@ -123,6 +126,10 @@ func toolAuditCommand(ev hook.Event) string {
 type targetGate interface {
 	CheckTargets(ctx context.Context, scope intercept.TargetScope, toolName string, input []byte) ([]intercept.TargetRequest, intercept.TargetResult)
 	RequestTargets(ctx context.Context, scope intercept.TargetScope, toolName string, input []byte, targets []intercept.TargetRequest, ask *intercept.Decision) intercept.TargetResult
+	// CheckUngated is the always-on check of a session whose gate is off: the
+	// asset block rules on the declared targets, and the metadata deny on the
+	// URL of WebFetch. It never asks.
+	CheckUngated(ctx context.Context, scope intercept.TargetScope, toolName string, input []byte) intercept.TargetResult
 }
 
 // targetPasses bounds the request-and-recheck loop of one call: a request that
@@ -143,7 +150,8 @@ func (g *Guard) gateScope(ctx context.Context) (intercept.TargetScope, bool) {
 //
 // The rules and the judge apply to the enabled tools of a full guard. A
 // target-only guard applies the built-in deny rules alone, whether its gate is
-// on or off. The target gate applies to every tool call of a session whose gate
+// on or off. With the gate off, every guard with an interceptor applies the
+// always-on egress checks (CheckUngated) before anything else. The target gate applies to every tool call of a session whose gate
 // is on: a deny blocks first, before any target request exists; an allow by a
 // rule or by the judge does not satisfy the gate; an ask and an unpinned target
 // share one approval request.
@@ -159,6 +167,14 @@ func (g *Guard) applyIntercept(ctx context.Context, ev hook.Event, cmd string) h
 		}
 	}
 	scope, gated := g.gateScope(ctx)
+	if !gated && g.gate != nil {
+		// The gate is off: the asset block rules still apply to what the call
+		// declares, and WebFetch never reaches a metadata address. A block here
+		// opens no request; it is logged as a decided row.
+		if res := g.gate.CheckUngated(ctx, scope, ev.ToolName, ev.Input); res.Code != "" {
+			return g.block(ev.ToolName, TargetBlockMessage(res), cmd)
+		}
+	}
 	rules := !g.targetOnly && g.interceptor != nil && g.interceptor.IsToolEnabled(ev.ToolName)
 	// Persistence tools (custom tools, MCP servers, skills) always meet their built-in
 	// approval, in the target-only guard too; see intercept.MatchPersistence.

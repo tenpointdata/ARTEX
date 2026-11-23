@@ -67,8 +67,10 @@ func gatedFetch(ctx context.Context, rawURL string) (*http.Response, error) {
 }
 
 // With the gate off, or without a scope, the policy is net/http's default:
-// every hop is followed, up to 10, with the same error after that. Nothing is
-// parsed, resolved, read or logged, not even a hop whose target cannot be read.
+// every hop is followed, up to 10, with the same error after that, and a hop
+// whose target cannot be read is followed too. Only the always-on checks run,
+// and only on a hop that leaves the original host: they read the rules and
+// resolve the hop, and log nothing when the hop passes.
 func TestRedirectGateOffKeepsDefaultPolicy(t *testing.T) {
 	g := newGate(t)
 	g.res.set("app.example.com", "203.0.113.7")
@@ -111,10 +113,13 @@ func TestRedirectGateOffKeepsDefaultPolicy(t *testing.T) {
 			t.Errorf("%s: redirect loop: %v, want the default policy's %v", name, gotErr, wantErr)
 		}
 	}
-	if g.store.reads != 0 || len(g.store.logged) != 0 || g.res.total() != 0 {
-		t.Errorf("gate off: %d store reads, %d rows, %d lookups, want none", g.store.reads, len(g.store.logged), g.res.total())
+	// Two scoped contexts, two hops each that leave app.example.com.
+	if g.store.reads != 4 || len(g.store.logged) != 0 || g.res.lookups("other.example.com") != 4 || g.res.total() != 4 || len(g.store.pins) != 0 {
+		t.Errorf("gate off: %d store reads, %d rows, %d lookups, want 4 rule reads, 4 lookups of the new host, no row",
+			g.store.reads, len(g.store.logged), g.res.total())
 	}
 	// Gate on, the limit holds as well, before anything is read.
+	g.store.reads = 0
 	if err := hop(g.ctx(), "https://app.example.com/", chain...); err == nil || err.Error() != "stopped after 10 redirects" || g.store.reads != 0 {
 		t.Errorf("gate on, hop 10: %v, %d store reads", err, g.store.reads)
 	}

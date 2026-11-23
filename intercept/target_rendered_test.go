@@ -18,9 +18,11 @@ func (g *gateFixture) ctx() context.Context {
 	return WithTargetScope(context.Background(), g.scope)
 }
 
-// With the gate off, or without a scope (the operator's test endpoint), the
-// rendered target is not even parsed: nothing is read, resolved or logged, and
-// a URL the gate could not read passes too, as it did before the gate.
+// With the gate off, or without a scope (the operator's test endpoint), a
+// rendered target that no rule blocks passes: nothing is requested, pinned or
+// logged, and a URL the gate could not read passes too, as it did before the
+// gate. Without a scope nothing is read at all; with the gate off the
+// always-on checks read the rules and resolve the rendered URL.
 func TestRenderedGateOffTouchesNothing(t *testing.T) {
 	g := newGate(t)
 	g.res.set("app.example.com", "203.0.113.7")
@@ -39,8 +41,10 @@ func TestRenderedGateOffTouchesNothing(t *testing.T) {
 			}
 		}
 	}
-	if g.store.reads != 0 || len(g.store.logged) != 0 || g.res.total() != 0 {
-		t.Errorf("gate off: %d store reads, %d rows, %d lookups, want none", g.store.reads, len(g.store.logged), g.res.total())
+	// Two scoped contexts: the URL (rules and a lookup, cached the second
+	// time) and the command (rules).
+	if g.store.reads != 4 || len(g.store.logged) != 0 || g.res.total() != 1 || len(g.store.pins) != 0 {
+		t.Errorf("gate off: %d store reads, %d rows, %d lookups, want 4 rule reads, 1 lookup, no row", g.store.reads, len(g.store.logged), g.res.total())
 	}
 }
 
@@ -130,12 +134,14 @@ func TestRenderedTargetUsesTheGateDecision(t *testing.T) {
 	g.res.set("app.example.com", "203.0.113.7")
 	g.store.approve(TargetRequest{Host: "app.example.com", Port: 443, ResolvedIPs: []string{"203.0.113.7"}})
 	g.store.approve(TargetRequest{Host: "198.51.100.9", Port: 8080, ResolvedIPs: []string{"198.51.100.9"}})
+	// A bare host in the arguments of a network tool is a target without a port.
+	g.store.approve(TargetRequest{Host: "app.example.com", Port: 0, ResolvedIPs: []string{"203.0.113.7"}})
 
 	for name, res := range map[string]TargetResult{
 		"url":                 GateRenderedURL(g.ctx(), "probe", appURL),
 		"url, ip and port":    GateRenderedURL(g.ctx(), "probe", "http://198.51.100.9:8080/x"),
 		"command":             GateRenderedCommand(g.ctx(), "probe", "curl -s '"+appURL+"'"),
-		"command, no target":  GateRenderedCommand(g.ctx(), "probe", "nmap -sV app.example.com"),
+		"command, bare host":  GateRenderedCommand(g.ctx(), "probe", "nmap -sV app.example.com"),
 		"command, ip literal": GateRenderedCommand(g.ctx(), "probe", "nc 198.51.100.9:8080"),
 	} {
 		if res != (TargetResult{}) {

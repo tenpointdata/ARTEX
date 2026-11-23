@@ -90,9 +90,9 @@ func extractDeclared(toolName string, input []byte) targetList {
 			out.urls = append(out.urls, strings.TrimSpace(u))
 		}
 	case "Bash", "shell_open", "Monitor":
-		out.scan(declaredFields(input).Command)
+		out.scanCommand(declaredFields(input).Command)
 	case "shell_send":
-		out.scan(declaredFields(input).Text)
+		out.scanCommand(declaredFields(input).Text)
 	default:
 		out.scanStrings(input)
 	}

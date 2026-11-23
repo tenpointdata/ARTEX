@@ -10,13 +10,6 @@ import (
 	"github.com/Autumn-27/artex/db"
 )
 
-// metadataAddrs are instance-metadata addresses that lie outside the link-local
-// ranges and would otherwise pass as private or public unicast.
-var metadataAddrs = []netip.Addr{
-	netip.MustParseAddr("fd00:ec2::254"),   // AWS IMDS over IPv6
-	netip.MustParseAddr("100.100.100.200"), // Alibaba Cloud
-}
-
 // ValidateExemptionHost checks the host of an entry an operator adds to the
 // target-gate exemption list. host is expected in normalised form.
 //

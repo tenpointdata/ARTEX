@@ -117,12 +117,14 @@ func get(ctx context.Context, client *http.Client, rawURL string) (string, error
 	return string(b), err
 }
 
-// With the gate off, or with no scope in a client built without one, the dial
-// is the dial of today: the address as received, no lookup, no store access.
+// With no scope in a client built without one, the dial is the plain dial: the
+// address as received, no lookup, no store access. With the gate off the
+// always-on checks run: one fresh lookup and the block rules, and the address
+// that was checked is dialled, not the name. No pin, request or row.
 func TestPinnedDialGateOffIsPlainDial(t *testing.T) {
 	g, rec := dialGate(t)
 	srv, hits, port := pinnedServer(t, "plain")
-	rec.route("app.example.com:"+port, srv.Listener.Addr().String())
+	rec.route("203.0.113.7:"+port, srv.Listener.Addr().String())
 	g.res.set("app.example.com", "203.0.113.7")
 
 	conn, err := PinnedDialer("WebFetch", false)(context.Background(), "tcp", srv.Listener.Addr().String())
@@ -138,11 +140,12 @@ func TestPinnedDialGateOffIsPlainDial(t *testing.T) {
 			t.Fatalf("%s: %q, %v", name, body, err)
 		}
 	}
-	if got := rec.calls(); len(got) != 2 || got[0] != "app.example.com:"+port || got[1] != got[0] {
-		t.Fatalf("dialled %v, want the address as received", got)
+	if got := rec.calls(); len(got) != 2 || got[0] != "203.0.113.7:"+port || got[1] != got[0] {
+		t.Fatalf("dialled %v, want the checked address", got)
 	}
-	if hits.Load() != 2 || g.store.reads != 0 || len(g.store.logged) != 0 || g.res.total() != 0 {
-		t.Fatalf("hits=%d, %d store reads, %d rows, %d lookups; want none but the hits", hits.Load(), g.store.reads, len(g.store.logged), g.res.total())
+	if hits.Load() != 2 || g.store.reads != 2 || len(g.store.logged) != 0 || g.res.lookups("app.example.com") != 2 || len(g.store.pins) != 0 {
+		t.Fatalf("hits=%d, %d store reads, %d rows, %d lookups, %d pins; want 2 hits, 2 rule reads, 2 lookups and nothing else",
+			hits.Load(), g.store.reads, len(g.store.logged), g.res.total(), len(g.store.pins))
 	}
 }
 
