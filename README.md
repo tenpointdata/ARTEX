@@ -413,7 +413,7 @@ docker compose -f docker-compose.ghcr.yml pull
 docker compose -f docker-compose.ghcr.yml up -d
 ```
 
-Pin a version with `ARTEX_IMAGE_TAG=v0.7.1` in `.env` (or `0.7.1`); unset uses `latest`. To use
+Set `ARTEX_IMAGE_TAG=v0.7.1` in `.env` (or `0.7.1`); it is required, there is no `latest` default. To use
 custom skills, copy them into a host directory and add `- ./skills:/app/skills` to the `artex`
 volumes, which overrides the built-in `/app/skills`.
 

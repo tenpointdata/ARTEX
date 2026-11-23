@@ -8,13 +8,13 @@
 # GHCR publish step, so the pull above fails with "denied" until then. Use
 # `docker compose up -d --build` with docker-compose.yml in the meantime.
 #
-# Set POSTGRES_PASSWORD in .env. Pin the image with ARTEX_IMAGE_TAG=v0.7.1 in
-# .env; unset uses latest. The image carries the built-in /app/skills; this file
+# Set POSTGRES_PASSWORD in .env. Set ARTEX_IMAGE_TAG=v0.7.1 (a release
+# tag) in .env; it is required, there is no floating latest default. The image carries the built-in /app/skills; this file
 # does not mount a host skills/ directory. To use custom skills, copy them into a
 # host directory and add `- ./skills:/app/skills` to the artex volumes.
 services:
   postgres:
-    image: postgres:16-alpine
+    image: postgres:16-alpine@sha256:f2f98726820d0342055351c6e9d36e705f5bfffb3dd53ff556325114b08afb6d
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-artex}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Please set POSTGRES_PASSWORD in .env}
@@ -29,11 +29,16 @@ services:
     restart: unless-stopped
 
   artex:
-    image: ghcr.io/baarai/artex:${ARTEX_IMAGE_TAG:-latest}
+    image: ghcr.io/baarai/artex:${ARTEX_IMAGE_TAG:?Set ARTEX_IMAGE_TAG in .env (a release tag such as v0.7.1)}
     # Agent processes run as an unprivileged executor (-exec-uid): no setuid program
     # or file capability may raise them back to root.
     security_opt:
       - "no-new-privileges:true"
+    # egress.sh installs iptables rules for the executor uid (metadata, host
+    # gateway, API port). Only root in the container (the server) holds the
+    # capability; the executor cannot regain it (no-new-privileges, no setuid).
+    cap_add:
+      - NET_ADMIN
     depends_on:
       postgres:
         condition: service_healthy
@@ -52,6 +57,11 @@ services:
       ARTEX_LLM_MODEL: ${ARTEX_LLM_MODEL:-}
       ARTEX_LLM_BASE_URL: ${ARTEX_LLM_BASE_URL:-}
       ARTEX_LLM_PROXY: ${ARTEX_LLM_PROXY:-}
+      # Agent egress filter (egress.sh): extra CIDRs to deny, CIDRs allowed despite the
+      # default denies (metadata, host gateway, API port), and 0 to disable.
+      ARTEX_EGRESS_DENY: ${ARTEX_EGRESS_DENY:-}
+      ARTEX_EGRESS_ALLOW: ${ARTEX_EGRESS_ALLOW:-}
+      ARTEX_EGRESS_FILTER: ${ARTEX_EGRESS_FILTER:-}
       # Exact host:port list the model-list fetch may reach on private addresses
       # (e.g. host.docker.internal:11434 for Ollama).
       ARTEX_LLM_PRIVATE_ENDPOINTS: ${ARTEX_LLM_PRIVATE_ENDPOINTS:-}

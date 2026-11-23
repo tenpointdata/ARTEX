@@ -167,6 +167,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       arp-scan arping fping iproute2 netdiscover net-tools nfs-common \
       python3-impacket python3-paramiko python3-scapy rpcbind sqlite3 xxd \
       hashcat hydra john ncrack openssh-client ssh-audit sshpass \
+      iptables \
     && rm -rf /var/lib/apt/lists/*
 # Node 22 from the official nodejs.org tarball: bookworm's apt nodejs is 18,
 # Playwright requires >=20, and 20 is end-of-life. 22 matches the CI and release
@@ -274,7 +275,7 @@ COPY --from=build /out/artex /app/artex
 # Daemon startup script: relaunches the process after a crash and forwards SIGTERM
 # to artex — docker stop only signals PID 1; without forwarding, artex never receives it,
 # cannot shut down gracefully, and is hard-killed by SIGKILL after 10 seconds.
-COPY start.sh /app/start.sh
+COPY start.sh egress.sh /app/
 RUN chmod +x /app/artex /app/start.sh && mkdir -p -m 0700 /app/keys \
     && chmod 0711 /root
 # No setuid or setgid programs (su, passwd, mount, bbot's chrome_sandbox, ...): an

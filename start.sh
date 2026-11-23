@@ -19,6 +19,13 @@ BIN=./artex
 
 MAX_DELAY=60
 
+# Egress filter for the executor uid (metadata, host gateway, API port); see egress.sh.
+# Never fatal: it logs loudly and carries on when the rules cannot be installed.
+if [ -f ./egress.sh ]; then
+	. ./egress.sh
+	egress_apply "$@" || echo "[artex] egress: WARNING: filter setup failed" >&2
+fi
+
 child=0
 stopping=0
 
