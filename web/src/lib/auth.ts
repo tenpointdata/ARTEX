@@ -1,5 +1,6 @@
-const TOKEN_KEY = "artex_token";
-const COOKIE_MAX_AGE = 7 * 24 * 60 * 60; // 7 days (seconds)
+// The session lives in an HttpOnly cookie that the server sets at login and clears
+// at logout. Scripts cannot read it, so this module never sees the token: it asks the
+// server whether the browser holds a valid session.
 
 export interface CurrentUser {
   id: string;
@@ -10,37 +11,34 @@ export interface CurrentUser {
   role: string;
 }
 
+// The console has a single account.
+const OPERATOR: CurrentUser = { id: "1", name: "ARTEX", username: "ARTEX", email: "", avatar: "", role: "operator" };
+
 export const auth = {
-  getToken(): string | null {
-    if (typeof window === "undefined") return null;
-    // Mock demo: no real login; return a fake token so the route guard allows going straight into the main UI.
-    return localStorage.getItem(TOKEN_KEY) ?? (process.env.NEXT_PUBLIC_MOCK === "1" ? "mock-demo" : null);
-  },
-
-  setToken(token: string): void {
-    localStorage.setItem(TOKEN_KEY, token);
-    // Also write a cookie for the Next.js middleware to read server-side
-    document.cookie = `${TOKEN_KEY}=${encodeURIComponent(token)}; path=/; max-age=${COOKIE_MAX_AGE}; SameSite=Lax`;
-  },
-
-  clearToken(): void {
-    localStorage.removeItem(TOKEN_KEY);
-    document.cookie = `${TOKEN_KEY}=; path=/; max-age=0`;
-  },
-
-  // Parse the current user from the JWT payload's sub field; display only, no signature verification.
-  getCurrentUser(): CurrentUser | null {
-    const token = this.getToken();
-    if (!token) return null;
+  // True when the browser's session cookie is valid. Mock demo: always signed in.
+  async isAuthenticated(): Promise<boolean> {
+    if (process.env.NEXT_PUBLIC_MOCK === "1") return true;
     try {
-      const parts = token.split(".");
-      if (parts.length !== 3) return null;
-      // base64url → base64
-      const payload = JSON.parse(atob(parts[1].replace(/-/g, "+").replace(/_/g, "/")));
-      const username: string = payload.sub ?? "ARTEX";
-      return { id: "1", name: username, username, email: "", avatar: "", role: "operator" };
+      const r = await fetch("/api/auth/session", { credentials: "same-origin" });
+      if (!r.ok) return false;
+      const body = (await r.json()) as { authenticated?: unknown };
+      return body.authenticated === true;
     } catch {
-      return null;
+      return false;
     }
+  },
+
+  // Ask the server to clear the session cookie.
+  async logout(): Promise<void> {
+    if (process.env.NEXT_PUBLIC_MOCK === "1") return;
+    try {
+      await fetch("/api/auth/logout", { method: "POST", credentials: "same-origin" });
+    } catch {
+      // The caller still navigates to /login; the server rejects the stale cookie anyway.
+    }
+  },
+
+  getCurrentUser(): CurrentUser {
+    return OPERATOR;
   },
 };

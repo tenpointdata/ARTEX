@@ -328,9 +328,21 @@ embedded binary, starts it).
 Open **http://localhost:8787**; `/setup` asks for the one-time setup token printed at startup
 (`docker compose logs artex | grep "Setup token"`).
 
-The UI listens on `127.0.0.1` by default. To reach it from another machine (or from Windows when
-ARTEX runs inside WSL), set `ARTEX_BIND_ADDR=0.0.0.0` in `.env` (the setup token still protects the
-first-run claim), or keep loopback and use a reverse proxy or SSH tunnel.
+The UI listens on `127.0.0.1` by default over plain HTTP. To reach it from another machine, keep
+the loopback bind and use an SSH tunnel (`ssh -L 8787:127.0.0.1:8787 user@host`) or a TLS reverse
+proxy in front. Do not bind `0.0.0.0` without TLS: the login session and every API call would
+cross the network in clear text. The binary refuses a non-loopback `-addr` unless it serves TLS
+(`-tls-cert`/`-tls-key`, or `ARTEX_TLS_CERT`/`ARTEX_TLS_KEY`; TLS 1.2 minimum) or you set
+`ARTEX_ALLOW_INSECURE_BIND=1`, which logs a warning. The Docker image sets that override because
+it binds inside the container; the published host address is `ARTEX_BIND_ADDR` (default
+`127.0.0.1`), so keep it on loopback or put TLS in front before widening it.
+
+**Session cookie and lab targets.** Login sets an `HttpOnly`, `SameSite=Strict` session cookie
+(`__Host-` prefixed and `Secure` when served over TLS). Browsers do not isolate cookies by port, so
+a lab target on `localhost:8080` is sent the same cookie as the console on `localhost:8787`. Serve
+the console from a hostname of its own, for example `http://artex.localhost:8787` (`*.localhost`
+resolves to loopback in current browsers), and keep lab targets on a different hostname. Scripts
+and API clients can still send `Authorization: Bearer <token>`; the login response returns it.
 
 ### Option 2: Docker (Compose checkout build or prebuilt GHCR image)
 

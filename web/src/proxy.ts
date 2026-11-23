@@ -8,7 +8,8 @@ export function proxy(request: NextRequest) {
   if (process.env.NEXT_PUBLIC_MOCK === "1") return NextResponse.next();
 
   const { pathname } = request.nextUrl;
-  const token = request.cookies.get("artex_token")?.value;
+  // HttpOnly session cookie; the server names it __Host-artex_token over TLS.
+  const token = request.cookies.get("__Host-artex_token")?.value ?? request.cookies.get("artex_token")?.value;
   const isAuthPage = AUTH_PAGES.some((p) => pathname === p || pathname.startsWith(`${p}/`));
 
   // Not logged in → redirect to the login page

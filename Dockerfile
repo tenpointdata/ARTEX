@@ -284,6 +284,10 @@ RUN find / -xdev -perm /6000 -type f -exec chmod a-s {} +
 COPY skills/ /app/skills/
 # persistence points: data/ (traffic index, task files, transcripts) and keys/ (jwt.key, secret.key, via ARTEX_JWT_KEY_DIR)
 VOLUME ["/app/data", "/app/keys"]
+# The process binds :8787 inside the container; the host-side exposure is docker-compose's
+# ARTEX_BIND_ADDR (127.0.0.1 by default). This acknowledges the plain-HTTP bind the
+# server otherwise refuses on a non-loopback address.
+ENV ARTEX_ALLOW_INSECURE_BIND=1
 EXPOSE 8787 8788
 ENTRYPOINT ["/app/start.sh"]
 CMD ["-addr", ":8787", "-proxy", ":8788"]
