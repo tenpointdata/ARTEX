@@ -493,7 +493,8 @@ func (t *ToolSet) graphOverviewData() map[string]any {
 	for _, g := range goals {
 		var p map[string]any
 		_ = json.Unmarshal(g.Payload, &p)
-		gsum = append(gsum, map[string]any{"id": g.ID, "state": g.State, "text": p["text"]})
+		// origin lets renderOverviewSections frame agent-authored goals (finding 12).
+		gsum = append(gsum, map[string]any{"id": g.ID, "state": g.State, "text": p["text"], "origin": g.Origin})
 	}
 	out["goals"] = gsum
 	// hints: strategic hints attached to the graph by the human/main agent via
@@ -1898,7 +1899,7 @@ type hintItem struct {
 
 // addOneHint attaches a hint node (active) to the exploration graph, optionally
 // anchored to assets; returns the id. Its origin is t.worker, the agent that wrote
-// it: "human" for the main-agent chat, "orchestrator" for cross-task orchestration.
+// it: mainAgentOrigin for the main-agent chat, "orchestrator" for cross-task orchestration.
 func (t *ToolSet) addOneHint(it hintItem) (int64, error) {
 	if len(it.TrafficRefs) > 0 && !findingTrafficBindingEnabled() {
 		return 0, fmt.Errorf("automatic agent traffic binding is off; the hint carrying traffic_refs was not saved — enable it in system settings, or hand over text only")
@@ -1934,7 +1935,7 @@ type goalItem struct {
 // addOneGoal attaches a goal node (open) to the exploration graph: linked to the
 // task root (origin fact, rel spawns). origin comes from t.worker (default system):
 // the goals decomposer's writes record "goals", the main agent's runtime writes
-// record "human". Waking the planner is done once by setGoals after the whole batch
+// record mainAgentOrigin. Waking the planner is done once by setGoals after the whole batch
 // (see below); this only persists.
 func (t *ToolSet) addOneGoal(it goalItem) (int64, error) {
 	text := strings.TrimSpace(it.Text)
@@ -2041,7 +2042,7 @@ type constraintItem struct {
 
 // addOneConstraint persists one operation constraint into task_constraints. origin
 // comes from t.worker (default system): the decomposer writes "goals", the main
-// agent writes "human".
+// agent writes mainAgentOrigin.
 func (t *ToolSet) addOneConstraint(it constraintItem) (int64, error) {
 	text := strings.TrimSpace(it.Text)
 	if text == "" {

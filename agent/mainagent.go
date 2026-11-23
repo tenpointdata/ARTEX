@@ -117,7 +117,10 @@ func mainAgentSystem(goal, dataDir, workDir string) string {
 // worker/planner sessions — not just the final answer. hooks (the task's
 // target-only Guard) sees every tool call; may be nil.
 func (m *MainAgent) Chat(ctx context.Context, taskID int64, mainSeg int, as *db.AssetStore, ts *db.ExplorationStore, goal, message string, hooks harness.HookRunner, emit func(db.Activity), notify, resume func(), notifyGoal func([]string), notifyHint func(string, []string)) (string, error) {
-	tsx := NewToolSet(ts, "human")
+	// The main agent writes as itself, not as the operator: a page it fetched can
+	// steer its add_hint / set_goals calls, so the planner reads them as agent
+	// suggestions (untrusted_provenance.go).
+	tsx := NewToolSet(ts, mainAgentOrigin)
 	tsx.SetFindingRecorder(m.findingRecorder)
 	tsx.SetFactTraffic(m.factTraffic)
 	if as != nil {
@@ -127,8 +130,8 @@ func (m *MainAgent) Chat(ctx context.Context, taskID int64, mainSeg int, as *db.
 	tsx.SetCoverageEnabled(coverageOn(as, taskID))
 	tsx.SetNotify(notify)         // generic wake-up (write ops without a dedicated callback go through it, debounced)
 	tsx.SetResumeTask(resume)     // set_goals adds a goal → pull a completed/paused task back to running
-	tsx.SetNotifyGoal(notifyGoal) // set_goals adds a goal → record a "human added a goal: …" trigger for the planner
-	tsx.SetNotifyHint(notifyHint) // add_hint adds hints → record a "human added N strategic hints: …" trigger for the planner (origin "human")
+	tsx.SetNotifyGoal(notifyGoal) // set_goals adds a goal → record a "goal added" trigger for the planner (origin read back from the goal node)
+	tsx.SetNotifyHint(notifyHint) // add_hint adds hints → record a "main agent added N strategic hints: …" trigger for the planner (origin mainAgentOrigin)
 	tsx.steerWork = m.steerWork   // enable steer_work tool (nil = unavailable)
 	// domain tools + basic default toolset (Read/Write/Edit/MultiEdit/LS/Glob/Grep/Bash)
 	// when the asset coverage feature is off, drop add_task_scope/list_untested_assets (not in the prompt).
