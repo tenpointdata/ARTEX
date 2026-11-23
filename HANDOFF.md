@@ -169,6 +169,10 @@ Card ids in brackets:
   legitimately name 169.254.169.254; it is enforced at the dial level instead. Block rules keep substring
   matching, since matching more is the safe direction; only allow rules became strict. Security
   follow-ups are private board cards, not GitHub issues, because the repo is public.
+- **2026-11-23** — The capture proxy keeps verifying upstream TLS by default. Engagements against
+  self-signed targets set `ARTEX_CAPTURE_INSECURE_UPSTREAM=1` for that run only, until per-target trust
+  (card `c-8d54d5`) exists. Reason: the goproxy setting is global, so turning it on also leaves package
+  downloads through the proxy open to tampering.
 
 ## Deltas
 
