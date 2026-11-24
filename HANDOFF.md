@@ -395,6 +395,9 @@ Card ids in brackets:
   `compress: false` in the dev branch of `web/next.config.mjs` and the `: open` comment in `openSSE`, or
   streams buffer or stay unopened in the browser.
 
+- **Migration 0025 (c-29ff19 transcripts) lands last:** 0023 (E7, E2 finding links) and 0024 (E10) are on
+  open branches, and a database that applied 0025 refuses them. Land this branch after those, and drop a
+  local test database that ran it before re-testing other branches.
 - **Migration 0020 (RSI) vs other branches' 0015–0019:** the runner refuses a pending migration older
   than the newest applied one, so merge 0015–0019 (E2, E5, E1, c-ba9f64, c-5b5421) before this branch
   reaches a database, or renumber 0020 forward at merge. `db/migrate_test.go` lists 0020 explicitly.
