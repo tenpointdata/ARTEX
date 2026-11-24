@@ -108,20 +108,20 @@ Linux-root tests, the Docker egress iptables rules, the Postgres-backed tests an
 ## Triage (next handful)
 
 **Agents' lane**
-0. *(unclaimed)* — **E5: audit-chain head-lock contention** (M), card `c-ba9f64`. Done = archive concurrent
+1. *(unclaimed)* — **E5: audit-chain head-lock contention** (M), card `c-ba9f64`. Done = archive concurrent
    with gate decisions doesn't stall; verify still passes.
-0. *(unclaimed)* — **E5: bind client_read to a client** (M), card `c-5b5421`. Done = PG test: bound user
+2. *(unclaimed)* — **E5: bind client_read to a client** (M), card `c-5b5421`. Done = PG test: bound user
    sees only its company.
-0. *(unclaimed)* — **E5: web UI for users / authorization / chain** (M), card `c-869050`.
-1. *(unclaimed)* — **SEC: gorilla/websocket bump, GO-2026-6278** (XS), card `c-c10f2c`; needs network.
+3. *(unclaimed)* — **E5: web UI for users / authorization / chain** (M), card `c-869050`.
+4. *(unclaimed)* — **SEC: gorilla/websocket bump, GO-2026-6278** (XS), card `c-c10f2c`; needs network.
    Done = govulncheck clean.
-2. *(unclaimed)* — **SEC: upstream-gate residuals** (M), card `c-5a6f96`: task-scoped rules on proxy
+5. *(unclaimed)* — **SEC: upstream-gate residuals** (M), card `c-5a6f96`: task-scoped rules on proxy
    dials, go-mitmproxy keep-alive host pinning, and the global-egress-proxy bypass. Done = a test or a decision for each.
-3. *(unclaimed)* — **E1 Client-grade reporting & deliverables** (M). Turn `report/` into
+6. *(unclaimed)* — **E1 Client-grade reporting & deliverables** (M). Turn `report/` into
    CVSS/EPSS-scored, remediation-bearing, standards-mapped deliverables (OWASP ASVS/WSTG, MITRE
    ATT&CK). Done = a report export with per-finding CVSS vector + remediation + framework tags,
    covered by tests. Card `c-8f9cca`.
-4. *(unclaimed)* — **E4 Methodology-driven coverage** (M), card `c-c0bb07`. Extend the coverage ledger to score
+7. *(unclaimed)* — **E4 Methodology-driven coverage** (M), card `c-c0bb07`. Extend the coverage ledger to score
    coverage against a codified methodology checklist, not only asset touch. Done = planner can
    read a methodology and the coverage graph shows checklist completion.
 
