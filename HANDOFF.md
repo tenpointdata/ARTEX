@@ -59,26 +59,11 @@ See `docs/ARCHITECTURE.md` for the code-level map. Summary:
 
 ## Current state
 
-**2026-11-24 — E5 web UI (card `c-869050`, in review)** is on branch `ej/20261124-132958-94f4bf`, which
-merged `ej/20261124-110647-182fa9` (E5 PR #16 + client_read binding), so it carries E5 too.
-- **Session/roles:** `auth.session()` (`web/src/lib/auth.ts`) reads `role`/`permissions` from
-  `GET /api/auth/session`; `SessionProvider`/`useCan` (`web/src/hooks/use-session.tsx`) feed the UI. The
-  sidebar is filtered by permission (`navFor`, `need` on each item). A 403 shows `errorText`
-  (`web/src/lib/api-errors.ts`) and never logs out; only 401 does. The login form takes any username
-  (default `ARTEX`); a `client_read` session lands on Findings, other roles on Tasks.
-- **Pages:** `/system/users` (admin table: inline role/enabled, set password, delete, client company
-  bindings); task detail **Authorization** tab (status badge, version history table, admin-only new-version
-  form and revoke); Approval Records **Chain** tab (filters, paging, entry sheet, Verify with
-  `head_seq`/`head_hash`, `broken_at`, `rows_mismatched`). Client code: `web/src/lib/governance*.ts`.
-- **Verified** in headless Chromium against a real backend + Postgres 17: admin created a user, changed a
-  role, bound a client to a company, added and revoked an authorization, verified the chain; a reviewer saw
-  no Users/edit controls, got 403 on a forced revoke and stayed signed in, and saw "Broken at seq 6" after
-  a superuser edited an entry; a client landed on Findings with no refused calls.
-  `scripts/verify.sh --web-only` (now also runs the governance unit tests and the i18n check) and
-  `npm run build:static` pass. Go was not re-run on this branch (no Go change beyond the merge).
-- **Not done:** existing pages still show controls a reviewer/operator cannot use (`c-92bb52`); a client
-  bound to several companies cannot pick one, and the dashboard is hidden for clients (`c-7c4715`); the
-  chain pages oldest-first only (`c-601ec6`).
+**2026-11-24 — E5 web UI (`c-869050`, in review)** on `ej/20261124-132958-94f4bf` (carries E5 + client_read).
+`/system/users`, task **Authorization** tab, Approval Records **Chain** tab with Verify; sidebar filtered by
+`useCan` (`web/src/hooks/use-session.tsx`); 403 never logs out (`web/src/lib/api-errors.ts`); login takes any
+username. Browser-tested as admin, reviewer and client_read against a real backend. Open: `c-92bb52`,
+`c-7c4715`, `c-601ec6`.
 
 **2026-11-24 (c-d25ff9, E3)** — The `RSI.md` Loop C benchmark gate and Loop B lesson graduation are built,
 flag off (`ARTEX_RSI_LOOP`, default off, read per request). Pure core `rsi/` (search-space allowlist:
