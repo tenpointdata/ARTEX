@@ -65,6 +65,49 @@ with `ARTEX_RSI_LESSONS=off`. Verified on Docker Desktop arm64: `up --build` bri
 isolation self-test passes, egress filter installed, UI 200, `ARTEX_RSI_LESSONS=off` in the container.
 No benchmark run was made against it.
 
+**2026-11-24 — E5 engagement governance (card `c-669406`)** is on branch `ej/20261124-055929-bd2253`. It
+is tested against Postgres 17 on macOS; see `docs/GOVERNANCE.md`.
+- **Roles.** `admin`, `operator`, `reviewer` and `client_read` work over the existing JWT. The users
+  are in `artex_users` and managed at `/api/users`. The policy table is `server/rbac_policy.go`,
+  enforced in `requireAuth`. `ARTEX` stays the break-glass admin.
+- **Authorization artifact.** Each task can have a versioned, immutable artifact covering scope, time
+  window and technique classes (`/api/tasks/{id}/authorization`). It is enforced only inside the
+  existing target gate (`intercept/authorization.go`, called from `CheckTargets`/`run`,
+  `CheckUngated`/`ungated`, and the dial and redirect paths). A spawned child task inherits it.
+- **Audit chain.** `audit_chain` is hash-chained and written by row triggers on `intercept_pending`,
+  `artex_users` and `engagement_authorizations`. Logins and refusals by role are appended too.
+  `GET /api/intercept/history/chain` lists it and `/chain/verify` checks it.
+- **Migration numbering.** Migration **0016** holds the schema, because 0015 is taken by the E2
+  integrations branch. If E2 has not merged when this branch lands, renumber whichever merges second.
+  The loader fails closed on a pending version older than one already applied.
+- **Tests.** With `ARTEX_PG_DSN`, all of `go test ./...` passes except three tests:
+  - `TestGateOffTaskIsUnchanged`, which also fails on base `1abe24f` (card `c-3157b4`);
+  - `TestConnectWithoutPasswordRealPG`, because the local Postgres uses trust auth;
+  - the SOCKS5 UDP test, because macOS cannot bind 127.0.0.2.
+- **Head-lock contention fixed (card `c-ba9f64`).** Migration **0018** recreates the three audit row
+  triggers as `DEFERRABLE INITIALLY DEFERRED` constraint triggers, so `audit_chain_head` is locked
+  only at commit. A task archive no longer stalls gate decisions or logins, and the
+  write-then-lock deadlock is gone. 0018 rather than 0017 because the E1 branch
+  (`ej/20261124-083744-02fa3c`) takes 0017. Tests: `db/audit_chain_concurrency_test.go` (both
+  concurrency tests fail without 0018). This branch merged the E5 branch in, so it carries E5 too.
+- **Not done.** There is no web UI for E5 yet (card `c-869050`). The login page still assumes `ARTEX`.
+
+**2026-11-24 — client_read bound to companies (card `c-5b5421`, in review)** is on branch
+`ej/20261124-110647-182fa9`. That branch merged the E5 branch (PR #16) in, so it carries E5 too.
+- A `client_read` user sees only the companies in `artex_user_companies` (migration **0019**, audited at
+  commit). Admins set them with `GET/PUT /api/users/{id}/companies`. An unbound client gets 403.
+- `server/client_scope.go`: every route open to `client_read` has a binder that runs after the role
+  check. Findings routes go through the #425 company filter with `StrictCompany`, which ignores
+  agent-added `task_scope` rows. Tasks and ids outside the binding answer 404. A route without a binder
+  is refused, and `TestClientBindersCoverClientRoutes` enforces that. The test found
+  `findings/{id}/traffic` and its body route open to clients without a binder, so both are now bound.
+- A client's report counts only its own companies' assets, and its `/api/stats` drops the global
+  traffic and asset totals. `findings/retests/active` now needs `read`.
+- Tests: `server/client_scope_pg_test.go`, checked by mutation. `go test ./db ./server` with PG passes
+  except `TestConnectWithoutPasswordRealPG` (trust auth) and the SOCKS5 UDP test (macOS). verify.sh passes.
+- **Migration order:** 0016 (E5), 0018, 0019 (this branch), with E1 holding 0017. The loader refuses a
+  pending version older than an applied one, so renumber E1 above 0019 if it lands later.
+
 **2026-11-23** — Fixes for the High and Medium findings from the 2026-11-23 security audit are on
 `main` (PR #1, branch `ej/20261123-145205-6a3af6`); the Linux/Docker verification fixes come from
 `ej/20261123-152406-fccff3`. It covers audit findings #1–#16 except as listed under Open work.
@@ -163,19 +206,20 @@ the newer main (`-exec-uid-range`, #18).
 **Agents' lane**
 1. *(unclaimed)* — **SEC: per-task uid follow-ups** (S each): `c-12df03` (single-uid start-up fails on a
    socket; MCP uid not egress-filtered), `c-e70e5c` (release ended tasks at start-up; per-key lock). The "Done when" is on each card.
-2. *(unclaimed)* — **SEC: gorilla/websocket bump, GO-2026-6278** (XS), card `c-c10f2c`; needs network.
+2. *(unclaimed)* — **E5: web UI for users / authorization / chain / client bindings** (M), card `c-869050`.
+3. *(unclaimed)* — **SEC: gorilla/websocket bump, GO-2026-6278** (XS), card `c-c10f2c`; needs network.
    Done = govulncheck clean.
-3. *(unclaimed)* — **SEC: upstream-gate residuals** (M), card `c-5a6f96`: task-scoped rules on proxy
+4. *(unclaimed)* — **SEC: upstream-gate residuals** (M), card `c-5a6f96`: task-scoped rules on proxy
    dials, go-mitmproxy keep-alive host pinning, and the global-egress-proxy bypass. Done = a test or a decision for each.
-4. *(unclaimed)* — **SEC: logout revocation** (S), card `c-a0af33`. Done = a token replayed after
+5. *(unclaimed)* — **SEC: logout revocation** (S), card `c-a0af33`. Done = a token replayed after
    logout or a password change gets 401, by a test.
-5. *(unclaimed)* — **SEC: Docker Desktop named volumes** (S), card `c-775dc2`. Done = `docker compose up`
+6. *(unclaimed)* — **SEC: Docker Desktop named volumes** (S), card `c-775dc2`. Done = `docker compose up`
    starts on a Mac with the isolation self-test passing; Linux bind-mount path documented.
-6. *(unclaimed)* — **E1 Client-grade reporting & deliverables** (M). Turn `report/` into
+7. *(unclaimed)* — **E1 Client-grade reporting & deliverables** (M). Turn `report/` into
    CVSS/EPSS-scored, remediation-bearing, standards-mapped deliverables (OWASP ASVS/WSTG, MITRE
    ATT&CK). Done = a report export with per-finding CVSS vector + remediation + framework tags,
    covered by tests. Card `c-8f9cca`.
-7. *(unclaimed)* — **E4 Methodology-driven coverage** (M), card `c-c0bb07`. Extend the coverage ledger to score
+8. *(unclaimed)* — **E4 Methodology-driven coverage** (M), card `c-c0bb07`. Extend the coverage ledger to score
    coverage against a codified methodology checklist, not only asset touch. Done = planner can
    read a methodology and the coverage graph shows checklist completion.
 
@@ -186,6 +230,10 @@ the newer main (`-exec-uid-range`, #18).
   artifact should be for your use.
 - **SEC: live Playwright scope-relay check** (S), card `c-517c2d`: a real task with capture on and the
   seeded Playwright MCP. Done = the browser's dials show the task scope and an out-of-scope host is refused.
+- E5 shipped a lightweight artifact (reference, signatory, scope, window, technique classes). Decide
+  whether tasks with an artifact must have the target gate forced on (card `c-f4115c` item 2), and
+  whether the extra admin-only routes in `server/rbac_policy.go` (tools, MCP, agents, LLM config,
+  notify) suit how operators work.
 
 **Blocked**
 - Nothing blocked.
@@ -222,7 +270,9 @@ Card ids in brackets:
 - **E2** [`c-6def05`] Finding/ticketing integrations out (Jira, GitHub issues, DefectDojo) and more ingest in (Nuclei, Nmap, ZAP/Burp, Semgrep).
 - **E3** [`c-d25ff9`] Loop-B lesson library graduation + Loop-C benchmark gate per the `RSI.md` contract (owner-approval, immutable surfaces).
 - **E4** [`c-c0bb07`] Methodology-driven coverage (OWASP WSTG / API Top 10 as structured checklists).
-- **E5** [`c-669406`] Engagement lifecycle & governance: RBAC, per-engagement authorization artifact, scope expiry, tamper-evident (hash-chained) audit log.
+- **E5** [`c-669406`] Engagement governance. The backend is done on `ej/20261124-055929-bd2253`. Follow-ups:
+  `c-5b5421` (client binding), `c-869050` (UI), `c-f4115c` (lifecycle gaps).
+- **TEST** [`c-3157b4`] `TestGateOffTaskIsUnchanged` fails on main with Postgres (also fails before E5).
 - **E6** [`c-cb0093`] Cost/observability dashboard + OpenTelemetry export, building on existing context telemetry.
 - **E7** [`c-d60149`] Distributed/remote workers (queue-backed intents) for larger engagements; Helm chart.
 - **E8** [`c-5487e8`] Planner/worker evaluation suite (regression targets, prompt-version A/B via the benchmark gate).
@@ -265,6 +315,10 @@ Card ids in brackets:
   untrusted-output boundary, audit trail — never weaken/bypass/route around them. `RSI.md`
   "immutable surfaces" must never enter an automated search space.
 - **Migrations fix forward** — a published `db/migrations/*.sql` is never edited.
+- **Audit chain is append-only:** `UPDATE`, `DELETE` and `TRUNCATE` on `audit_chain` fail, and artifact
+  rows reject `UPDATE`. A test database that gets polluted has to be recreated, not cleaned. Verify only
+  catches a full consistent rewrite by a DB superuser if `head_hash` is compared with a copy kept
+  outside the database.
 - **Embedded UI** requires `-tags embedui`; a plain `go build` omits the web assets.
 - **Root tests on Linux:** run them as root in a container, e.g. `docker run --rm --cap-add NET_ADMIN
   -v "$PWD":/src -w /src -e ARTEX_PG_DSN=postgres://… golang:1.26.11-bookworm go test ./...`. Without
@@ -347,6 +401,26 @@ Card ids in brackets:
   URL. UI tool discovery (no run) keeps the stored URL, global rules: it lists tools and browses
   nothing. This branch merges PR #13's branch (`ej/20261124-075745-5a4987`), which this work needs.
 
+- **2026-11-24** — E5: the engagement is the task. The artifact is enforced only by the existing target
+  gate, so there is one enforcement path, and refusals are decided intercept rows. Names are never
+  resolved for the scope match, so a name must be listed by name; this fails closed. The technique
+  classifier is a declared check driven by a data table, not a sandbox; unclassified calls are not
+  limited. The audit chain is fed by DB row triggers (atomic with every writer, present and future),
+  and the hashed payload is stored as text so the bytes are hashed exactly. Users' roles are read from
+  the DB on every request, not from the token, so revocation is immediate.
+
+- **2026-11-24** — Audit head-lock contention (`c-ba9f64`): fixed with deferred constraint triggers
+  (migration 0018) rather than reordering the archive's deletes (which fixes one caller only) or an
+  unchained staging table plus a sequencer (which leaves a window where committed writes are not yet
+  chained, and adds a worker). Entries stay atomic with their writes; the head becomes the last lock a
+  transaction takes. Accepted costs: chain order is commit order, and the actor is `artex.actor` at commit.
+
+- **2026-11-24** — Client binding (`c-5b5421`): enforced in one middleware step with a declarative
+  per-route binder table that fails closed, rather than in scattered handler checks, so a new client
+  route cannot leak by omission. Findings reuse the #425 company filter. Task ownership counts only
+  operator-made company scope rows, because agent output is untrusted. A multi-company task is fully
+  visible to each bound client (accepted). Bindings apply to `client_read` only.
+
 ## Deltas
 
 <!-- composite:deltas · newest first; Composite rewrites this block on every merge (ej handoff merge / merge_handoff) -->
@@ -369,6 +443,7 @@ Card ids in brackets:
 - **2026-11-24 06:17 MST** · claude-code · `h-537f2b` — c-8d54d5 done: the capture proxy verifies upstream TLS per host. **Next:** Run `ARTEX_PG_DSN=… go test ./db -run ActiveTaskScopeRulesPG`.
 - **2026-11-24 05:18 MST** · claude-code · `h-5a3839` — c-5a6f96 is done; follow-up cards c-eb32cc and c-9b48b7 are open. **Next:** c-eb32cc: scope the chat and conversation agents, the custom HTTP tools and the transparent listener.
 - **2026-11-23 21:08 MST** · claude-code · `h-43cc9e` — c-775dc2: docker-compose.yml and docker-compose.ghcr.yml now keep /app/data, /app/keys and /app/skills in named volumes, so the stock `docker compose up` starts on Docker Desktop with the isolation self-test passing. **Next:** c-965b0e: Docker's `restart: unless-stopped` still restarts the container after an exit 78.
+- **2026-11-23 21:07 MST** · claude-code · `h-ee4b2b` — c-a0af33: logout now revokes the session server-side. **Next:** Re-run `ARTEX_PG_DSN=… go test ./server` once Docker is healthy. **Issues:** opened #c-8dea4d.
 <!-- /composite:deltas -->
 
 _(written by `merge_handoff`)_

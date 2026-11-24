@@ -1087,6 +1087,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/intercept/judge", s.interceptGetJudgeConfig)
 	mux.HandleFunc("PUT /api/intercept/judge", s.interceptSetJudgeConfig)
 	mux.HandleFunc("GET /api/intercept/judge/usage", s.interceptJudgeUsage) // cumulative token usage of fallback approval
+	s.registerGovernanceRoutes(mux)
+	s.registerRBACRoutes(mux)
 
 	// /api/* goes through CORS + JWT; everything else is served by the embedded
 	// frontend (public — auth is enforced client-side and on the API). With the
@@ -1129,12 +1131,15 @@ func (s *Server) stats(w http.ResponseWriter, r *http.Request) {
 	out := map[string]any{}
 	out["engine_mode"] = "idle"              // spec enum; overridden below when a task is active
 	out["llm_configured"] = s.engine.Ready() // is an LLM provider installed at all
-	if tr := s.m.Traffic(); tr != nil {
+	_, client := clientScopeFrom(r.Context())
+	// Traffic and asset totals span every client; a client account gets only
+	// its task's fields below (its binder already admitted ?task).
+	if tr := s.m.Traffic(); tr != nil && !client {
 		c, _ := tr.Count()
 		out["traffic"] = c
 		out["traffic_enabled"] = true
 	}
-	if counts, err := s.m.Assets().CountsByType(); err == nil {
+	if counts, err := s.m.Assets().CountsByType(); err == nil && !client {
 		total := 0
 		for _, n := range counts {
 			total += n
@@ -2302,7 +2307,7 @@ func (s *Server) findings(w http.ResponseWriter, r *http.Request) {
 		// same compat policy as the intents endpoint). Filtering/sorting is pushed down to SQL uniformly, and the bare
 		// array honours the filters too: the dashboard narrows by the active company through asset_scope.
 		if q.Get("page") == "" && q.Get("limit") == "" {
-			fs, _ := s.m.pg.ListFindingsFiltered(findingFilterFromQuery(q), 500)
+			fs, _ := s.m.pg.ListFindingsFiltered(clientFindingFilter(r, findingFilterFromQuery(q)), 500)
 			assets := s.resolveFindingAssets(fs)
 			out := make([]FindingDTO, 0, len(fs))
 			for _, f := range fs {
@@ -2313,7 +2318,7 @@ func (s *Server) findings(w http.ResponseWriter, r *http.Request) {
 		}
 		page := findingPaginationParam(q.Get("page"), 1, 0)
 		limit := findingPaginationParam(q.Get("limit"), 20, 200)
-		fs, total, err := s.m.pg.ListFindingsPage(findingFilterFromQuery(q), page, limit)
+		fs, total, err := s.m.pg.ListFindingsPage(clientFindingFilter(r, findingFilterFromQuery(q)), page, limit)
 		if err != nil {
 			writeErr(w, 500, err.Error())
 			return
@@ -2431,7 +2436,7 @@ func (s *Server) resolveAssetIDs(ids []int64) map[int64]*db.Asset {
 // for the paginated Findings page.
 func (s *Server) findingStats(w http.ResponseWriter, r *http.Request) {
 	// company narrows the cards to the sidebar's company, with the list's rule.
-	st, err := s.m.pg.FindingStatsForCompany(r.URL.Query().Get("company"))
+	st, err := s.m.pg.FindingStatsFor(clientFindingFilter(r, db.FindingFilter{Company: r.URL.Query().Get("company")}))
 	if err != nil {
 		writeErr(w, 500, err.Error())
 		return
@@ -2508,9 +2513,10 @@ func (s *Server) findingsExport(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	case "all":
-		// empty filter = no conditions added.
+		// empty filter = no conditions added (a client account: its company).
+		filter = clientFindingFilter(r, db.FindingFilter{})
 	case "filtered", "":
-		filter = findingFilterFromQuery(q)
+		filter = clientFindingFilter(r, findingFilterFromQuery(q))
 	default:
 		writeErr(w, 400, "bad scope: "+scope)
 		return
@@ -4544,11 +4550,17 @@ func (s *Server) getReport(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	findings, _ := t.Store.ListByKind(db.KindFinding, 1000) // pure vulnerabilities (facts are a separate KindFact and never enter the report)
+	assetTypes := []string{"root_domain", "ip", "subdomain", "app", "service", "endpoint"}
 	counts := map[string]int{}
-	for _, ty := range []string{"root_domain", "ip", "subdomain", "app", "service", "endpoint"} {
-		ns, _ := s.m.Assets().QueryByType(ty, 100000, 0)
-		if len(ns) > 0 {
-			counts[ty] = len(ns)
+	if sc, ok := clientScopeFrom(r.Context()); ok {
+		// A client sees its own companies' assets, not the whole inventory.
+		counts = s.clientAssetCounts(sc.TaskCompanies, assetTypes)
+	} else {
+		for _, ty := range assetTypes {
+			ns, _ := s.m.Assets().QueryByType(ty, 100000, 0)
+			if len(ns) > 0 {
+				counts[ty] = len(ns)
+			}
 		}
 	}
 	taskID, _ := strconv.ParseInt(t.ID, 10, 64)
