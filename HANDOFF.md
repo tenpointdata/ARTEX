@@ -70,11 +70,17 @@ the archive round-trip, `TestCreateTaskMethodologies` (server), the full `go tes
 known macOS 127.0.0.2 SOCKS5 test fails), web `tsc` and i18n. Not checked: the form in a browser.
 Gaps carded as `c-aed5fd`: no "none" choice, and the choice is fixed at creation.
 
-**2026-11-24 — E5 web UI (`c-869050`, in review)** on `ej/20261124-132958-94f4bf` (carries E5 + client_read).
-`/system/users`, task **Authorization** tab, Approval Records **Chain** tab with Verify; sidebar filtered by
-`useCan` (`web/src/hooks/use-session.tsx`); 403 never logs out (`web/src/lib/api-errors.ts`); login takes any
-username. Browser-tested as admin, reviewer and client_read against a real backend. Open: `c-92bb52`,
-`c-7c4715`, `c-601ec6`.
+**2026-11-24 — E5 web UI (`c-869050`, then `c-92bb52`)** — `/system/users`, task **Authorization** tab,
+Approval Records **Chain** tab; sidebar filtered by `useCan` (`web/src/hooks/use-session.tsx`); a 403 never
+logs out (`errorText`, `web/src/lib/api-errors.ts`). **c-92bb52:** every existing page hides or disables the
+mutating controls the role lacks, per `server/rbac_policy.go`: admin for guardrail and platform config,
+operate for task, chat, traffic, assets, workspace and skills actions (and for operate-only reads such as
+credentials, raw exchanges, workspace files and LLM records), review for approval decisions and finding
+triage. Allow/Deny is one gated `components/approval-decision-buttons.tsx`, and `rich()` is
+`web/src/lib/rich-text.tsx`. Every touched file over 600 lines shrank by extraction. Browser-probed
+(headless Chromium, real backend + Postgres 16) as reviewer and operator on 23 pages: no 403 on load, and
+no enabled mutating control the role lacks. Rows that were not seeded (MCP servers, channels, LLM
+profiles, pending approvals, traffic, files, skills) were checked in code only. Open: `c-7c4715`, `c-601ec6`.
 
 **2026-11-24 (c-d25ff9, E3)** — The `RSI.md` Loop C benchmark gate and Loop B lesson graduation are built,
 flag off (`ARTEX_RSI_LOOP`, default off, read per request). Pure core `rsi/` (search-space allowlist:
@@ -125,20 +131,11 @@ is tested against Postgres 17 on macOS; see `docs/GOVERNANCE.md`.
 - **Audit chain.** `audit_chain` is hash-chained and written by row triggers on `intercept_pending`,
   `artex_users` and `engagement_authorizations`. Logins and refusals by role are appended too.
   `GET /api/intercept/history/chain` lists it and `/chain/verify` checks it.
-- **Migration numbering.** Migration **0016** holds the schema, because 0015 is taken by the E2
-  integrations branch. If E2 has not merged when this branch lands, renumber whichever merges second.
-  The loader fails closed on a pending version older than one already applied.
-- **Tests.** With `ARTEX_PG_DSN`, all of `go test ./...` passes except three tests:
-  - `TestGateOffTaskIsUnchanged`, which also fails on base `1abe24f` (card `c-3157b4`);
-  - `TestConnectWithoutPasswordRealPG`, because the local Postgres uses trust auth;
-  - the SOCKS5 UDP test, because macOS cannot bind 127.0.0.2.
-- **Head-lock contention fixed (card `c-ba9f64`).** Migration **0018** recreates the three audit row
-  triggers as `DEFERRABLE INITIALLY DEFERRED` constraint triggers, so `audit_chain_head` is locked
-  only at commit. A task archive no longer stalls gate decisions or logins, and the
-  write-then-lock deadlock is gone. 0018 rather than 0017 because the E1 branch
-  (`ej/20261124-083744-02fa3c`) takes 0017. Tests: `db/audit_chain_concurrency_test.go` (both
-  concurrency tests fail without 0018). This branch merged the E5 branch in, so it carries E5 too.
-- **Web UI:** see the c-869050 entry above.
+- **Migration 0016** holds the schema; the loader fails closed on a pending version older than an applied one.
+- **Tests.** With `ARTEX_PG_DSN`, `go test ./...` passes except `TestGateOffTaskIsUnchanged` (`c-3157b4`,
+  fails on base too), `TestConnectWithoutPasswordRealPG` (trust auth) and the macOS SOCKS5 UDP test.
+- **Head-lock contention fixed (`c-ba9f64`).** Migration **0018** makes the audit row triggers deferred
+  constraint triggers, so `audit_chain_head` is locked only at commit (`db/audit_chain_concurrency_test.go`).
 
 **2026-11-24 — client_read bound to companies (card `c-5b5421`, in review)** is on branch
 `ej/20261124-110647-182fa9`. That branch merged the E5 branch (PR #16) in, so it carries E5 too.
@@ -167,10 +164,8 @@ Verified 2026-11-23 (card `c-dadc14`, done):
   broken on main), and `TestGateOffTaskIsUnchanged` still expected zero lookups with the gate off.
 - Docker egress: through the real `docker-compose.yml` (NET_ADMIN) on a slim image of the same
   runtime base, `[artex] egress: installed` is logged, `-m owner`/`-m addrtype` load on bookworm's
-  nf_tables iptables 1.8.9, and the executor is refused for 169.254.169.254, 100.100.100.200, the
-  gateway, host.docker.internal (root reaches the host service) and :8787 on every local address,
-  while a LAN router, another container and the internet stay reachable. The full image gives the
-  same results (2026-11-24, `c-a6891b`, below).
+  nf_tables iptables 1.8.9, and the executor is refused for metadata, the gateway, host.docker.internal
+  and :8787 while LAN, other containers and the internet stay reachable (full image too, `c-a6891b`).
 - Web: `npm ci` and `npx tsc --noEmit` clean. `npm run lint` fails with 84 errors, all already on main
   and none in the changed files (`c-834a5a`). Headless Chromium: setup, login, Sign out over the
   HttpOnly SameSite=Strict cookie work and `document.cookie` is empty, **but a token copied before
@@ -193,26 +188,14 @@ Operator-facing changes:
   Since 2026-11-23 (branch `ej/20261123-152404-f61d73`, card `c-485de0`) this includes the capture
   proxy's own upstream dials: go-mitmproxy's upstream is a loopback gate (`traffic/upstream_gate.go`)
   that dials with `Interceptor.DialSOCKS5`.
-- **2026-11-24** (card `c-5a6f96`, commit `75184c3`): task agents' proxy URLs now carry a task scope token,
-  so capture-proxy upstream dials (and SOCKS5 with the token as password) also apply that task's
-  block rules and, with its gate on, its pins/approvals; an ended task's token is refused.
-  **2026-11-24** (card `c-eb32cc`, commit `ac7c35e`, branch `ej/20261124-075745-5a4987`, which also
-  carries the not-yet-merged `c-5a6f96` branch): chat/conversation agents and `use_recording_proxy`
-  HTTP tools now get their run's scoped URL (`Manager.ScopedProxyAddr`, `server/proxy_scope.go`);
-  conversations have their own token, forgotten on delete; an unloaded task's call gets a refused
-  URL. The transparent listener is global-only by decision. **2026-11-24** (card `c-15b39d`, branch
-  `ej/20261124-110649-dbd854`, stacked on PR #13's branch): stdio MCP servers, the Playwright browser
-  included, are spawned per run with their capture-proxy `--proxy-server`/proxy env rewritten to a
-  per-run loopback **scope relay** (`traffic/scope_relay.go`, `Manager.scopeMCPProxy`), so browser
-  dials carry the run's scope; listing tools from the UI (no run) still uses the global rules. **2026-11-24**
-  (card `c-a1c0fc`, branch `ej/20261124-114610-cae888`, which carries c-15b39d): a relay serves at most 256
-  connections at once; a prepareMCP closer is released at once when its MCP fails to start; tests cover
-  the hook (PG), two concurrent scopes, the keep-alive host change, wss, an in-flight request across the
-  relay's close (tombstone), the cap, and a real headless Chrome (opt-in `ARTEX_TEST_CHROME`). This is on
-  main (landed with #22). Re-verified 2026-11-24 12:30: the PG hook test ran against a throwaway Postgres
-  (not skipped) and passed, the Chrome test passed, relay tests pass with -race. A full live task is `c-517c2d`. Operators' own clients keep the global rules. go-mitmproxy's keep-alive host pinning is worked around
-  (`unpinHostChange`; upstream report `c-9b48b7`). The global-egress-proxy bypass is accepted and
-  documented (`docs/OPS.md` §6). `scripts/verify.sh` passes.
+- **Task-scoped capture-proxy dials** (`c-5a6f96`, `c-eb32cc`, `c-15b39d`, `c-a1c0fc`, all on main): task
+  and chat agents' proxy URLs (and SOCKS5 passwords) carry a scope token, so upstream dials apply that
+  run's block rules and, with its gate on, its pins/approvals; an ended run's token is refused
+  (`Manager.ScopedProxyAddr`, `server/proxy_scope.go`). Stdio MCP servers, Playwright included, get a
+  per-run loopback scope relay (`traffic/scope_relay.go`, at most 256 connections). Listing MCP tools
+  from the UI and operators' own clients keep the global rules; the transparent listener is global-only.
+  Keep-alive host pinning is worked around (`unpinHostChange`; upstream `c-9b48b7`); the
+  global-egress-proxy bypass is accepted (`docs/OPS.md` §6). A full live task is `c-517c2d`.
   Block rules apply even with the gate off. Fuzzy allow rules match on name and address boundaries.
 - Main-agent writes carry origin `mainagent` and are framed as agent-authored. Norma compaction
   summaries are framed as untrusted data.
@@ -228,12 +211,8 @@ Operator-facing changes:
   Verified: Linux-root tests (`server/execuid_root_linux_test.go`, where task A gets EACCES on
   `tasks/B/i1` and `.artex-home`), the full server and agent suites as root in `golang:1.26.11-bookworm`,
   and egress rules with iptables in a NET_ADMIN container.
-  Spill dirs follow the key too (card `c-dd160a`, `server/execuid_spill_unix.go`). A live key's
-  `<data>/spill/{tasks,sessions}/<id>` is `root:<uid>` 0750 with files `root:<uid>` 0640, so the
-  shared exec gid no longer reads another task's spills. It is regrouped on acquire, closed to
-  `root:root` 0700 at the start of release, and closed at start-up when the key holds no uid. Verified
-  by `TestExecUIDRangeSpillIsolationAsRoot`, where task A's shell and file tool get EACCES on B's spill,
-  plus the full server suite as root in Docker.
+  Spill dirs follow the key too (`c-dd160a`, `server/execuid_spill_unix.go`): a live key's spills are
+  `root:<uid>` 0750/0640 and closed to `root:root` 0700 on release (`TestExecUIDRangeSpillIsolationAsRoot`).
   Root tests in Docker: build the test binary into a 0755 dir (`go test -c -o /t/server.test`). The
   default 0700 go-build dir makes the isolation self-tests fail on `main` too.
 
@@ -266,9 +245,8 @@ body, through the versioned prompt API, and the starting bodies are restored aft
 **Agents' lane**
 1. *(unclaimed)* — **SEC: per-task uid follow-ups** (S each): `c-12df03` (single-uid start-up fails on a
    socket; MCP uid not egress-filtered), `c-e70e5c` (release ended tasks at start-up; per-key lock). The "Done when" is on each card.
-2. *(unclaimed)* — **E5 UI: hide role-lacking actions on existing pages** (M), card `c-92bb52`. Done = as
-   reviewer and operator, no visible control answers 403. Then `c-7c4715` (client_read console: my-companies
-   endpoint and switcher, M) and `c-601ec6` (chain newest-first paging, S).
+2. *(unclaimed)* — **E5 UI: client_read console** (M), card `c-7c4715`: my-companies endpoint and switcher,
+   client dashboard. Then `c-601ec6` (chain newest-first paging, S).
 3. *(unclaimed)* — **SEC: gorilla/websocket bump, GO-2026-6278** (XS), card `c-c10f2c`; needs network.
    Done = govulncheck clean.
 4. *(unclaimed)* — **SEC: upstream-gate residuals** (M), card `c-5a6f96`: task-scoped rules on proxy
