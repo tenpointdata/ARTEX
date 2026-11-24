@@ -122,24 +122,15 @@ func TestActivityStreamAcceptsConsoleCookieSessions(t *testing.T) {
 			if resp.StatusCode != 200 || !strings.HasPrefix(resp.Header.Get("Content-Type"), "text/event-stream") {
 				t.Fatalf("stream: %d %q", resp.StatusCode, resp.Header.Get("Content-Type"))
 			}
-			// The handler may still be subscribing when the headers arrive; publish
-			// until the frame shows up so no event is sent before the subscription.
-			want := int64(1000 + i)
-			stop := make(chan struct{})
-			defer close(stop)
-			go func() {
-				tick := time.NewTicker(50 * time.Millisecond)
-				defer tick.Stop()
-				for {
-					select {
-					case <-stop:
-						return
-					case <-tick.C:
-						s.engine.Broadcaster().Publish(task.ID, db.Activity{ID: want, Kind: "note", Summary: "hello"})
-					}
-				}
-			}()
+			// The stream opens with a comment before any event (proxies that wait
+			// for a first body byte pass the headers on at once); the handler has
+			// subscribed by then, so an event published now reaches this client.
 			sc := bufio.NewScanner(resp.Body)
+			if !sc.Scan() || sc.Text() != ": open" {
+				t.Fatalf("first line %q, want the open comment (%v)", sc.Text(), sc.Err())
+			}
+			want := int64(1000 + i)
+			s.engine.Broadcaster().Publish(task.ID, db.Activity{ID: want, Kind: "note", Summary: "hello"})
 			for sc.Scan() {
 				if sc.Text() == fmt.Sprintf("id: %d", want) {
 					return
