@@ -107,6 +107,13 @@ revocation through the API pauses at once. Such a task can't be resumed through 
 an admin stores a version that has not ended. A window that has not started yet does not pause: the
 gate refuses calls until it starts.
 
+**What the console sees.** `GET /api/tasks` and `GET`/`PATCH /api/tasks/{id}` carry
+`authorization: {version, revoked, ended}` for a task that has an artifact (absent otherwise; the list
+reads every task's in one query, `db.AuthorizationSummaries`). The console uses it to lock the
+task's Target gate switch on and to replace Resume on a paused task whose version ended with the
+reason and a link to the Authorization tab, so neither 409 is reached by a click. The server checks
+are unchanged and remain the authority.
+
 **Caching.** The gate reads the artifact through a per-task cache (`db.CachedAuthorization`, 2 s).
 `AddAuthorization` invalidates it after commit, so a version stored through the API applies to the next
 call; a row changed outside this process is seen within 2 s.
