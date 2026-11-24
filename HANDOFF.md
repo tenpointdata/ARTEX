@@ -59,6 +59,17 @@ See `docs/ARCHITECTURE.md` for the code-level map. Summary:
 
 ## Current state
 
+**2026-11-24 (c-cb0093, E6)** — Cost & observability: **Function → Cost & efficiency** page
+(`web/src/app/(main)/function/cost/`) and `GET /api/llm/cost?by=task|profile|worker|model&days=N`
+(`server/llm_cost.go`, `db/llm_cost.go`) show spend (EUR from profile prices, priced per profile), tokens,
+cache hit rate, output/input ratio, EUR per 1M tokens, LLM time, wall time, average latency and errors as a
+sortable table. A new dependency-free `otlp/` package (OTLP/HTTP JSON) exports per-LLM-call metrics
+(`artex.llm.calls`, `artex.llm.tokens`, `gen_ai.client.*`) and spans (one trace per task) when
+`OTEL_EXPORTER_OTLP_ENDPOINT` is set (`cmd/artex/telemetry.go`, `llmrec/observer.go`); see
+`docs/cost-and-telemetry.md`. Verified: DB tests against Postgres 16, exporter tests, web type-check/tests/static
+build, and a live `otel/opentelemetry-collector` 0.165.0 that decoded 4 metrics / 7 points / 1 span with no
+errors. Not verified: the page in a browser against real LLM traffic (card `c-4c8fd6`).
+
 **2026-11-24 (c-75c593)** — The benchmark subject instance (`docker-compose.bench.yml`) now builds from a
 clean clone: production `Dockerfile`, a sibling Postgres, named volumes, committed `bench/.env.example`
 with `ARTEX_RSI_LESSONS=off`. Verified on Docker Desktop arm64: `up --build` brings both containers up,
@@ -189,7 +200,8 @@ the newer main (`-exec-uid-range`, #18).
   seeded Playwright MCP. Done = the browser's dials show the task scope and an out-of-scope host is refused.
 
 **Blocked**
-- Nothing blocked.
+- **E6: admin gate on `/api/llm/cost`** (S), card `c-9ca57a`; waits for client_read (c-5b5421) to merge.
+  Done = client_read users get 403 or only their companies' rows, by a test.
 
 ## Set up / run / test / deploy
 
@@ -224,7 +236,8 @@ Card ids in brackets:
 - **E3** [`c-d25ff9`] Loop-B lesson library graduation + Loop-C benchmark gate per the `RSI.md` contract (owner-approval, immutable surfaces).
 - **E4** [`c-c0bb07`] Methodology-driven coverage (OWASP WSTG / API Top 10 as structured checklists).
 - **E5** [`c-669406`] Engagement lifecycle & governance: RBAC, per-engagement authorization artifact, scope expiry, tamper-evident (hash-chained) audit log.
-- **E6** [`c-cb0093`] Cost/observability dashboard + OpenTelemetry export, building on existing context telemetry.
+- **E6 follow-ups** (E6 itself landed 2026-11-24, `c-cb0093`): admin/company gate on `/api/llm/cost` once client_read lands [`c-9ca57a`];
+  live browser + collector check [`c-4c8fd6`]; archived tasks in the cost view + cost-metrics web test [`c-f4a69d`].
 - **E7** [`c-d60149`] Distributed/remote workers (queue-backed intents) for larger engagements; Helm chart.
 - **E8** [`c-5487e8`] Planner/worker evaluation suite (regression targets, prompt-version A/B via the benchmark gate).
 - **E9** [`c-73af97`] Frontend/UX pass (tables over cards, fewer-clicks triage workflow, live engagement dashboard).
@@ -277,6 +290,12 @@ Card ids in brackets:
   `ARTEX_SECRET_KEY`) loses stored secrets.
 
 ## Decisions
+
+- **2026-11-24** — E6 (c-cb0093): OpenTelemetry export is a small in-repo OTLP/HTTP-JSON exporter (`otlp/`)
+  instead of the OpenTelemetry Go SDK: three signals' worth of need (counters, histograms, spans) did not
+  justify a large dependency tree in a security tool, and the wire format is stable. It was checked against a
+  real collector. gRPC/protobuf is refused with a log line. Task ids go on spans only (bounded metric cardinality).
+  Cost is computed in ARTEX, not exported, because prices live here. Spans follow the GenAI semantic conventions.
 
 - **2026-11-24** — c-75c593: the bench subject instance builds from the production `Dockerfile` instead
   of a separate `Dockerfile.bench`, so the benchmark measures the shipped image and there is one image

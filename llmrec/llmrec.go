@@ -346,6 +346,11 @@ func (r *Recorder) recordUsage(ctx context.Context, taskID string, expID int64, 
 	if sink, _ := ctx.Value(usageSinkContextKey{}).(func(llm.Usage)); sink != nil {
 		sink(usage)
 	}
+	latency := time.Duration(latencyMs) * time.Millisecond
+	notifyObserver(CallEvent{
+		TaskID: taskID, Worker: worker, Model: r.model, Profile: r.prof, Status: status,
+		Start: time.Now().Add(-latency), Latency: latency, Usage: usage,
+	})
 	if r.pg == nil {
 		return
 	}

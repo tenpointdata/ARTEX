@@ -869,6 +869,32 @@ export interface ModelTokenStat {
   cache_write_tokens: number;
 }
 
+// Grouping dimension and one aggregated row of GET /api/llm/cost (LLM spend and efficiency).
+export type CostGroupBy = "task" | "profile" | "worker" | "model";
+
+export interface CostRow {
+  key: string; // task id, profile name, worker lane or model ("" = unlabelled)
+  label: string; // display name (task name for by=task, else same as key)
+  calls: number;
+  tasks: number;
+  errors: number; // calls whose status != 'ok'
+  input_tokens: number; // includes cache_read and cache_write
+  output_tokens: number;
+  cache_read_tokens: number;
+  cache_write_tokens: number;
+  latency_ms: number; // summed LLM call latency
+  first_ts: string; // RFC3339
+  last_ts: string; // RFC3339
+  cost_eur: number | null; // null when nothing in the group is priced
+  unpriced_calls: number; // calls from profiles with no price set
+}
+
+export interface CostResponse {
+  by: CostGroupBy;
+  days: number; // 0 = all time
+  rows: CostRow[];
+}
+
 export interface Session {
   id: string;
   role: SessionRole;
