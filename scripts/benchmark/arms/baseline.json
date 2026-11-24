@@ -1,0 +1,15 @@
+{
+  "name": "baseline",
+  "proposed_from": [],
+  "prompts": {
+    "goals": {
+      "source": "current"
+    },
+    "planner": {
+      "source": "current"
+    },
+    "worker": {
+      "source": "current"
+    }
+  }
+}

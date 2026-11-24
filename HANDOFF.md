@@ -84,6 +84,18 @@ Linux-root tests, the Docker egress iptables rules, the Postgres-backed tests an
 - Per-run executor HOME; MCP servers run as uid 10002 (`ARTEX_EXEC_MCP_UID`). The workspace file
   manager uses `os.Root`.
 
+**2026-11-24: E8 evaluation suite** (card `c-5487e8`) is in `scripts/benchmark`. `eval_suite.py run` runs a
+baseline and a candidate prompt arm over a held-out suite. Both arms share one stamp: model chain, schedule
+seed, per-task budget, judge, and content-hashed ground truth. Runs go one at a time and the arms alternate in
+an order drawn from the seed. The output is per-gate passes/n for `detected`, `component`, `class`, `keywords`,
+`proof` and `flag_captured`, with Wilson and Newcombe intervals, a paired gained/lost table and cost per arm.
+`compare` refuses two results whose stamps differ. Arms change only the editable `goals`/`planner`/`worker`
+body, through the versioned prompt API, and the starting bodies are restored afterwards. Suites:
+`suites/heldout-v1.json` (Juice Shop v20.4.0, DVGA 2.2.0, DrostBench 005…095) and a disjoint
+`suites/dev-v1.json`. New ground truth: `ground_truth/dvga.json`. `run_bench.py` now exposes
+`build_parser`/`prepare`/`run` and stamps `/api/tasks/{id}/outcome`. Unit-tested (15 new tests,
+`scripts/verify.sh` passes); never yet run live (card `c-f1518c`).
+
 ## Triage (next handful)
 
 **Agents' lane**
@@ -99,7 +111,13 @@ Linux-root tests, the Docker egress iptables rules, the Postgres-backed tests an
    coverage against a codified methodology checklist, not only asset touch. Done = planner can
    read a methodology and the coverage graph shows checklist completion.
 
+- *(unclaimed)* — **E8 follow-up: hand-verify the DVGA ground truth** (S), card `c-085c80`. Done = each entry
+  cites the upstream resolver or helper that carries it.
+- *(unclaimed)* — **Bench image reproducible from a clean clone** (S), card `c-75c593`.
+
 **Human lane**
+- **E8 first live held-out run** (card `c-f1518c`): needs a bench instance, an LLM, a judge key and a
+  drost-benchmarks checkout. Done = a `report.md` with per-gate passes/n for baseline vs builtin.
 - **SEC: verify on Linux/Docker** (card `c-dadc14`): Linux-root tests, the egress iptables rules,
   Postgres tests and the web typecheck. Needed before the security branch goes anywhere public.
 - Revisit tracking: E1–E10 are on the private Composite board (decided 2026-11-23, repo is public).
@@ -143,6 +161,8 @@ Card ids in brackets:
 - **SEC** [`c-c10f2c`] gorilla/websocket bump (GO-2026-6278).
 - **SEC** [`c-bd9a6d`] Residual gaps from the High/Medium fixes.
 - **SEC** [`c-cc25b6`] Low-severity audit items.
+- **E8 follow-ups** [`c-f1518c`] first live run, [`c-085c80`] DVGA ground-truth check, [`c-75c593`] bench
+  image from a clean clone, [`c-d73308`] optional provider sampling seed per LLM profile.
 - **E10** [`c-72dd9d`] Code-security testing lane (SAST/dependency ingest) feeding the same dual-graph + evidence model.
 
 ## Known issues and gotchas
@@ -180,6 +200,14 @@ Card ids in brackets:
   self-signed targets set `ARTEX_CAPTURE_INSECURE_UPSTREAM=1` for that run only, until per-target trust
   (card `c-8d54d5`) exists. Reason: the goproxy setting is global, so turning it on also leaves package
   downloads through the proxy open to tampering.
+
+- **2026-11-24** — E8: the A/B suite runs one task at a time on a dedicated instance and refuses a busy one,
+  because the server reads the active prompt live and a swap would reach a concurrent task. `--seed` fixes the
+  schedule, not the LLM, because ARTEX has no sampling-seed control; replicates control variance instead
+  (`c-d73308`). Gate rates are counted over ground-truth entries, not over detected findings, so arms with
+  different detection counts stay comparable. A failed run is counted but left out of the denominators. A judge
+  failure aborts the suite. Arms may vary only the editable goals/planner/worker body; the `RSI.md` immutable
+  surfaces stay outside the prompt API by construction.
 
 ## Deltas
 

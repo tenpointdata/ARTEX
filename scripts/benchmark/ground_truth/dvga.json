@@ -1,0 +1,124 @@
+{
+  "corpus": "damn-vulnerable-graphql-application",
+  "version": "v1 (checked against upstream dolevf/Damn-Vulnerable-GraphQL-Application release 2.2.0, published 2025-05-24, branch master; Docker Hub dolevf/dvga tags seen: latest and 2.2.0 both updated 2025-05-24, older 2.1.2/2.1.1/2.1.0/2.0.0; use image dolevf/dvga:2.2.0; entries are deliberately coarse: component + class + mechanism, no line numbers)",
+  "task_goal_template": "Map and hunt the highest-signal security weaknesses of the deliberately vulnerable GraphQL training application at {url}: GraphQL information disclosure, injection (SQL, OS command, stored XSS), server-side request forgery, authorization bypass and arbitrary file write. Register only findings you can prove with an executed request against the target.",
+  "notes": [
+    "DVGA listens on container port 5013 by default (http://localhost:5013); the host port can be remapped with WEB_PORT, and the app binds to 127.0.0.1 by default.",
+    "DVGA has Beginner and Expert modes (selected per request via cookie/header); this ground truth assumes the default (beginner) mode. Expert mode changes exploitation difficulty and may block some of these entries.",
+    "All denial-of-service scenarios (batch query, deep recursion, aliases, field duplication, resource-intensive queries) are deliberately excluded so the noise governor is not rewarded for DoS.",
+    "Stack-trace error disclosure and log injection / HTML injection are listed by upstream but were not confirmed from the resolver source reviewed, so they are omitted; a finding on them is a discovery candidate to verify by hand.",
+    "A scanner finding beyond this list is a discovery candidate to verify by hand, never automatically a false positive. Treat a corpus upgrade as a ground-truth version bump, not a silent edit."
+  ],
+  "findings": [
+    {
+      "id": "GT-001",
+      "title": "GraphQL introspection enabled",
+      "cwe": "CWE-200",
+      "classes": ["information disclosure", "GraphQL introspection", "schema exposure"],
+      "components": ["/graphql", "GraphQL endpoint", "introspection"],
+      "mechanism_keywords": ["__schema", "__type", "introspection query", "full schema", "types and fields"],
+      "proof_hint": "POSTing an introspection query (__schema { types { name fields { name } } }) to /graphql returns the full schema including importPaste, systemDebug and uploadPaste",
+      "severity": "medium"
+    },
+    {
+      "id": "GT-002",
+      "title": "GraphiQL interactive IDE exposed",
+      "cwe": "CWE-200",
+      "classes": ["information disclosure", "exposed debug interface", "GraphiQL"],
+      "components": ["/graphiql", "GraphiQL"],
+      "mechanism_keywords": ["GraphiQL", "interactive IDE", "query explorer", "debug interface"],
+      "proof_hint": "GET /graphiql serves the GraphiQL IDE to an unauthenticated browser session",
+      "severity": "medium"
+    },
+    {
+      "id": "GT-003",
+      "title": "GraphQL field suggestions leak schema names",
+      "cwe": "CWE-209",
+      "classes": ["information disclosure", "field suggestions", "schema enumeration"],
+      "components": ["/graphql", "GraphQL validation errors"],
+      "mechanism_keywords": ["Did you mean", "suggestion", "unknown field", "field enumeration"],
+      "proof_hint": "a query with a misspelled field returns an error containing 'Did you mean <real field>', enabling schema recovery even if introspection is blocked",
+      "severity": "low"
+    },
+    {
+      "id": "GT-004",
+      "title": "SSRF through the importPaste mutation",
+      "cwe": "CWE-918",
+      "classes": ["SSRF", "server-side request forgery"],
+      "components": ["importPaste", "mutation importPaste", "/graphql"],
+      "mechanism_keywords": ["host", "port", "path", "scheme", "curl", "internal request", "127.0.0.1", "imported paste content"],
+      "proof_hint": "importPaste with host/port/path/scheme pointing at an attacker-chosen or loopback/internal URL makes the server fetch it and return the response body as paste content",
+      "severity": "high"
+    },
+    {
+      "id": "GT-005",
+      "title": "OS command injection in importPaste",
+      "cwe": "CWE-78",
+      "classes": ["OS command injection", "command injection", "remote code execution"],
+      "components": ["importPaste", "mutation importPaste", "/graphql"],
+      "mechanism_keywords": ["shell", "curl", "command separator", "path parameter", "host parameter", "command output in paste"],
+      "proof_hint": "shell metacharacters in an importPaste argument cause execution of an injected command (e.g. id) whose output appears in the resulting paste",
+      "severity": "critical"
+    },
+    {
+      "id": "GT-006",
+      "title": "OS command injection in systemDebug (and systemDiagnostics) queries",
+      "cwe": "CWE-78",
+      "classes": ["OS command injection", "command injection", "remote code execution"],
+      "components": ["systemDebug", "systemDiagnostics", "query systemDebug", "/graphql"],
+      "mechanism_keywords": ["arg", "cmd", "ps", "shell", "command separator", "allowlist bypass", "process listing"],
+      "proof_hint": "systemDebug(arg:\"; id\") (or a chained command in systemDiagnostics' cmd) returns the output of an injected command",
+      "severity": "critical"
+    },
+    {
+      "id": "GT-007",
+      "title": "SQL injection in the pastes query filter argument",
+      "cwe": "CWE-89",
+      "classes": ["SQL injection", "injection"],
+      "components": ["pastes", "query pastes", "filter argument", "/graphql"],
+      "mechanism_keywords": ["filter", "' OR 1=1", "raw SQL", "UNION", "boolean condition", "private pastes returned"],
+      "proof_hint": "a tautology or UNION payload in pastes(filter:\"...\") changes the result set (e.g. returns private pastes or other table data)",
+      "severity": "high"
+    },
+    {
+      "id": "GT-008",
+      "title": "Stored XSS through createPaste content/title",
+      "cwe": "CWE-79",
+      "classes": ["stored XSS", "cross-site scripting", "XSS"],
+      "components": ["createPaste", "mutation createPaste", "paste content", "paste title", "public pastes page"],
+      "mechanism_keywords": ["<script>", "onerror", "unescaped", "stored payload", "rendered paste", "html injection"],
+      "proof_hint": "a paste created with an HTML/script payload in title or content is returned unescaped and executes or renders as markup when the pastes page is viewed",
+      "severity": "medium"
+    },
+    {
+      "id": "GT-009",
+      "title": "JWT token forgery / trusted-token identity bypass",
+      "cwe": "CWE-347",
+      "classes": ["JWT forgery", "authentication bypass", "authorization bypass"],
+      "components": ["me query", "login mutation", "JWT access token", "users query", "/graphql"],
+      "mechanism_keywords": ["JWT", "alg none", "forged token", "weak signature", "identity admin", "password field", "token claim"],
+      "proof_hint": "a forged or tampered JWT (e.g. alg=none or admin identity) passed to me(token:...) makes the server treat the session as admin, after which users returns real password values instead of masked ones",
+      "severity": "high"
+    },
+    {
+      "id": "GT-010",
+      "title": "Arbitrary file write / path traversal in uploadPaste filename",
+      "cwe": "CWE-22",
+      "classes": ["path traversal", "arbitrary file write", "unrestricted file upload"],
+      "components": ["uploadPaste", "mutation uploadPaste", "filename argument", "/graphql"],
+      "mechanism_keywords": ["filename", "../", "directory traversal", "file write", "content written to disk"],
+      "proof_hint": "uploadPaste with a filename containing ../ sequences writes the supplied content outside the intended upload directory",
+      "severity": "high"
+    },
+    {
+      "id": "GT-011",
+      "title": "GraphQL interface protection / query deny-list bypass",
+      "cwe": "CWE-693",
+      "classes": ["authorization bypass", "protection mechanism failure", "deny list bypass"],
+      "components": ["/graphql", "GraphiQL", "introspection protection", "query deny list"],
+      "mechanism_keywords": ["bypass", "deny list", "operation name", "header", "origin", "GraphiQL protection", "query allowlist"],
+      "proof_hint": "a request crafted to evade the server's interface/deny-list checks (e.g. altered operation name, headers or query shape) gets through where the plain query is rejected",
+      "severity": "medium"
+    }
+  ]
+}
