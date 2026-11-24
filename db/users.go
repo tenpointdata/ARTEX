@@ -179,6 +179,7 @@ func (d *DB) UpdateUser(actor string, id int64, p UserPatch) (User, error) {
 			WHERE id = $1 RETURNING `+userCols, id, p.Role, p.Disabled, p.PasswordHash))
 		return err
 	})
+	d.invalidateUser(id)
 	if errors.Is(err, sql.ErrNoRows) {
 		return User{}, ErrUserNotFound
 	}
@@ -187,7 +188,7 @@ func (d *DB) UpdateUser(actor string, id int64, p UserPatch) (User, error) {
 
 // DeleteUser removes the user with id, or returns ErrUserNotFound.
 func (d *DB) DeleteUser(actor string, id int64) error {
-	return d.withActor(actor, func(tx *sql.Tx) error {
+	err := d.withActor(actor, func(tx *sql.Tx) error {
 		res, err := tx.Exec(`DELETE FROM artex_users WHERE id = $1`, id)
 		if err != nil {
 			return err
@@ -199,4 +200,6 @@ func (d *DB) DeleteUser(actor string, id int64) error {
 		}
 		return nil
 	})
+	d.invalidateUser(id)
+	return err
 }

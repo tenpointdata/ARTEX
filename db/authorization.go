@@ -311,7 +311,13 @@ RETURNING `+authorizationColumns,
 	if err != nil {
 		return nil, err
 	}
-	return a, tx.Commit()
+	err = tx.Commit()
+	// After the commit, so a gate read racing it cannot cache the old version.
+	d.invalidateAuthorization(taskID)
+	if err != nil {
+		return nil, err
+	}
+	return a, nil
 }
 
 // Input returns the terms of a version, to carry into the next one.

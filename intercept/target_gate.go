@@ -97,7 +97,7 @@ func (s dbTargetStore) Authorization(scope db.TargetScopeRef) (*db.EngagementAut
 	if s.d == nil || scope.TaskID == 0 {
 		return nil, nil
 	}
-	return s.d.CurrentAuthorization(scope.TaskID)
+	return s.d.CachedAuthorization(scope.TaskID)
 }
 
 func (s dbTargetStore) LogDecision(r db.TargetDecision) error {

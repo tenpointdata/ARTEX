@@ -402,7 +402,7 @@ func TestMigrationsRefuseOutOfOrderVersion(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer raw.Close()
-	after := readApplied(t, &DB{raw})
+	after := readApplied(t, &DB{DB: raw})
 	if len(after) != len(before) {
 		t.Fatalf("schema_migrations changed: before %+v, after %+v", before, after)
 	}
