@@ -59,6 +59,26 @@ See `docs/ARCHITECTURE.md` for the code-level map. Summary:
 
 ## Current state
 
+**2026-11-24 — E7 smaller gaps (`c-18f7a8`, in review)** on `ej/20261124-161440-11cbc4`, which merges the
+unmerged E7 branch `ej/20261124-150525-1a95b3`. (1) Browser MCP on worker nodes: `traffic.StartCredentialRelay`
+(`traffic/credential_relay.go`) is a loopback relay that adds the run's scope token as `Proxy-Authorization` and
+forwards to `ARTEX_CONTROL_PROXY`; `server/mcp_proxy_remote.go` swaps the shared row's loopback `--proxy-server`
+for it and points `NODE_EXTRA_CA_CERTS` at the fetched control CA. `ScopeRelay` and the new relay share
+`traffic/relay_conns.go`. (2) Remote findings wake the planner: `remoteSettleLoop` pages
+`ExplorationStore.FindingNodesSince` and calls `NotifyFinding` for worker-node writers. (3) The capture proxy
+requires a scope token from every non-loopback client in every role; `ARTEX_PROXY_ALLOW_UNSCOPED_REMOTE=1`
+opts out (ignored on a control node). (4) Noise-governor floor decided against (Decisions), bound pinned by
+`egress/share_bound_test.go`. (5) Rule and enabled-tools writes bump the intercept revision in their own
+transaction (`db.writeInterceptRules`); callers only `DropCache`. Verified: the new tests against Postgres 16
+(`TestInterceptRuleWritesBumpInTheirTransaction`, `TestFindingNodesSince`, `TestWorkerBrowserMCPRelaysToControlProxy`,
+`TestCredentialRelayCarriesRemoteScope`, `TestRemoteClientScopeRequiredByDefault`), and a real headless Chrome
+through the credential relay (`TestCredentialRelayRealChrome`, `ARTEX_TEST_CHROME`). **Not verified:** the
+Playwright MCP on a real worker host (falls under `c-8cfbfe`). **Merge risk:** `c-50b832`
+(`ej/20261124-114604-e46087`) moves the browser proxy into a Playwright `--config` file; whichever lands second
+must keep the worker path in `scopeMCPProxy`. Not in this card (left over from the E7 delta): delete-drain ack and LLM profile
+reload on workers, now `c-1d3e0a`; proxy-hop TLS is `c-677166` (the credential relay already dials an https upstream,
+but without CA pinning yet).
+
 **2026-11-24 — E7 distributed workers + Helm (`c-d60149`, in review)** on `ej/20261124-150525-1a95b3`; design
 and limits in `docs/DISTRIBUTED.md`. `-role all|control|worker` (`server/node.go`): worker nodes are the same
 binary and `server.New` wiring (guard, intercept rules, LLM reviewer, target gate, budgets, isolation,
@@ -78,7 +98,7 @@ blocked by a rule added on the control node after they started and seeing the co
 refused (`TestWorkerNodeUsesControlRecordingProxy`); `helm lint`/`template` clean. An opus adversarial
 review found 12 issues; H1–M9, L10, L11 fixed (`c0210dd5`). **Not verified:** a real install on two hosts
 (`c-8cfbfe`). **Gaps:** worker findings cannot bind captured traffic (`c-3b781a`), transcripts are per host
-(`c-29ff19`), smaller items `c-18f7a8`.
+(`c-29ff19`), smaller items `c-18f7a8` (built, see the entry above).
 
 **2026-11-24 — SSE 401 after console login (`c-13e86c`, fixed; pre-E5).** Streams are same-origin only
 (`web/src/lib/sse.ts`), dev gzip off, `openSSE` writes `: open`. Test `server/activity_stream_auth_pg_test.go`;
@@ -248,8 +268,8 @@ body, through the versioned prompt API, and the starting bodies are restored aft
   pre-registration, adopted-lesson retire sync. Done = Postgres tests for each.
 - *(unclaimed)* — **RSI gate web UI** (M), card `c-936308`. Done = adopt/rollback from a proposals table in ≤2 clicks + password.
 
-- *(unclaimed)* — **E7: evidence and traffic tools on worker nodes** (M), card `c-3b781a`. Done = a
-  finding recorded on a worker node binds its captured exchange, by a two-manager test.
+- *(unclaimed)* — **E7: worker drain ack + LLM profile reload** (M), card `c-1d3e0a`. Done = a two-manager
+  test for each.
 
 **Human lane**
 - **E7 live install on two hosts** (card `c-8cfbfe`): `helm install` on a ≥2-node cluster, a task whose
@@ -316,7 +336,8 @@ Card ids in brackets:
 - **E6** [`c-cb0093`] Cost/observability dashboard + OpenTelemetry export, building on existing context telemetry.
 - **E7** [`c-d60149`] Distributed workers + Helm: built, in review (see Current state). Follow-ups:
   `c-3b781a` (evidence on workers), `c-29ff19` (transcripts across hosts), `c-8cfbfe` (live two-host
-  install), `c-18f7a8` (browser MCP relay, finding wake-ups, proxy TLS, smaller gaps).
+  install), `c-18f7a8` (browser MCP relay, finding wake-ups, proxy scope default, rule-revision tx; in review),
+  `c-1d3e0a` (worker drain ack, LLM profile reload), `c-677166` (proxy-hop TLS).
 - **E8** [`c-5487e8`] Planner/worker evaluation suite (regression targets, prompt-version A/B via the benchmark gate).
 - **E9** [`c-73af97`] Frontend/UX pass (tables over cards, fewer-clicks triage workflow, live engagement dashboard).
 - **SEC** [`c-517c2d`] Live Playwright task check of the scope relay (human/bench: needs an LLM key and an authorized target).
@@ -395,6 +416,18 @@ Card ids in brackets:
   `ARTEX_SECRET_KEY`) loses stored secrets.
 
 ## Decisions
+
+- **2026-11-24** — c-18f7a8: (a) The capture proxy refuses token-less non-loopback clients in **every** role,
+  not only on a control node. `ARTEX_PROXY_ALLOW_NONLOOPBACK=1` was meant to expose the proxy, not to make it an
+  open relay on the global rules. Operators who really want remote manual capture set
+  `ARTEX_PROXY_ALLOW_UNSCOPED_REMOTE=1`. A control node ignores that switch. (b) **Decided against** a DB-backed
+  per-host slot for the noise governor. It would add a Postgres round trip and a new failure mode (block or
+  fail open) to every target request. The rate is already divided exactly, and the in-flight overshoot is
+  bounded at max(limit, N). Most worker traffic is also paced again at the control proxy. The bound is pinned by
+  `egress/share_bound_test.go`. Revisit if `quiet` with several nodes is shown to trip a target's limits. (c) The
+  intercept revision bump runs in the write's own transaction: a failed bump rolls the write back (an API 500),
+  so no committed rule is ever unannounced. (d) A worker treats any loopback http `--proxy-server` in a shared
+  MCP row as the capture proxy, because a worker runs no proxy of its own.
 
 - **2026-11-24** — E7 (`c-d60149`): the queue is the existing `exploration_nodes` lease, not a broker.
   It already had atomic claims, fencing tokens and lease takeover, so a broker would have added a

@@ -45,7 +45,7 @@ when that read fails.
 
 | Decision | Single process | Worker node | Read failure |
 |---|---|---|---|
-| Intercept rules / enabled tools | in-memory cache, `Invalidate` on edit | `Invalidate` bumps `settings.intercept_rules_revision`; every node reloads when it changes (checked at most 1 s apart; full reload every 30 s regardless) | deny every matcher (`loadFailed`) |
+| Intercept rules / enabled tools | in-memory cache, `Invalidate` on edit | every rule or tool-config write bumps `settings.intercept_rules_revision` in its own transaction (a failed bump rolls the write back); every node reloads when it changes (checked at most 1 s apart; full reload every 30 s regardless) | deny every matcher (`loadFailed`) |
 | Ask approval decided by a human | in-memory channel | the waiter also polls its `intercept_pending` row every 2 s | keep waiting (a read error is not a decision) |
 | Target approvals, pins, block rules, authorization artifact | read from Postgres per call | the same | as before (deny) |
 | Target-gate switch | `atomic.Bool` updated by the API | read from `tasks.target_gate` on every gated call | gate **on** |
@@ -81,9 +81,21 @@ the task's TargetScope, and paces the traffic.
   resolves the presented token to the task it has loaded, and applies that
   task's scope exactly as it does for a local token. Deleting the task drops
   the tokens and closes their connections.
-- **Clients without a token.** Once the proxy accepts remote clients, a client
-  that presents no token from a non-loopback address is refused, so the proxy
-  is never an open proxy.
+- **Clients without a token.** A client that presents no token from a
+  non-loopback address is refused, so the proxy is never an open proxy. This
+  holds in every role, also for a single node started with
+  `ARTEX_PROXY_ALLOW_NONLOOPBACK=1`. `ARTEX_PROXY_ALLOW_UNSCOPED_REMOTE=1` is
+  the explicit opt-out (remote manual capture on the global rules only); it is
+  ignored on a control node.
+- **Browser MCP on a worker node.** The shared MCP row names the control node's
+  loopback proxy. Each spawn on a worker replaces it with a loopback credential
+  relay (`traffic.StartCredentialRelay`) that forwards to `ARTEX_CONTROL_PROXY`
+  with the run's scope token as `Proxy-Authorization`, which Chromium cannot
+  send itself, and points `NODE_EXTRA_CA_CERTS` at the fetched control CA. A
+  run without a task scope gets a relay whose dials are refused.
+- **Finding wake-ups.** The control node pages the task's finding nodes every
+  poll and wakes the planner for those a worker node wrote, as a local
+  `report_finding` does.
 - **CA certificate.** The control node publishes its CA certificate (the public
   cert only) for worker nodes to install for their agent processes.
 
@@ -110,12 +122,10 @@ These are known and carded on the ARTEX board:
 - **Transcripts stay on the node that ran the intent.** If a claim is taken
   over by another host, or a reopened intent is rerun elsewhere, the run starts
   over instead of resuming its transcript.
-- **Finding wake-ups are not relayed.** The planner sees a worker node's
-  findings on its next round. That round is triggered by the intent's
-  settlement.
 - **`egress.Share` floors in-flight limits at 1 per node.** With N nodes, up to
-  N requests to one host can be in flight at once. The request rate is divided
-  exactly.
+  max(limit, N) requests to one host can be in flight at once. The request rate
+  is divided exactly. A DB-backed per-host slot was decided against (HANDOFF
+  Decisions, c-18f7a8); `egress/share_bound_test.go` pins the bound.
 - **Agent processes can reach other cluster services.** On a worker host they
   can reach the network like any target, including the control API and
   Postgres, just as the bundled compose Postgres is reachable today. Deny those
@@ -125,10 +135,6 @@ These are known and carded on the ARTEX board:
   activity-only, and a finding cannot bind captured traffic as proof (`prove_goal`
   is refused). Findings without traffic references work. The traffic itself is
   recorded on the control node.
-- **A browser MCP (stdio Playwright) on a worker node has no usable proxy.**
-  The shared MCP row names the control node's loopback proxy, which a worker
-  cannot reach, so its dials fail (closed). A worker-side credential relay is
-  needed.
 - **The compose overlay changes how the host reaches the capture proxy.** The
   overlay binds the control proxy to `0.0.0.0` inside the container. A
   host-side client (for example the browser extension through the published
