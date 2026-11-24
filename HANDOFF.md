@@ -78,8 +78,10 @@ only those; new **Reports** page `/function/reports` (client landing; hidden for
 nav item's new `hideWith`) lists the company's engagements in a table with the selected one's outcome
 and Markdown report. Verified: `TestClientReadBoundToCompanyPG` (now also a client bound to two
 companies reading each one's tasks, findings, report, stats and outcome with no refusal), the RBAC route
-tests, web `tsc`, governance unit tests and i18n. Browser check: see the Deltas entry for this branch.
-Still open: a client Dashboard replacement beyond the Reports page (`c-7c4715` follow-up card).
+tests, web `tsc`, governance unit tests, i18n and `scripts/verify.sh` (only the two known env failures).
+Browser-checked in headless Chromium against a real backend + Postgres 17: a client bound to two
+companies lands on Reports, sees only Reports + Findings and a switcher with just its two companies,
+switches between them and reads each one's findings and report; all 51 `/api` responses were 200.
 
 **2026-11-24 — E5 web UI (`c-869050`, in review)** on `ej/20261124-132958-94f4bf` (carries E5 + client_read).
 `/system/users`, task **Authorization** tab, Approval Records **Chain** tab with Verify; sidebar filtered by
