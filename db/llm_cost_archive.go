@@ -22,7 +22,7 @@ type archiveCostCell struct {
 	CacheReadTokens  int       `json:"cache_read_tokens"`
 	CacheWriteTokens int       `json:"cache_write_tokens"`
 	LatencyMs        int64     `json:"latency_ms"`
-	FirstTs          time.Time `json:"first_ts"`
+	FirstTs          time.Time `json:"first_ts"` // earliest call start (ts - latency_ms), as CostRow.FirstTs
 	LastTs           time.Time `json:"last_ts"`
 }
 
@@ -34,7 +34,7 @@ SELECT COALESCE(profile_name,'') profile_name, COALESCE(worker,'') worker, COALE
        count(*) FILTER (WHERE COALESCE(status,'ok') <> 'ok') errors,
        COALESCE(sum(input_tokens),0) input_tokens, COALESCE(sum(output_tokens),0) output_tokens,
        COALESCE(sum(cache_read),0) cache_read_tokens, COALESCE(sum(cache_write),0) cache_write_tokens,
-       COALESCE(sum(latency_ms),0) latency_ms, min(ts) first_ts, max(ts) last_ts
+       COALESCE(sum(latency_ms),0) latency_ms, min(ts - COALESCE(latency_ms,0) * interval '1 ms') first_ts, max(ts) last_ts
 FROM llm_usage WHERE COALESCE(task_id,'')=$1 OR exploration_id=$2
 GROUP BY 1,2,3,4 ORDER BY 4,1,2,3) x`
 

@@ -13,7 +13,7 @@ carries prompt or response content.
   judge, …) | `model`. Anything else is a 400; the dimension is a whitelist, never interpolated text.
 - `days`: window; `0` = all time; default 30.
 - Each row: calls, distinct tasks, errors (status ≠ ok), the four token buckets, summed call latency
-  ("LLM time"), first/last call (wall time = last − first), `cost_eur` and `unpriced_calls`.
+  ("LLM time"), first call start / last call end (wall time = last − first; `llm_usage.ts` is a call's completion, so the first call's start is `ts − latency_ms`), `cost_eur` and `unpriced_calls`.
 - Cost uses the per-profile prices (EUR per 1M tokens, LLM settings). Each (group, profile) partial is
   priced with its own profile, so a task that used two providers is priced correctly. `input_tokens`
   includes both cache buckets; only the fresh remainder is billed at the input price

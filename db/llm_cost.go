@@ -90,20 +90,24 @@ func ParseCostDimension(s string) (CostDimension, error) {
 
 // CostRow is the spend and efficiency of one group of LLM calls.
 type CostRow struct {
-	Key              string     `json:"key"`
-	Label            string     `json:"label"`
-	Calls            int        `json:"calls"`
-	Tasks            int        `json:"tasks"`
-	Errors           int        `json:"errors"`
-	InputTokens      int        `json:"input_tokens"` // includes cache read and write
-	OutputTokens     int        `json:"output_tokens"`
-	CacheReadTokens  int        `json:"cache_read_tokens"`
-	CacheWriteTokens int        `json:"cache_write_tokens"`
-	LatencyMs        int64      `json:"latency_ms"` // summed call latency: time waiting on the model
-	FirstTs          *time.Time `json:"first_ts"`   // nil when only legacy archive totals (no times) are in the group
-	LastTs           *time.Time `json:"last_ts"`
-	CostEur          *float64   `json:"cost_eur"`       // nil when nothing in the group is priced
-	UnpricedCalls    int        `json:"unpriced_calls"` // calls from profiles without a price
+	Key              string `json:"key"`
+	Label            string `json:"label"`
+	Calls            int    `json:"calls"`
+	Tasks            int    `json:"tasks"`
+	Errors           int    `json:"errors"`
+	InputTokens      int    `json:"input_tokens"` // includes cache read and write
+	OutputTokens     int    `json:"output_tokens"`
+	CacheReadTokens  int    `json:"cache_read_tokens"`
+	CacheWriteTokens int    `json:"cache_write_tokens"`
+	LatencyMs        int64  `json:"latency_ms"` // summed call latency: time waiting on the model
+	// FirstTs is when the earliest call started (ts - latency_ms: llm_usage.ts is
+	// the completion time); LastTs is when the latest call completed. Wall time is
+	// LastTs - FirstTs. Both are nil when only legacy archive totals (no times) are
+	// in the group.
+	FirstTs       *time.Time `json:"first_ts"`
+	LastTs        *time.Time `json:"last_ts"`
+	CostEur       *float64   `json:"cost_eur"`       // nil when nothing in the group is priced
+	UnpricedCalls int        `json:"unpriced_calls"` // calls from profiles without a price
 }
 
 // CostReport is the cost view: one row per group, and how much archived usage
@@ -137,7 +141,7 @@ SELECT `+col+` AS k, COALESCE(u.profile_name,'') AS p,
        COUNT(*), COUNT(*) FILTER (WHERE COALESCE(u.status,'ok') <> 'ok'),
        COALESCE(SUM(u.input_tokens),0), COALESCE(SUM(u.output_tokens),0),
        COALESCE(SUM(u.cache_read),0), COALESCE(SUM(u.cache_write),0),
-       COALESCE(SUM(u.latency_ms),0), MIN(u.ts), MAX(u.ts)
+       COALESCE(SUM(u.latency_ms),0), MIN(u.ts - COALESCE(u.latency_ms,0) * interval '1 ms'), MAX(u.ts)
 FROM llm_usage u
 WHERE $1 <= 0 OR u.ts >= now() - ($1 * interval '1 day')
 GROUP BY 1, 2`, days)
