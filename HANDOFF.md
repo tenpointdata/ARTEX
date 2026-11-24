@@ -79,22 +79,10 @@ Postgres: only the known macOS SOCKS5 test and the order-dependent
 `helm install` (c-8cfbfe) or a live compose run with a built image. **Still clear text:** the
 worker→control recording-proxy hop (plain-HTTP targets and the scope token), carded `c-677166`.
 
-**2026-11-24 — Worker-node findings carry their captured proof (`c-3b781a`, E7 follow-up; in review).**
-A finding recorded by an intent on a `-role worker` node now binds the request/response the control
-node's recording proxy captured. The worker calls a **signed node RPC** on the control API
-(`POST /api/node/rpc/{op}`, `server/node_rpc.go` + `node_rpc_client.go`). It covers the traffic tools,
-fact provenance, `record`/`bind`, the `prove_goal` exists check, `get_finding_traffic`'s body preview,
-and the S1 quote assessment, so the bodies stay in the control node's evidence directory. Requests are
-HMAC'd under `db.NodeRPCKey`, a sub-key of `ARTEX_SECRET_KEY`, with ±60 s skew and a nonce cache. The
-per-task scope token is not used, because agent processes hold it. A new worker env var,
-`ARTEX_CONTROL_API`, defaults to the control proxy host on :8787 and is set in Helm and compose.
-**This branch merges the unmerged E7 branch (`ej/20261124-150525-1a95b3`), so landing it lands E7.**
-Verified against Postgres 16: `TestWorkerNodeFindingBindsControlCapture` (two managers; a worker-node
-intent's `report_finding` binds the control capture; a mutation with the local store fails it),
-`TestNodeRPCVerifier`, `TestControlAPIURL`, `TestWorkerNodeUsesControlRecordingProxy`, and
-`scripts/verify.sh` (see Deltas for the result). The Helm template was rendered (`alpine/helm`). Not
-checked: a real multi-host run. Gap carded: `c-7ad4da` (workers read the capture switch only at
-start-up).
+**2026-11-24 — Worker-node findings carry their captured proof (`c-3b781a`, E7; in review).** A
+worker-node finding binds the control capture through a signed node RPC (`POST /api/node/rpc/{op}`,
+`server/node_rpc.go`, HMAC under `db.NodeRPCKey`); design in `docs/DISTRIBUTED.md` "Evidence on worker
+nodes", verification in Deltas. Gap: `c-7ad4da` (capture switch read at start-up).
 
 **2026-11-24 — SSE 401 after console login (`c-13e86c`, fixed; pre-E5).** Streams are same-origin only
 (`web/src/lib/sse.ts`), dev gzip off, `openSSE` writes `: open`. Test `server/activity_stream_auth_pg_test.go`;
@@ -124,11 +112,7 @@ Browser-checked in headless Chromium against a real backend + Postgres 17: a cli
 companies lands on Reports, sees only Reports + Findings and a switcher with just its two companies,
 switches between them and reads each one's findings and report; all 51 `/api` responses were 200.
 
-**2026-11-24 — E5 web UI (`c-869050`, in review)** on `ej/20261124-132958-94f4bf` (carries E5 + client_read).
-`/system/users`, task **Authorization** tab, Approval Records **Chain** tab with Verify; sidebar filtered by
-`useCan` (`web/src/hooks/use-session.tsx`); 403 never logs out (`web/src/lib/api-errors.ts`); login takes any
-username. Browser-tested as admin, reviewer and client_read against a real backend. Open: `c-92bb52`,
-`c-7c4715`, `c-601ec6`.
+**2026-11-24 — E5 web UI (`c-869050`, in review).** Detail moved to `docs/handoff/2026-11-24-e5-web-ui.md`.
 
 **2026-11-24** — **E2 integrations** (backend `c-6def05`, UI `c-597eb6`, follow-ups `c-2d91eb`, all in review)
 are on branch `ej/20261124-150516-d78c96`. It merges the UI branch `ej/20261124-132955-7aef3f`, which carries
@@ -199,21 +183,7 @@ is hash-chained by deferred row triggers (migrations 0016, 0018); `/api/intercep
 With `ARTEX_PG_DSN`, `go test ./...` fails only `TestGateOffTaskIsUnchanged` (`c-3157b4`),
 `TestConnectWithoutPasswordRealPG` (trust auth) and the macOS SOCKS5 UDP test.
 
-**2026-11-24 — client_read bound to companies (card `c-5b5421`, in review)** is on branch
-`ej/20261124-110647-182fa9`. That branch merged the E5 branch (PR #16) in, so it carries E5 too.
-- A `client_read` user sees only the companies in `artex_user_companies` (migration **0019**, audited at
-  commit). Admins set them with `GET/PUT /api/users/{id}/companies`. An unbound client gets 403.
-- `server/client_scope.go`: every route open to `client_read` has a binder that runs after the role
-  check. Findings routes go through the #425 company filter with `StrictCompany`, which ignores
-  agent-added `task_scope` rows. Tasks and ids outside the binding answer 404. A route without a binder
-  is refused, and `TestClientBindersCoverClientRoutes` enforces that. The test found
-  `findings/{id}/traffic` and its body route open to clients without a binder, so both are now bound.
-- A client's report counts only its own companies' assets, and its `/api/stats` drops the global
-  traffic and asset totals. `findings/retests/active` now needs `read`.
-- Tests: `server/client_scope_pg_test.go`, checked by mutation. `go test ./db ./server` with PG passes
-  except `TestConnectWithoutPasswordRealPG` (trust auth) and the SOCKS5 UDP test (macOS). verify.sh passes.
-- **Migration order:** 0016 (E5), 0018, 0019 (this branch), with E1 holding 0017. The loader refuses a
-  pending version older than an applied one, so renumber E1 above 0019 if it lands later.
+**2026-11-24 — client_read bound to companies (card `c-5b5421`, in review).** Detail (branch, verification, gaps) moved to `docs/handoff/2026-11-24-client-read-company-bindings.md`.
 
 **2026-11-23** — Fixes for the High and Medium findings from the 2026-11-23 security audit are on
 `main` (PR #1, branch `ej/20261123-145205-6a3af6`); the Linux/Docker verification fixes come from
