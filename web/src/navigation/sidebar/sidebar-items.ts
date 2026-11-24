@@ -6,6 +6,7 @@ import {
   Brain,
   Bug,
   ClipboardList,
+  FileText,
   FolderOpen,
   FolderSync,
   LayoutDashboard,
@@ -40,6 +41,9 @@ export interface NavSubItem {
   // need is the permission the page requires; the sidebar hides it otherwise.
   // Unset means "read" (server/rbac_policy.go: a GET needs read by default).
   need?: Permission;
+  // hideWith hides the item from sessions holding that permission: a page
+  // that stands in for one they already have (the client summary for Tasks).
+  hideWith?: Permission;
 }
 
 interface NavItemBase {
@@ -50,6 +54,7 @@ interface NavItemBase {
   disabled?: boolean;
   newTab?: boolean;
   need?: Permission;
+  hideWith?: Permission;
 }
 
 export interface NavMainLinkItem extends NavItemBase {
@@ -77,6 +82,14 @@ export const sidebarItems: NavGroup[] = [
       { id: "dashboard", title: t("Dashboard"), url: "/dashboard", icon: LayoutDashboard },
       { id: "chat", title: t("Chat"), url: "/chat", icon: MessageSquare, need: "operate" },
       { id: "tasks", title: t("Tasks"), url: "/function/tasks", icon: Target },
+      {
+        id: "reports",
+        title: t("Reports"),
+        url: "/function/reports",
+        icon: FileText,
+        need: "client_read",
+        hideWith: "read",
+      },
       { id: "findings", title: t("Findings"), url: "/function/findings", icon: Bug, need: "client_read" },
       { id: "traffic", title: t("Traffic"), url: "/function/traffic", icon: Activity },
       { id: "commands", title: t("Tool Execution"), url: "/function/commands", icon: Terminal },
@@ -109,7 +122,8 @@ export const sidebarItems: NavGroup[] = [
 // navFor keeps the items (and sub-items) the session's permissions allow, and
 // drops groups left empty.
 export function navFor(groups: NavGroup[], allowed: (p: Permission) => boolean): NavGroup[] {
-  const ok = (x: { need?: Permission }) => allowed(x.need ?? "read");
+  const ok = (x: { need?: Permission; hideWith?: Permission }) =>
+    allowed(x.need ?? "read") && !(x.hideWith && allowed(x.hideWith));
   return groups
     .map((g) => ({
       ...g,
