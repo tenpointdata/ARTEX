@@ -517,7 +517,7 @@ func NewManager(dir, proxyAddr string) (*Manager, error) {
 				}
 			}
 			go func() {
-				log.Printf("[traffic] recording proxy on %s (set HTTP_PROXY=%s + trust _ca CA)", proxyAddr, tr.ProxyAddr())
+				log.Printf("[traffic] recording proxy on %s (set HTTP_PROXY=%s + trust _ca CA)", proxyAddr, tr.ProxyDisplayAddr()) // never tr.ProxyAddr(): it carries ARTEX_PROXY_AUTH
 				if err := tr.Start(); err != nil {
 					log.Printf("[traffic] proxy stopped: %v", err)
 				}

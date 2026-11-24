@@ -31,9 +31,9 @@ const nextConfig = {
           images: { unoptimized: true },
         }
       : {
-          // Dev: reverse-proxy /api/* to the Go backend (default :8787, override with AUTOPENTEST_API).
+          // Dev: reverse-proxy /api/* to the Go backend (default :8787, override with ARTEX_API_URL, or the legacy AUTOPENTEST_API).
           async rewrites() {
-            const backend = process.env.AUTOPENTEST_API ?? "http://localhost:8787";
+            const backend = process.env.ARTEX_API_URL ?? process.env.AUTOPENTEST_API ?? "http://127.0.0.1:8787";
             return [{ source: "/api/:path*", destination: `${backend}/api/:path*` }];
           },
         }),

@@ -11,7 +11,8 @@ import (
 func TestMarkProxyURL(t *testing.T) {
 	for in, want := range map[string]string{
 		"http://127.0.0.1:8788":            "http://artex-pace:artex-pace@127.0.0.1:8788",
-		"http://u:p@127.0.0.1:8788":        "http://u:p@127.0.0.1:8788",
+		"http://u:p@127.0.0.1:8788":        "http://artex-pace:p@127.0.0.1:8788", // auth on: keep the secret, mark the user
+		"http://u@127.0.0.1:8788":          "http://u@127.0.0.1:8788",
 		"":                                 "",
 		"127.0.0.1:8788":                   "127.0.0.1:8788",
 		"socks5://proxy.example.test:1080": "socks5://artex-pace:artex-pace@proxy.example.test:1080",

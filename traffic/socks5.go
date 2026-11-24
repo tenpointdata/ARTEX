@@ -247,6 +247,13 @@ type socks5Server struct {
 // Returns the actual bound address (useful when cfg.Addr uses port 0).
 func (t *Traffic) StartSOCKS5(cfg SOCKS5Config) (string, error) {
 	cfg = cfg.withDefaults()
+	// Same bind rule as the HTTP proxy: loopback, unless ARTEX_PROXY_AUTH makes
+	// this listener demand credentials too (or the operator accepts the risk).
+	addr, err := ResolveListenAddr(cfg.Addr)
+	if err != nil {
+		return "", fmt.Errorf("socks5 listen: %w", err)
+	}
+	cfg.Addr = addr
 	ln, err := net.Listen("tcp", cfg.Addr)
 	if err != nil {
 		return "", fmt.Errorf("socks5 listen %s: %w", cfg.Addr, err)
@@ -455,6 +462,15 @@ func (s *socks5Server) recordCapture(rec RawTCPCapture) {
 	}
 }
 
+// socksAuth is the credentials the SOCKS5 listener demands, nil when none.
+// Nil-safe: tests build a socks5Server without a Traffic.
+func (t *Traffic) socksAuth() *ProxyCreds {
+	if t == nil {
+		return nil
+	}
+	return t.auth
+}
+
 func (s *socks5Server) negotiateAuth(conn net.Conn) (paced bool, ok bool) {
 	var hdr [2]byte
 	if _, err := io.ReadFull(conn, hdr[:]); err != nil {
@@ -478,16 +494,18 @@ func (s *socks5Server) negotiateAuth(conn net.Conn) (paced bool, ok bool) {
 		}
 	}
 
-	// Prefer username/password when offered so clients carrying the pace marker
-	// (egress.PaceUser) can pass it through without requiring real credentials.
-	// Accept no-auth for loopback clients.
+	// With ARTEX_PROXY_AUTH set, only RFC 1929 with the matching credentials is
+	// accepted (also from loopback). Otherwise prefer username/password when
+	// offered so clients carrying the pace marker (egress.PaceUser) can pass it
+	// through without requiring real credentials, and accept no-auth for
+	// loopback clients.
 	if hasUserPass {
 		if _, err := conn.Write([]byte{socks5Version, socks5AuthUserPass}); err != nil {
 			return false, false
 		}
-		return readSOCKS5UserPass(conn)
+		return readSOCKS5UserPass(conn, s.t.socksAuth())
 	}
-	if hasNone && isLoopbackRemote(conn.RemoteAddr()) {
+	if s.t.socksAuth() == nil && hasNone && isLoopbackRemote(conn.RemoteAddr()) {
 		if _, err := conn.Write([]byte{socks5Version, socks5AuthNone}); err != nil {
 			return false, false
 		}
@@ -498,9 +516,10 @@ func (s *socks5Server) negotiateAuth(conn net.Conn) (paced bool, ok bool) {
 }
 
 // readSOCKS5UserPass parses an RFC 1929 username/password subnegotiation.
-// Credentials are never required (any username/password succeeds); a username
-// equal to egress.PaceUser marks the connection as paced.
-func readSOCKS5UserPass(conn net.Conn) (paced bool, ok bool) {
+// With want nil credentials are not required (any username/password succeeds);
+// with want set they must match (constant time) or the handshake fails with
+// status 0x01. A username equal to egress.PaceUser marks the connection as paced.
+func readSOCKS5UserPass(conn net.Conn, want *ProxyCreds) (paced bool, ok bool) {
 	var head [2]byte
 	if _, err := io.ReadFull(conn, head[:]); err != nil {
 		return false, false
@@ -517,11 +536,16 @@ func readSOCKS5UserPass(conn net.Conn) (paced bool, ok bool) {
 	if _, err := io.ReadFull(conn, plen[:]); err != nil {
 		return false, false
 	}
+	var pass []byte
 	if plen[0] > 0 {
-		pass := make([]byte, int(plen[0]))
+		pass = make([]byte, int(plen[0]))
 		if _, err := io.ReadFull(conn, pass); err != nil {
 			return false, false
 		}
+	}
+	if want != nil && !want.matches(string(uname), string(pass)) {
+		_, _ = conn.Write([]byte{socks5UserPassVer, 0x01})
+		return false, false
 	}
 	if _, err := conn.Write([]byte{socks5UserPassVer, 0x00}); err != nil {
 		return false, false

@@ -212,6 +212,13 @@ func (t *Traffic) StartTransparentTCP(cfg TransparentTCPConfig) (string, error) 
 	if ip := net.ParseIP(strings.Trim(host, "[]")); ip != nil && ip.To4() == nil {
 		return "", ErrTransparentTCPIPv6Unsupported
 	}
+	// A transparent listener cannot authenticate: the redirected client does not
+	// know it is talking to a proxy. ARTEX_PROXY_AUTH therefore does not cover it;
+	// off loopback it relays for whoever can reach the port (gated by the target
+	// gate and egress governor only), so say so and leave the firewall to the operator.
+	if ip := net.ParseIP(strings.Trim(host, "[]")); ip == nil || !ip.IsLoopback() {
+		log.Printf("[traffic/transparent] WARNING: listening on non-loopback %s; transparent TCP cannot require ARTEX_PROXY_AUTH credentials, restrict the port with a host firewall", cfg.Addr)
+	}
 	ln, err := net.Listen("tcp4", cfg.Addr)
 	if err != nil {
 		return "", fmt.Errorf("listen transparent TCP on %s: %w", cfg.Addr, err)

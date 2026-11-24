@@ -120,7 +120,7 @@ func (s *Server) editConstraint(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 400, "kind must be allow or deny")
 		return
 	}
-	if err := t.Store.UpdateConstraint(cid, kind, text); err != nil {
+	if err := t.Store.UpdateConstraint(cid, kind, text, "human"); err != nil {
 		writeErr(w, 500, err.Error())
 		return
 	}

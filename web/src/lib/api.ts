@@ -125,10 +125,6 @@ import type {
 const MAX_CHAT_UPLOAD_BYTES = 512 * 1024 * 1024;
 
 // The session is an HttpOnly cookie the browser attaches by itself; scripts hold no token.
-// Kept as a function so the Authorization-header call sites below stay inert.
-function getToken(): string | null {
-  return null;
-}
 
 // ApiError is what http() throws for a non-2xx response: the message is the
 // server's {error} (or "METHOD path: status"), and status lets callers tell
@@ -144,12 +140,10 @@ export class ApiError extends Error {
 
 export async function http<T>(path: string, init?: RequestInit): Promise<T> {
   if (MOCK) return mockHandle<T>(init?.method ?? "GET", path, init?.body ?? null);
-  const token = getToken();
   const r = await fetch(`/api${path}`, {
     ...init,
     headers: {
       ...(init?.body ? { "Content-Type": "application/json" } : {}),
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
       ...(init?.headers as Record<string, string> | undefined),
     },
   });
@@ -185,16 +179,10 @@ export async function http<T>(path: string, init?: RequestInit): Promise<T> {
 // to the backend — no need to expose :8787 publicly. Hardcoding :8787 here used to
 // break exactly that (https://<domain>:8787/... is unreachable when only 443 is open).
 //
-// Dev (next dev): SSE must NOT go through the Next.js `/api` rewrite — that proxy
-// buffers the streamed response, so event frames never reach the browser (the
-// EventSource opens but receives 0 messages). So in dev only we connect straight
-// to the Go backend on :8787, whose CORS is open.
-//
-// Override either default with NEXT_PUBLIC_SSE_BASE (set it to "" to force same-origin).
-// A same-origin stream sends the HttpOnly session cookie. The dev connection to :8787 is
-// cross-origin, so the browser does not send the cookie there and the stream is refused
-// (scripts hold no token to put in the URL); in dev run the UI against the backend's
-// own port, or set NEXT_PUBLIC_SSE_BASE="" and accept the rewrite's buffering.
+// Streams are same-origin so the HttpOnly SameSite=Strict session cookie is sent. In dev the
+// Next.js `/api` rewrite proxies them to the backend; that proxy may buffer streamed frames,
+// so live updates can lag in `next dev` (the embedded build is unaffected).
+// NEXT_PUBLIC_SSE_BASE overrides the origin (cross-origin streams get no cookie).
 // mockReport returns a canned Markdown report for the demo.
 function mockReport(_task?: string): string {
   return `# ARTEX Penetration Test Report — Acme Corp
@@ -219,17 +207,9 @@ function mockReport(_task?: string): string {
 }
 
 export function sseUrl(path: string): string {
-  const base =
-    process.env.NEXT_PUBLIC_SSE_BASE ??
-    (process.env.NODE_ENV !== "production" && typeof window !== "undefined"
-      ? `${window.location.protocol}//${window.location.hostname}:8787`
-      : "");
-  if (!base) {
-    return path;
-  }
-  const token = getToken();
-  const sep = path.includes("?") ? "&" : "?";
-  return token ? `${base}${path}${sep}token=${encodeURIComponent(token)}` : `${base}${path}`;
+  // Same-origin by default (next dev proxies /api to the backend) so the SameSite=Strict session cookie is sent.
+  const base = process.env.NEXT_PUBLIC_SSE_BASE ?? "";
+  return base ? `${base}${path}` : path;
 }
 
 const get = <T>(p: string) => http<T>(p);
@@ -506,10 +486,8 @@ export const api = {
     if (MOCK) return { uploaded: files.length };
     const fd = new FormData();
     for (const f of files) fd.append("file", f);
-    const token = getToken();
     const r = await fetch(`/api/workspace/upload?path=${encodeURIComponent(dir)}`, {
       method: "POST",
-      headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) },
       body: fd,
     });
     if (!r.ok) throw new Error(t("Upload failed: {error}", { error: r.status }));
@@ -520,9 +498,7 @@ export const api = {
     if (MOCK) {
       blob = new Blob([`(demo) Sample download content of ${path}.`], { type: "text/plain" });
     } else {
-      const token = getToken();
       const r = await fetch(`/api/workspace/download?path=${encodeURIComponent(path)}`, {
-        headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) },
       });
       if (!r.ok) throw new Error(t("Download failed: {error}", { error: r.status }));
       blob = await r.blob();
@@ -641,9 +617,7 @@ export const api = {
     } else if (opts.scope === "filtered" && opts.filters) {
       for (const [k, v] of findingFilterParams(opts.filters)) p.set(k, v);
     }
-    const token = getToken();
     const r = await fetch(`/api/exploration/findings/export?${p.toString()}`, {
-      headers: token ? { Authorization: `Bearer ${token}` } : {},
     });
     if (!r.ok) throw new Error(t("Export failed: {error}", { error: r.status }));
     const blob = await r.blob();
@@ -714,10 +688,8 @@ export const api = {
     side: "request" | "response",
     contextTask?: string,
   ) => {
-    const token = getToken();
     const response = await fetch(
       `/api/exploration/findings/${id}/traffic/${bindingId}/body?side=${side}&download=1${contextTask ? `&context_task=${encodeURIComponent(contextTask)}` : ""}`,
-      { headers: token ? { Authorization: `Bearer ${token}` } : {} },
     );
     if (!response.ok) {
       const error = await response.json().catch(() => ({ error: t("Download failed") }));
@@ -901,9 +873,7 @@ export const api = {
   // The JSON-only `get` cannot carry binary, hence the direct fetch.
   trafficBlob: async (hash: string) => {
     if (MOCK) throw new Error(t("Blob download is not available in mock mode"));
-    const token = getToken();
     const r = await fetch(`/api/traffic/blob?hash=${encodeURIComponent(hash)}`, {
-      headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) },
     });
     if (!r.ok) throw new Error(t("Blob download failed: {error}", { error: r.status }));
     return new Uint8Array(await r.arrayBuffer());
@@ -952,9 +922,7 @@ export const api = {
     if (opts.respMin) qs.set("resp_min", opts.respMin);
     if (opts.respMax) qs.set("resp_max", opts.respMax);
     const suffix = qs.toString();
-    const token = getToken();
     const r = await fetch(`/api/traffic/export/har${suffix ? `?${suffix}` : ""}`, {
-      headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) },
     });
     if (r.status === 401) {
       if (typeof window !== "undefined") {
@@ -1061,9 +1029,7 @@ export const api = {
   notifyRetryDelivery: (id: number) => post<{ ok: boolean }>(`/notify/deliveries/${id}/retry`),
   report: async (task?: string) => {
     if (MOCK) return mockReport(task);
-    const token = getToken();
     const r = await fetch(`/api/report${tq(task)}`, {
-      headers: token ? { Authorization: `Bearer ${token}` } : {},
     });
     if (!r.ok) throw new Error(t("Report failed: {error}", { error: r.status }));
     return r.text();
@@ -1093,10 +1059,8 @@ export const api = {
       };
     const fd = new FormData();
     for (const f of files) fd.append("file", f);
-    const token = getToken();
     const r = await fetch(`/api/chat/upload?scope=${scope}&id=${encodeURIComponent(id)}`, {
       method: "POST",
-      headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) },
       body: fd,
     });
     if (!r.ok) throw new Error(t("Upload failed: {error}", { error: `${r.status} ${await r.text()}` }));
@@ -1360,11 +1324,9 @@ export const api = {
     if (MOCK) return { name: file.name.replace(/\.zip$/i, ""), files: 1 };
     const fd = new FormData();
     fd.append("file", file);
-    const token = getToken();
     const r = await fetch(`/api/skills/upload${overwrite ? "?overwrite=true" : ""}`, {
       method: "POST",
       body: fd,
-      headers: token ? { Authorization: `Bearer ${token}` } : {},
     });
     const body = await r.json().catch(() => ({}));
     if (!r.ok) throw new Error(body?.error || t("Upload failed ({status})", { status: r.status }));
@@ -1455,21 +1417,17 @@ export const api = {
   // ---- intercept tool-config (global tool interception scope) ----
   interceptGetToolConfig: async (): Promise<{ enabled_tools: string[] }> => {
     if (MOCK) return { enabled_tools: ["bash"] };
-    const token = getToken();
     const r = await fetch("/api/intercept/tool-config", {
-      headers: token ? { Authorization: `Bearer ${token}` } : {},
     });
     if (!r.ok) throw new Error(await r.text());
     return r.json();
   },
   interceptSetToolConfig: async (enabledTools: string[]): Promise<void> => {
     if (MOCK) return;
-    const token = getToken();
     const r = await fetch("/api/intercept/tool-config", {
       method: "PUT",
       headers: {
         "Content-Type": "application/json",
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
       },
       body: JSON.stringify({ enabled_tools: enabledTools }),
     });

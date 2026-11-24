@@ -3639,10 +3639,10 @@ func (s *Server) getTraffic(w http.ResponseWriter, r *http.Request) {
 	ex, matched, _ := tr.Page(pq, page, size)
 	count, _ := tr.Count() // global total, for the stat card
 	writeJSON(w, 200, map[string]any{
-		"enabled":   s.m.TrafficEnabled(), // reflect the capture toggle
-		"proxy":     s.m.ProxyAddr(),
-		"count":     count,   // total recorded (unfiltered)
-		"total":     matched, // rows matching the current filter (for pagination)
+		"enabled":   s.m.TrafficEnabled(),                  // reflect the capture toggle
+		"proxy":     egress.StripUserinfo(s.m.ProxyAddr()), // API/UI never carries ARTEX_PROXY_AUTH or a global proxy password
+		"count":     count,                                 // total recorded (unfiltered)
+		"total":     matched,                               // rows matching the current filter (for pagination)
 		"page":      page,
 		"size":      size,
 		"exchanges": trafficDTOs(ex),

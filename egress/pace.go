@@ -20,13 +20,41 @@ import (
 const PaceUser = "artex-pace"
 
 // MarkProxyURL returns raw with the marker userinfo. raw is returned unchanged
-// when it does not parse or already carries a userinfo.
+// when it does not parse or has no host. A raw that already carries a password
+// (the recording proxy with ARTEX_PROXY_AUTH set) keeps it and only has its
+// user replaced by PaceUser: the proxy accepts PaceUser with the real password,
+// so the connection stays authenticated and is paced. A userinfo without a
+// password is returned unchanged.
 func MarkProxyURL(raw string) string {
 	u, err := url.Parse(raw)
-	if err != nil || u.Host == "" || u.User != nil {
+	if err != nil || u.Host == "" {
 		return raw
 	}
-	u.User = url.UserPassword(PaceUser, PaceUser)
+	if u.User == nil {
+		u.User = url.UserPassword(PaceUser, PaceUser)
+		return u.String()
+	}
+	pass, ok := u.User.Password()
+	if !ok {
+		return raw
+	}
+	u.User = url.UserPassword(PaceUser, pass)
+	return u.String()
+}
+
+// StripUserinfo returns raw without any user:password, for prompts and logs.
+// A value with no "@" cannot carry userinfo and is returned as is (a bare
+// host:port is a valid proxy address that url.Parse rejects). One with "@" that
+// does not parse is returned as "": its credentials cannot be told apart.
+func StripUserinfo(raw string) string {
+	if !strings.Contains(raw, "@") {
+		return raw
+	}
+	u, err := url.Parse(raw)
+	if err != nil || u.Host == "" {
+		return ""
+	}
+	u.User = nil
 	return u.String()
 }
 

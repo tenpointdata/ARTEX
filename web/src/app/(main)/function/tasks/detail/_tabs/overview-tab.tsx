@@ -21,6 +21,7 @@ import {
 } from "lucide-react";
 
 import { StatusBadge } from "@/components/status-badge";
+import { isAgentProposed } from "@/lib/constraint-origin";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -277,6 +278,20 @@ export function OverviewTab({ taskId }: { taskId: string }) {
     try {
       await api.updateConstraint(taskId, c.id, text, editConKind);
       cancelEditConstraint();
+      await loadConstraints();
+    } catch (e) {
+      setConErr(e instanceof Error ? e.message : t("Failed to save"));
+    } finally {
+      setConBusy(false);
+    }
+  };
+
+  // Adopt an agent-proposed constraint as the operator's (same text and kind).
+  const adoptConstraint = async (c: TaskConstraint) => {
+    setConBusy(true);
+    setConErr("");
+    try {
+      await api.updateConstraint(taskId, c.id, c.text, c.kind);
       await loadConstraints();
     } catch (e) {
       setConErr(e instanceof Error ? e.message : t("Failed to save"));
@@ -684,6 +699,28 @@ export function OverviewTab({ taskId }: { taskId: string }) {
                       {c.kind === "allow" ? t("Allow") : t("Deny")}
                     </span>
                     <span className="min-w-0 flex-1 break-words">{c.text}</span>
+                    {isAgentProposed(c) ? (
+                      <>
+                        <span
+                          className="shrink-0 rounded bg-amber-500/15 px-1.5 py-0.5 text-amber-600 text-xs dark:text-amber-400"
+                          title={t(
+                            "Written by an agent, not by you. Agents see it as a proposal: an allow grants nothing until you adopt it.",
+                          )}
+                        >
+                          {t("Agent-proposed")}
+                        </span>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="h-6 shrink-0 px-1.5"
+                          disabled={conBusy}
+                          title={t("Adopt as an operator constraint")}
+                          onClick={() => void adoptConstraint(c)}
+                        >
+                          <CheckIcon className="size-3.5 text-emerald-500" />
+                        </Button>
+                      </>
+                    ) : null}
                     <Button
                       size="sm"
                       variant="ghost"

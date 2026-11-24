@@ -294,11 +294,18 @@ type Traffic struct {
 	// via StartTransparentTCP (P4.1b).
 	transparentMu sync.Mutex
 	transparent   *transparentServer
+	// auth, when set (ARTEX_PROXY_AUTH), is required of every HTTP proxy client
+	// and every SOCKS5 client. Immutable after Open.
+	auth *ProxyCreds
 }
 
 // Open initializes the traffic tree, blob store and SQLite index under dir.
 func Open(dir, addr string) (*Traffic, error) {
-	addr, err := ResolveListenAddr(addr)
+	creds, authOn, err := ProxyAuthFromEnv()
+	if err != nil {
+		return nil, err
+	}
+	addr, err = ResolveListenAddr(addr)
 	if err != nil {
 		return nil, err
 	}
@@ -338,6 +345,9 @@ func Open(dir, addr string) (*Traffic, error) {
 		return nil, err
 	}
 	t := &Traffic{dir: dir, addr: addr, db: db, closed: make(chan struct{}), snaps: newSnapTable()}
+	if authOn {
+		t.auth = &creds
+	}
 	if err := t.initIndex(); err != nil {
 		db.Close()
 		return nil, err
@@ -388,6 +398,11 @@ func Open(dir, addr string) (*Traffic, error) {
 	p.SetShouldInterceptRule(func(req *http.Request) bool {
 		return !t.tunneling(hostOnly(req.Host))
 	})
+	if t.auth != nil {
+		// Every request and CONNECT must carry the credentials; the sink then drops
+		// the Proxy-Authorization header before anything is forwarded or recorded.
+		p.SetAuthProxy(t.auth.authorize)
+	}
 	p.AddAddon(&sink{t: t})
 	t.proxy = p
 	t.sweeping.Go(t.sweepSnapshots) // stops on t.closed; Close waits for it
@@ -415,9 +430,11 @@ func InsecureUpstream() bool {
 }
 
 // ResolveListenAddr makes the recording proxy loopback-only by default. A
-// host-less address (":8788") binds 127.0.0.1; a non-loopback host is refused
-// unless ARTEX_PROXY_ALLOW_NONLOOPBACK=1, because the proxy has no
-// authentication and would be an open relay onto the network.
+// host-less address (":8788") binds 127.0.0.1. A non-loopback host is refused
+// unless the proxy authenticates its clients (ARTEX_PROXY_AUTH=user:password,
+// allowed quietly) or the operator accepts an open relay explicitly with
+// ARTEX_PROXY_ALLOW_NONLOOPBACK=1 (allowed with a loud warning). The SOCKS5
+// listener resolves its address the same way.
 func ResolveListenAddr(addr string) (string, error) {
 	host, port, err := net.SplitHostPort(addr)
 	if err != nil {
@@ -432,12 +449,15 @@ func ResolveListenAddr(addr string) (string, error) {
 	if ip := net.ParseIP(host); ip != nil && ip.IsLoopback() {
 		return addr, nil
 	}
-	switch strings.ToLower(strings.TrimSpace(os.Getenv("ARTEX_PROXY_ALLOW_NONLOOPBACK"))) {
-	case "1", "true", "yes", "on":
-		log.Printf("[traffic] WARNING: recording proxy listening on non-loopback %s without authentication", addr)
+	if _, authOn, err := ProxyAuthFromEnv(); authOn && err == nil {
 		return addr, nil
 	}
-	return "", fmt.Errorf("refusing to listen on non-loopback %q (unauthenticated proxy); set ARTEX_PROXY_ALLOW_NONLOOPBACK=1 to allow", addr)
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("ARTEX_PROXY_ALLOW_NONLOOPBACK"))) {
+	case "1", "true", "yes", "on":
+		log.Printf("[traffic] WARNING: proxy listening on non-loopback %s without authentication (ARTEX_PROXY_ALLOW_NONLOOPBACK accepted-risk opt-out; set ARTEX_PROXY_AUTH=user:password instead)", addr)
+		return addr, nil
+	}
+	return "", fmt.Errorf("refusing to listen on non-loopback %q (unauthenticated proxy); set ARTEX_PROXY_AUTH=user:password to require credentials, or ARTEX_PROXY_ALLOW_NONLOOPBACK=1 to accept an open relay", addr)
 }
 
 // initIndex applies the schema on a single pinned connection. Pinning is what
@@ -566,13 +586,28 @@ func hostOnly(hostport string) string {
 	return hostport
 }
 
-// ProxyAddr returns the address workers should set as HTTP(S)_PROXY. A bare
+// ProxyAddr returns the URL workers and tools set as HTTP(S)_PROXY. A bare
 // ":port" means "bind all interfaces" (legacy default), so map it to loopback.
+// With ARTEX_PROXY_AUTH set it carries the credentials (http://user:pass@host:port),
+// so the platform's own clients authenticate. It is a secret then: use
+// ProxyDisplayAddr for logs, API responses, stored rows and prompts.
 func (t *Traffic) ProxyAddr() string {
-	if strings.HasPrefix(t.addr, ":") {
-		return "http://127.0.0.1" + t.addr
+	u := t.proxyURL()
+	if t.auth != nil {
+		u.User = t.auth.userinfo()
 	}
-	return "http://" + t.addr
+	return u.String()
+}
+
+// ProxyDisplayAddr is ProxyAddr without credentials.
+func (t *Traffic) ProxyDisplayAddr() string { return t.proxyURL().String() }
+
+func (t *Traffic) proxyURL() *url.URL {
+	host := t.addr
+	if strings.HasPrefix(host, ":") {
+		host = "127.0.0.1" + host
+	}
+	return &url.URL{Scheme: "http", Host: host}
 }
 
 // SetUpstreamProxy points every captured request at a global egress proxy

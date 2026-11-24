@@ -81,8 +81,22 @@ Linux-root tests, the Docker egress iptables rules, the Postgres-backed tests an
   Block rules apply even with the gate off. Fuzzy allow rules match on name and address boundaries.
 - Main-agent writes carry origin `mainagent` and are framed as agent-authored. Norma compaction
   summaries are framed as untrusted data.
-- Per-run executor HOME; MCP servers run as uid 10002 (`ARTEX_EXEC_MCP_UID`). The workspace file
-  manager uses `os.Root`.
+- Per-run executor HOME; MCP servers run as uid 10002 (`ARTEX_EXEC_MCP_UID`).
+
+**2026-11-24** — Residual gaps from the security fixes (card `c-bd9a6d`) are fixed or recorded as
+accepted in `SECURITY.md`. `scripts/verify.sh` passes on macOS; the egress.sh change is not yet run in a container.
+- Constraints are rendered by origin (`agent/constraints.go`): agent-written ones (`mainagent`) are
+  data-framed proposals (an allow grants nothing). The overview marks them "Agent-proposed" with
+  one-click Adopt; any operator edit records origin `human`.
+- The workspace file manager follows no symlink at all (`server/nofollow_root.go`): in-root swaps into
+  `traffic/_ca`/`_index`/`_blobs` fail. Overwrites replace the file (owner and mode kept).
+- Optional capture-proxy auth: `ARTEX_PROXY_AUTH=user:password` (HTTP Basic + SOCKS5 RFC 1929); it also
+  permits a non-loopback bind. SOCKS5 now uses the same loopback rule. The browser MCP can't send it yet (`c-50b832`).
+- `egress.sh` now also filters the MCP uid (10002), not only the executor uid.
+- Web: `getToken()`/Bearer headers removed; `next dev` must be opened via the dev server (:5173), which
+  proxies `/api` (`ARTEX_API_URL`).
+- Accepted (SECURITY.md): pre-fix main-agent rows stored as `human`; shared executor uid (`c-13f293`);
+  MCP secrets in argv; no metadata deny on Bash text (dial-level gap outside Docker: `c-b73542`).
 
 ## Triage (next handful)
 
@@ -141,7 +155,9 @@ Card ids in brackets:
 - **SEC** [`c-dadc14`] Verify the security branch on Linux root, in Docker and against Postgres, plus the web typecheck.
 - **SEC** [`c-8d54d5`] Capture proxy: insecure upstream only for in-scope targets.
 - **SEC** [`c-c10f2c`] gorilla/websocket bump (GO-2026-6278).
-- **SEC** [`c-bd9a6d`] Residual gaps from the High/Medium fixes.
+- **SEC** [`c-13f293`] Per-task executor uids (one live task can write another's run directory).
+- **SEC** [`c-b73542`] Dial-level metadata deny for agent processes outside the Docker egress filter.
+- **traffic** [`c-50b832`] Browser MCP cannot present `ARTEX_PROXY_AUTH` credentials (fails closed).
 - **SEC** [`c-cc25b6`] Low-severity audit items.
 - **E10** [`c-72dd9d`] Code-security testing lane (SAST/dependency ingest) feeding the same dual-graph + evidence model.
 
@@ -180,6 +196,13 @@ Card ids in brackets:
   self-signed targets set `ARTEX_CAPTURE_INSECURE_UPSTREAM=1` for that run only, until per-target trust
   (card `c-8d54d5`) exists. Reason: the goproxy setting is global, so turning it on also leaves package
   downloads through the proxy open to tampering.
+
+- **2026-11-24** — Agent-written constraints are proposals, not authorization: only operator-origin
+  constraints render as constraints; agent denies are honoured as a precaution. Adoption is an operator
+  edit (one click), so no new migration or column is needed. Rows from before the origin fix stay
+  operator (they cannot be told apart) and are documented as accepted.
+- **2026-11-24** — Proxy auth is optional and opt-in; `ARTEX_PROXY_ALLOW_NONLOOPBACK=1` stays as the
+  explicit open-relay opt-out so existing deployments keep working.
 
 ## Deltas
 

@@ -600,8 +600,16 @@ The per-worker average is not restored (usage rows have no run boundary), so the
 from the defaults until a worker finishes in this process.
 
 **Common flags**: `./start.sh -addr 127.0.0.1:8787 -proxy 127.0.0.1:8788` (`-addr` frontend/API, `-proxy` traffic
-recording proxy). The proxy is unauthenticated, so it only binds loopback: a host-less `:8788` becomes
-`127.0.0.1:8788` and other hosts are refused unless `ARTEX_PROXY_ALLOW_NONLOOPBACK=1`. Upstream TLS
+recording proxy). The proxy binds loopback by default: a host-less `:8788` becomes `127.0.0.1:8788`. To
+listen elsewhere, set `ARTEX_PROXY_AUTH=user:password`: every request and `CONNECT` must then carry matching
+`Proxy-Authorization: Basic` credentials (constant-time compare, otherwise `407`), and the opt-in SOCKS5 listener
+requires the same credentials (RFC 1929). ARTEX's own agents, tools and replay get `http://user:password@host:port`
+automatically, and the header is dropped before anything is forwarded or recorded. A malformed value (no colon,
+empty user or password) stops start-up. Without `ARTEX_PROXY_AUTH`, a non-loopback address is refused unless
+`ARTEX_PROXY_ALLOW_NONLOOPBACK=1`, the explicit accepted-risk opt-out that leaves an open relay (logged as a
+warning); prefer the credentials. The Linux transparent listener cannot authenticate clients, so keep it on
+loopback or behind a host firewall. The browser MCP (`--proxy-server`) cannot carry credentials, so it is refused
+(`407`) while `ARTEX_PROXY_AUTH` is set. Upstream TLS
 certificates are verified against system roots; set `ARTEX_CAPTURE_INSECURE_UPSTREAM=1` to capture
 targets with self-signed certificates. That switch applies to every host the proxy reaches, package
 downloads included, so set it only for the run that needs it. The traffic index directory is owner-only (0700/0600).
@@ -890,7 +898,11 @@ CGO_ENABLED=0 go build -tags embedui -o artex ./cmd/artex
 ```
 
 - Backend: `go run ./cmd/artex` (without `-tags embedui`, the frontend is not embedded)
-- Frontend: `cd web && npm run dev` (`/api` is reverse-proxied to the backend, with hot reload)
+- Frontend: `cd web && npm run dev` (`/api` is reverse-proxied to the backend, with hot reload).
+  The session is an HttpOnly `SameSite=Strict` cookie, so always open the UI through the dev server
+  (http://localhost:5173) and let it proxy `/api`; the browser must never call the Go port directly (cross-origin
+  requests, SSE included, would not authenticate). Point the proxy elsewhere with `ARTEX_API_URL`
+  (default `http://127.0.0.1:8787`). Streams go through the same proxy, which may buffer SSE frames in dev.
 - Tests: `go test ./...`
 - Reproduce the fast CI checks locally: `./scripts/verify.sh` (add `--full` for `-race` and the static web build; add `--security` for `govulncheck`)
 - Security scan: install `govulncheck` and run `./scripts/verify.sh --security` (CI runs this on every push and pull request)

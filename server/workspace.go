@@ -137,15 +137,11 @@ func (s *Server) wsList(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	out := make([]wsEntry, 0, len(ents))
-	for _, e := range ents {
-		info, err := e.Info()
-		if err != nil {
-			continue
-		}
+	for _, info := range ents {
 		out = append(out, wsEntry{
-			Name:  e.Name(),
-			Path:  s.wsRel(filepath.Join(abs, e.Name())),
-			Dir:   e.IsDir(),
+			Name:  info.Name(),
+			Path:  s.wsRel(filepath.Join(abs, info.Name())),
+			Dir:   info.IsDir(),
 			Size:  info.Size(),
 			MTime: info.ModTime().UnixMilli(),
 		})
@@ -216,7 +212,8 @@ func (s *Server) wsWrite(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	abs := cp.realPath
-	// Root-confined: a symlink swapped in after the check cannot lead the write out.
+	// Root-confined, no-follow: a symlink swapped in after the check makes the
+	// write fail; it cannot redirect it, out of the workspace or inside it.
 	if err := wsWriteConfined(cp, []byte(req.Content)); err != nil {
 		if errors.Is(err, errWorkspaceIsDir) {
 			writeErr(w, 400, err.Error())
@@ -272,8 +269,8 @@ func (s *Server) wsDelete(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 404, "path does not exist")
 		return
 	}
-	// Root-confined: a directory swapped for a symlink after the check is not
-	// followed out of the workspace.
+	// Root-confined, no-follow: a directory swapped for a symlink after the
+	// check is not followed, out of the workspace or inside it.
 	if err := wsRemoveConfined(cp); err != nil {
 		writeErr(w, 500, safeFSErr(err))
 		return

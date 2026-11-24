@@ -1,8 +1,9 @@
 #!/bin/sh
 # ARTEX container egress filter, sourced by start.sh before artex starts.
 #
-# Agent processes run as the executor uid (-exec-uid, default 10001). This installs
-# OUTPUT rules that match that uid only (-m owner --uid-owner); the server (root)
+# Agent processes run as the executor uid (-exec-uid, default 10001) and stdio MCP
+# servers as the MCP uid (ARTEX_EXEC_MCP_UID, default exec uid + 1). This installs
+# OUTPUT rules that match those uids only (-m owner --uid-owner); the server (root)
 # and the Postgres/LLM connections it makes are untouched. Default-deny for the
 # executor:
 #   - cloud metadata: 169.254.0.0/16 (also covers link-local), 100.100.100.200,
@@ -25,8 +26,10 @@ egress_log() { echo "[artex] egress: $*" >&2; }
 egress_build() {
 	ipt="$1"; fam="$2"
 	"$ipt" -w -N ARTEX_EGRESS 2>/dev/null || "$ipt" -w -F ARTEX_EGRESS || return 1
-	"$ipt" -w -C OUTPUT -m owner --uid-owner "$uid" -j ARTEX_EGRESS 2>/dev/null \
-		|| "$ipt" -w -I OUTPUT 1 -m owner --uid-owner "$uid" -j ARTEX_EGRESS || return 1
+	for u in $uids; do
+		"$ipt" -w -C OUTPUT -m owner --uid-owner "$u" -j ARTEX_EGRESS 2>/dev/null \
+			|| "$ipt" -w -I OUTPUT 1 -m owner --uid-owner "$u" -j ARTEX_EGRESS || return 1
+	done
 	for c in $allow; do
 		case "$c" in *:*) [ "$fam" = 6 ] || continue ;; *) [ "$fam" = 4 ] || continue ;; esac
 		"$ipt" -w -A ARTEX_EGRESS -d "$c" -j ACCEPT || return 1
@@ -72,6 +75,12 @@ egress_apply() {
 		''|*[!0-9]*) egress_log "WARNING: unreadable -exec-uid '$uid'; egress filter NOT installed"; return 0 ;;
 	esac
 	case "$port" in ''|*[!0-9]*) port=8787 ;; esac
+	# stdio MCP servers run as a uid of their own (server/execpriv.go: ARTEX_EXEC_MCP_UID,
+	# default exec uid + 1); filter it too.
+	mcpuid="${ARTEX_EXEC_MCP_UID:-$((uid + 1))}"
+	case "$mcpuid" in ''|*[!0-9]*) mcpuid=$((uid + 1)) ;; esac
+	[ "$mcpuid" = "$uid" ] && mcpuid=$((uid + 1))
+	uids="$uid $mcpuid"
 
 	if [ "$(id -u)" != "0" ]; then
 		egress_log "WARNING: not running as root; egress filter NOT installed (agent can reach metadata, host gateway, API port)"
@@ -89,13 +98,13 @@ egress_apply() {
 	extra="$(echo "${ARTEX_EGRESS_DENY:-}" | tr ',' ' ')"
 
 	if egress_build iptables 4; then
-		egress_log "installed for uid $uid (ipv4): deny metadata, gateway ${gw4:-none}, host.docker.internal ${hd4:-none}, local port $port${extra:+, extra: $extra}${allow:+; allow: $allow}"
+		egress_log "installed for uid(s) $uids (ipv4): deny metadata, gateway ${gw4:-none}, host.docker.internal ${hd4:-none}, local port $port${extra:+, extra: $extra}${allow:+; allow: $allow}"
 	else
 		egress_log "WARNING: could not install iptables rules (missing CAP_NET_ADMIN? add cap_add: NET_ADMIN); agent processes are NOT egress filtered"
 		return 0
 	fi
 	if command -v ip6tables >/dev/null 2>&1 && egress_build ip6tables 6; then
-		egress_log "installed for uid $uid (ipv6)"
+		egress_log "installed for uid(s) $uids (ipv6)"
 	else
 		egress_log "WARNING: ipv6 rules not installed (no ip6tables or IPv6 unavailable); fd00:ec2::254 stays reachable if the container has IPv6"
 	fi

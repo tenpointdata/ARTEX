@@ -12,7 +12,7 @@ type Constraint struct {
 	ID        int64     `json:"id"`
 	Kind      string    `json:"kind"` // allow | deny
 	Text      string    `json:"text"`
-	Origin    string    `json:"origin,omitempty"` // goals | human | system
+	Origin    string    `json:"origin,omitempty"` // goals | human | system | mainagent (agent-proposed)
 	CreatedAt time.Time `json:"created_at"`
 }
 
@@ -53,15 +53,17 @@ VALUES ($1, $2, $3, $4) RETURNING id`, s.expID, kind, text, origin).Scan(&id)
 	return id, err
 }
 
-// UpdateConstraint rewrites a constraint's kind + text; scoped to this exploration.
-// Returns an error if no such constraint exists.
-func (s *ExplorationStore) UpdateConstraint(id int64, kind, text string) error {
+// UpdateConstraint rewrites a constraint's kind + text and records origin as its
+// writer (an operator edit adopts an agent-proposed constraint); scoped to this
+// exploration. An empty origin keeps the stored one. Returns an error if no such
+// constraint exists.
+func (s *ExplorationStore) UpdateConstraint(id int64, kind, text, origin string) error {
 	if kind != "allow" && kind != "deny" {
 		return fmt.Errorf("kind must be allow or deny")
 	}
 	res, err := s.db.Exec(`
-UPDATE task_constraints SET kind=$1, text=$2, updated_at=now()
-WHERE id=$3 AND exploration_id=$4`, kind, text, id, s.expID)
+UPDATE task_constraints SET kind=$1, text=$2, origin=COALESCE(NULLIF($5,''), origin), updated_at=now()
+WHERE id=$3 AND exploration_id=$4`, kind, text, id, s.expID, origin)
 	if err != nil {
 		return err
 	}

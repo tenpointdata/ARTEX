@@ -2114,7 +2114,7 @@ func (t *ToolSet) setConstraints() actool.CoreTool {
 }
 
 func (t *ToolSet) addHint() actool.CoreTool {
-	return t.writeExpTool("add_hint", "Attach a strategic hint to the exploration graph; the planner reads it the next time it generates intents. The hint is stored with the calling agent as its origin (human for the main-agent chat, orchestrator for cross-task orchestration, otherwise the agent's name).\n"+
+	return t.writeExpTool("add_hint", "Attach a strategic hint to the exploration graph; the planner reads it the next time it generates intents. The hint is stored with the calling agent as its origin (mainagent for the main-agent chat, rendered to the planner as agent-authored; orchestrator for cross-task orchestration; otherwise the agent's name).\n"+
 		"★Batch preferred: put multiple hints in the hints array in a single submission (saves round trips vs. one call per item). Returns an ids array, same length and order as hints (failed items get id=0, details in errors). For a single hint, omit hints and pass the top-level text.",
 		obj(map[string]any{
 			"hints":        map[string]any{"type": "array", "description": "[Prefer this] array of hints to add, processed in order. Each element has the same fields as the top-level ones below (text/asset_ids/traffic_refs). The returned ids match this array in length and order.", "items": obj(map[string]any{"text": str("hint content"), "asset_ids": map[string]any{"type": "array", "items": map[string]any{"type": "integer"}}, "traffic_refs": HintTrafficSchema()})},

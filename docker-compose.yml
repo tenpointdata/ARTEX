@@ -57,6 +57,8 @@ services:
       ARTEX_LLM_MODEL: ${ARTEX_LLM_MODEL:-}
       ARTEX_LLM_BASE_URL: ${ARTEX_LLM_BASE_URL:-}
       ARTEX_LLM_PROXY: ${ARTEX_LLM_PROXY:-}
+      # Recording proxy credentials (user:password); empty = no proxy authentication (loopback only).
+      ARTEX_PROXY_AUTH: ${ARTEX_PROXY_AUTH:-}
       # Agent egress filter (egress.sh): extra CIDRs to deny, CIDRs allowed despite the
       # default denies (metadata, host gateway, API port), and 0 to disable.
       ARTEX_EGRESS_DENY: ${ARTEX_EGRESS_DENY:-}
