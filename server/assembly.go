@@ -96,29 +96,34 @@ func wireAgentAugment(pg *db.DB, skillDir string, hostTools func() ([]actool.Cor
 					continue // neither directly visible nor referenced by a visible skill
 				}
 				spawn := m
+				var prepClose io.Closer // released with the server; at once if it does not start
 				if prepareMCP != nil {
 					prepared, closer, err := prepareMCP(ctx, m)
 					if err != nil {
 						log.Printf("[mcp] %s not started for this run: %v", m.Name, err)
 						continue
 					}
-					if closer != nil {
-						closers = append(closers, closer)
-					}
-					spawn = prepared
+					spawn, prepClose = prepared, closer
 				}
 				cl, err := connectMCP(ctx, spawn, priv)
 				if err != nil {
+					closeIfSet(prepClose)
 					log.Printf("[mcp] %s connect failed: %v", m.Name, err)
 					_ = pg.UpdateMCPHealth(m.ID, false, "connect: "+err.Error())
 					continue
 				}
-				closers = append(closers, cl)
 				ts, err := cl.Tools(ctx)
 				if err != nil {
+					_ = cl.Close()
+					closeIfSet(prepClose)
 					log.Printf("[mcp] %s tools/list failed: %v", m.Name, err)
 					_ = pg.UpdateMCPHealth(m.ID, false, "tools/list: "+err.Error())
 					continue
+				}
+				// The client first: the server stops before what it was prepared with.
+				closers = append(closers, cl)
+				if prepClose != nil {
+					closers = append(closers, prepClose)
 				}
 				_ = pg.UpdateMCPHealth(m.ID, true, "")
 				for _, t := range ts {
@@ -408,4 +413,11 @@ func jsonStrMap(raw json.RawMessage) map[string]string {
 		_ = json.Unmarshal(raw, &out)
 	}
 	return out
+}
+
+// closeIfSet closes c unless it is nil.
+func closeIfSet(c io.Closer) {
+	if c != nil {
+		_ = c.Close()
+	}
 }

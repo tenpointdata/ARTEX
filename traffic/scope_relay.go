@@ -32,7 +32,15 @@ type ScopeRelay struct {
 	mu    sync.Mutex
 	done  bool // Close ran; no connection is tracked from then
 	conns map[net.Conn]struct{}
+	slots chan struct{} // one per client connection relayed at once (maxRelayConns)
 }
+
+// maxRelayConns caps the client connections one relay serves at once; a
+// connection over it is closed unserved. Chromium keeps at most 256 sockets
+// per profile (and 6 per proxy host per pool), so a browser never meets the
+// cap; it bounds what a runaway or hostile client of the loopback port can
+// hold open (two sockets and two goroutines a connection).
+const maxRelayConns = 256
 
 // StartScopeRelay returns a relay for the scope token in proxyURL, a URL that
 // ScopedProxyURL, EndedScopeURL (or the server's ScopedProxyAddr) returned. A
@@ -57,7 +65,7 @@ func (t *Traffic) StartScopeRelay(proxyURL string) (string, *ScopeRelay, error) 
 	if err != nil {
 		return "", nil, err
 	}
-	r := &ScopeRelay{URL: "http://" + ln.Addr().String(), ln: ln, t: t, token: tok, conns: map[net.Conn]struct{}{}}
+	r := &ScopeRelay{URL: "http://" + ln.Addr().String(), ln: ln, t: t, token: tok, conns: map[net.Conn]struct{}{}, slots: make(chan struct{}, maxRelayConns)}
 	go r.serve(u.Host)
 	return r.URL, r, nil
 }
@@ -85,7 +93,15 @@ func (r *ScopeRelay) serve(proxyHost string) {
 		if err != nil {
 			return
 		}
-		go r.relay(down, proxyHost)
+		select {
+		case r.slots <- struct{}{}:
+			go func() {
+				defer func() { <-r.slots }()
+				r.relay(down, proxyHost)
+			}()
+		default:
+			_ = down.Close() // over maxRelayConns
+		}
 	}
 }
 
