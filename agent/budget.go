@@ -126,6 +126,21 @@ func (l *BudgetLedger) RestoreSpend(spent Spend) {
 	l.mu.Unlock()
 }
 
+// SyncSpend raises the task total to at least spent, the total recorded in
+// llm_usage by every node. With several nodes working one task (E7) each
+// ledger counts only its own process's calls live; syncing before each
+// dispatch decision makes the others' spend count too. The total never goes
+// down: calls this process metered but has not inserted yet stay counted.
+func (l *BudgetLedger) SyncSpend(spent Spend) {
+	if l == nil {
+		return
+	}
+	l.mu.Lock()
+	l.spent.Tokens = max(l.spent.Tokens, spent.Tokens)
+	l.spent.Turns = max(l.spent.Turns, spent.Turns)
+	l.mu.Unlock()
+}
+
 // Record meters one task-level call (the planner's own rounds).
 func (l *BudgetLedger) Record(u llm.Usage) {
 	l.mu.Lock()

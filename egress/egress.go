@@ -554,3 +554,20 @@ func (b *releaseBody) Close() error {
 	b.release()
 	return err
 }
+
+// Share returns p scaled to one of n nodes that pace the same targets (E7:
+// a control node and its worker nodes each run a governor). The per-host rate,
+// burst and in-flight limits are divided by n, rounding down but never below
+// the smallest working value, so n governors together stay within p. Off stays
+// off; n <= 1 returns p unchanged. The name is kept (the UI matches on it).
+// The in-flight floor of 1 means n nodes may hold up to n requests to one host
+// at once even when p allows one; the rate (RPS) is divided exactly.
+func Share(p Profile, n int) Profile {
+	if n <= 1 || p.RPS <= 0 {
+		return p
+	}
+	div := func(v int) int { return max(v/n, 1) }
+	p.RPS /= float64(n)
+	p.Burst, p.MaxPerHost, p.MaxGlobal = div(p.Burst), div(p.MaxPerHost), div(p.MaxGlobal)
+	return p
+}

@@ -1,0 +1,241 @@
+# ARTEX Helm chart values.
+#
+# AUTHORIZED USE ONLY. ARTEX acts against live targets. Only deploy and run it
+# against systems you are explicitly authorized to test. The guardrails (scope gate,
+# approval gate, budgets, noise governor, audit trail) run identically on every node.
+
+nameOverride: ""
+fullnameOverride: ""
+
+image:
+  # Published image (docker-compose.ghcr.yml). The 0.7.0 tag predates the GHCR publish
+  # step; set image.tag to the first release that is published there.
+  repository: ghcr.io/baarai/artex
+  # Empty = "v" + Chart.appVersion. Prefer an explicit release tag or digest; there is
+  # no floating "latest" default.
+  tag: ""
+  pullPolicy: IfNotPresent
+imagePullSecrets: []
+
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {}
+
+# ---------------------------------------------------------------- secrets ---
+# ARTEX_SECRET_KEY is the AES-256-GCM key (base64, 32 bytes) for secret columns in
+# PostgreSQL. EVERY node (control and workers) must use the same one.
+secretKey:
+  # Name of an existing Secret holding the key. Empty = the chart generates one once
+  # (kept across upgrades through `lookup`; NOT available under `helm template`/GitOps
+  # renderers without cluster access, where you must supply existingSecret or value).
+  existingSecret: ""
+  existingSecretKey: secret-key
+  # Inline base64 32-byte key (stored in the chart Secret). Prefer existingSecret.
+  value: ""
+
+# ----------------------------------------------------------------- LLM ------
+llm:
+  # Existing Secret whose keys are injected as env (e.g. ANTHROPIC_API_KEY, OPENAI_API_KEY).
+  existingSecret: ""
+  # Inline keys (stored in the chart Secret). Prefer existingSecret.
+  anthropicApiKey: ""
+  openaiApiKey: ""
+  provider: ""
+  model: ""
+  baseUrl: ""
+  proxy: ""
+  # Exact host:port list the model-list fetch may reach on private addresses.
+  privateEndpoints: ""
+
+# ----------------------------------------------------------- shared settings ---
+# Applied identically to control and worker nodes via one ConfigMap. Empty = unset
+# (the binary's default). See .env.example in the repository for meaning.
+settings:
+  trustedProxies: ""        # ARTEX_TRUSTED_PROXIES (set to your ingress controller CIDR)
+  untrustedBoundary: ""     # "0" disables the untrusted-output boundary (not recommended)
+  updateCheck: ""           # ARTEX_UPDATE_CHECK
+  noiseProfile: ""          # off | quiet | balanced | aggressive
+  targetUserAgent: ""
+  budgets:                  # unset or 0 = unlimited
+    taskTokens: ""
+    taskTurns: ""
+    intentTokens: ""
+    intentTurns: ""
+
+# Agent egress filter (egress.sh): iptables rules for the executor uid. Requires NET_ADMIN.
+egress:
+  enabled: true             # adds NET_ADMIN capability to ARTEX containers
+  filter: ""                # ARTEX_EGRESS_FILTER ("0" disables the filter)
+  deny: ""                  # ARTEX_EGRESS_DENY extra CIDRs
+  allow: ""                 # ARTEX_EGRESS_ALLOW CIDRs allowed despite default denies
+
+# Extra environment for all ARTEX pods (name: value). Use for settings not modelled above.
+extraEnv: {}
+extraEnvFrom: []
+
+# Security context shared by control and worker containers.
+# runAsNonRoot stays false: the binary runs as root so it can drop agent processes to an
+# unprivileged executor uid (and egress.sh needs root + NET_ADMIN to install rules).
+securityContext:
+  runAsNonRoot: false
+  allowPrivilegeEscalation: false
+  seccompProfile:
+    type: RuntimeDefault
+  capabilities:
+    drop: [ALL]
+    # Capabilities added in addition to NET_ADMIN (when egress.enabled). The binary needs
+    # CHOWN/SETUID/SETGID/DAC_OVERRIDE/FOWNER to prepare data and switch to the executor uid.
+    add: [CHOWN, SETUID, SETGID, DAC_OVERRIDE, FOWNER]
+
+# ------------------------------------------------------- control API TLS ---
+# TLS on the control API: the UI, and the worker nodes' node RPC, whose payloads carry
+# captured target traffic (session cookies, credentials). On by default. Workers reach
+# https://<release>-control and trust only the CA in the Secret's CA key (ARTEX_CONTROL_CA),
+# never the system roots. The control node reloads a renewed certificate within 30 s;
+# workers read the CA at start-up, so roll the workers after a CA change.
+controlTLS:
+  enabled: true
+  # generate     : the chart makes a private CA and a server certificate once (kept
+  #                across upgrades through `lookup`; NOT under `helm template`/GitOps).
+  # secret       : existingSecret holds tls.crt, tls.key and the CA under caKey.
+  # certManager  : a cert-manager Certificate; the issuer must be a CA issuer (CA, Vault,
+  #                ...) so the Secret's ca.crt is the CA that signed the certificate.
+  source: generate
+  existingSecret: ""
+  caKey: ca.crt
+  generate:
+    validityDays: 3650      # renew by deleting the Secret and upgrading, then roll workers
+  certManager:
+    issuerRef:
+      name: ""
+      kind: Issuer          # or ClusterIssuer
+      group: cert-manager.io
+    duration: 2160h
+    renewBefore: 360h
+  # Names beyond <release>-control[.<ns>[.svc[.cluster.local]]] and localhost.
+  extraDnsNames: []
+
+# -------------------------------------------------------------- control ------
+control:
+  # Exactly one replica: the control node holds in-memory planner state.
+  # Do not raise; the Deployment uses strategy Recreate.
+  # Number of intent workers run inside the control process (ARTEX_LOCAL_WORKERS).
+  # 0 sends every intent to worker nodes.
+  localWorkers: 0
+  resources:
+    requests: {cpu: 500m, memory: 1Gi}
+    limits: {memory: 4Gi}
+  persistence:
+    data:
+      enabled: true
+      existingClaim: ""
+      storageClass: ""
+      accessModes: [ReadWriteOnce]
+      size: 20Gi
+    keys:                   # JWT signing key (jwt.key); losing it signs users out
+      enabled: true
+      existingClaim: ""
+      storageClass: ""
+      accessModes: [ReadWriteOnce]
+      size: 100Mi
+  service:
+    type: ClusterIP
+    port: 8787
+    annotations: {}
+  ingress:
+    enabled: false
+    className: ""
+    # With controlTLS.enabled the backend speaks HTTPS: the chart adds
+    # nginx.ingress.kubernetes.io/backend-protocol: HTTPS and the Service port has
+    # appProtocol https. Other controllers need their own backend-TLS setting.
+    annotations: {}
+    hosts:
+      - host: artex.example.com
+        paths:
+          - path: /
+            pathType: Prefix
+    tls: []
+    #  - secretName: artex-tls
+    #    hosts: [artex.example.com]
+  # Capture proxy bind inside the control pod. Worker nodes reach it through the
+  # ClusterIP Service <release>-control-proxy:8788. In the control role the proxy
+  # refuses any non-loopback client that presents no worker scope token. The proxy
+  # hop is plain HTTP (controlTLS covers the API only): HTTPS targets stay TLS inside
+  # CONNECT, but plain-HTTP target traffic and the scope token cross in clear text;
+  # see docs/DISTRIBUTED.md "Transport".
+  proxyAddr: "0.0.0.0:8788"
+  terminationGracePeriodSeconds: 60
+  podAnnotations: {}
+  podLabels: {}
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+  extraEnv: {}
+
+# -------------------------------------------------------------- workers ------
+worker:
+  enabled: true
+  replicas: 2
+  # Concurrent intents per worker node (ARTEX_NODE_WORKERS).
+  concurrency: 3
+  # Workers must land on separate hosts. "hard" = required anti-affinity on
+  # kubernetes.io/hostname (pods stay Pending if there are fewer nodes than replicas);
+  # "soft" = preferred; "none" = no anti-affinity (set your own under affinity).
+  antiAffinity: hard
+  topologyKey: kubernetes.io/hostname
+  # Health endpoint (plaintext, GET /healthz). Workers serve no API.
+  healthPort: 8790
+  # A worker finishes or abandons its claim; a lost claim is retaken after 90s.
+  terminationGracePeriodSeconds: 120
+  resources:
+    requests: {cpu: "1", memory: 1Gi}
+    limits: {memory: 4Gi}
+  pdb:
+    enabled: true
+    maxUnavailable: 1
+  podAnnotations: {}
+  podLabels: {}
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}              # merged with the anti-affinity above (podAntiAffinity wins on conflict)
+  extraEnv: {}
+  # Scratch space for /app/data (emptyDir).
+  ephemeralDataSizeLimit: 10Gi
+
+# Optional NetworkPolicy for workers: no ingress except the health port; egress open
+# (workers must reach targets, PostgreSQL and the LLM provider). Off by default because the
+# kubelet source differs per CNI; set healthSourceCIDRs to the node CIDR(s) to restrict it.
+networkPolicy:
+  enabled: false
+  healthSourceCIDRs: []     # empty = any source on the health port only
+
+# ------------------------------------------------------------ PostgreSQL -----
+postgresql:
+  # Shared by control and workers. For production use an external managed PostgreSQL.
+  sslmode: ""               # empty: "disable" for bundled, "require" for external
+  external:
+    host: ""
+    port: 5432
+    user: artex
+    database: artex
+    existingSecret: ""      # Secret holding the password
+    existingSecretKey: password
+    password: ""            # inline (stored in the chart Secret); prefer existingSecret
+  # Simple single-instance StatefulSet for evaluation. No backups, no HA.
+  bundled:
+    enabled: true
+    image:
+      repository: postgres
+      tag: 16-alpine@sha256:f2f98726820d0342055351c6e9d36e705f5bfffb3dd53ff556325114b08afb6d
+      pullPolicy: IfNotPresent
+    user: artex
+    database: artex
+    existingSecret: ""      # empty = chart generates a password once (via lookup)
+    existingSecretKey: password
+    persistence:
+      storageClass: ""
+      size: 20Gi
+    resources:
+      requests: {cpu: 250m, memory: 512Mi}
+      limits: {memory: 2Gi}

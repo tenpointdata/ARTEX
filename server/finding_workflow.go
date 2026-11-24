@@ -173,7 +173,7 @@ func (s *Server) toolBindFindingTraffic() actool.CoreTool {
 			if len(args.Refs) == 0 {
 				return actool.Errorf("binding requires at least one verified traffic_refs entry; no need to call this tool when there is no traffic"), nil
 			}
-			list, err := s.evidenceStore().Bind(ctx, id, args.Refs)
+			list, err := s.findingEvidence().Bind(ctx, id, args.Refs)
 			if err != nil {
 				return actool.Errorf(err.Error()), nil
 			}

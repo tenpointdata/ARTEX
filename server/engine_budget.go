@@ -17,7 +17,7 @@ func (e *Engine) budgetFor(taskID string) *agent.BudgetLedger {
 	if v, ok := e.budgets.Load(taskID); ok {
 		return v.(*agent.BudgetLedger)
 	}
-	created := agent.NewBudgetLedger(agent.BudgetsFromEnv())
+	created := agent.NewBudgetLedger(e.budgetConfig())
 	e.seedBudget(taskID, created)
 	v, loaded := e.budgets.LoadOrStore(taskID, created)
 	if loaded {
@@ -58,6 +58,7 @@ func (e *Engine) budgetStop(ctx context.Context, t *Task) bool {
 	if l == nil {
 		return false
 	}
+	e.syncBudget(t.ID, l) // other nodes' spend counts too
 	st := l.State()
 	log.Printf("[budget] task %s planner round: %s", t.ID, st.Line())
 	if st.Dispatch {
@@ -86,6 +87,7 @@ func (e *Engine) budgetRoundCtx(ctx context.Context, t *Task, wrapup bool) conte
 // remaining task budget is below one worker's cost estimate, or the wrap-up started.
 func (e *Engine) budgetBlocksClaim(taskID string) bool {
 	l := e.budgetFor(taskID)
+	e.syncBudget(taskID, l)
 	return l != nil && !l.State().Dispatch
 }
 

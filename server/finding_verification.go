@@ -137,7 +137,22 @@ func readBoundResponse(store *evidence.Store, snap db.TrafficEvidenceSnapshot) (
 // assessFindingVerification computes the verification state of a finding from
 // its bound traffic and the quotes the agent supplied. poe is the declared POE
 // level (0 when absent). It never returns "verified" unless every rule passes.
+//
+// The bound bodies live on the node holding the capture, so a worker node has
+// the control node run this same assessment (node_rpc.go); a failed call is
+// not_assessed, never a verdict.
 func (s *Server) assessFindingVerification(ctx context.Context, findingID int64, poe int, quotes []string) (status, note string) {
+	if s.m.controlRPC != nil {
+		var out nodeAssessReply
+		if err := s.m.controlRPC.call(ctx, "assess", nodeAssessReq{FindingID: findingID, POE: poe, Quotes: quotes}, &out); err != nil {
+			return db.VerificationNotAssessed, "control node verification unavailable: " + err.Error()
+		}
+		return out.Status, out.Note
+	}
+	return s.assessLocalFindingVerification(ctx, findingID, poe, quotes)
+}
+
+func (s *Server) assessLocalFindingVerification(ctx context.Context, findingID int64, poe int, quotes []string) (status, note string) {
 	tr, err := s.m.pg.GetFindingTraffic(ctx, findingID)
 	if err != nil {
 		return db.VerificationNotAssessed, "binding read error: " + err.Error()

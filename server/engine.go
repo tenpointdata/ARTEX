@@ -95,6 +95,8 @@ func retryableWorkerModelError(reason harness.TerminalReason, err error) bool {
 type Engine struct {
 	m        *Manager
 	debounce time.Duration
+	node     NodeConfig       // process role (node.go); zero value = RoleAll behaviour
+	wnode    *workerNodeState // worker node claim gate (worker_node.go); nil unless RoleWorker
 
 	bc *Broadcaster // live activity pub/sub (SSE)
 
@@ -201,6 +203,12 @@ func (e *Engine) BeginDelete(taskID string) bool {
 	e.paused.Store(taskID, true)
 	e.deleteMu.Unlock()
 	e.cancelExec(taskID, agent.AbortTaskDeleted)
+	e.closeDispatch(taskID, db.DispatchDeleting)
+	if e.m != nil {
+		if t, ok := e.m.Task(taskID); ok {
+			e.revokeRemoteClaims(t)
+		}
+	}
 	return true
 }
 
@@ -215,6 +223,9 @@ func (e *Engine) AbortDelete(taskID string, keepPaused bool) {
 		e.paused.Delete(taskID)
 	}
 	e.deleteMu.Unlock()
+	if e.distributed() {
+		e.openDispatch(taskID)
+	}
 	if !keepPaused && e.m != nil {
 		if t, ok := e.m.Task(taskID); ok {
 			t.Notify()
@@ -502,6 +513,11 @@ func (e *Engine) ControlWork(ctx context.Context, intentID int64, action string)
 	run := e.work[intentID]
 	if run == nil {
 		e.workMu.Unlock()
+		if handled, err := e.remoteWorkSignal(intentID, action, ""); err != nil {
+			return err
+		} else if handled {
+			return e.awaitRemoteSettle(ctx, intentID)
+		}
 		return fmt.Errorf("%w: intent %d currently has no running work (it may have finished or was never claimed)", errWorkControlConflict, intentID)
 	}
 	if run.action != "" {
@@ -554,6 +570,9 @@ func (e *Engine) SteerWork(intentID int64, msg string) error {
 	running := e.work[intentID] != nil
 	e.workMu.Unlock()
 	if !running {
+		if handled, err := e.remoteWorkSignal(intentID, db.WorkSignalSteer, msg); handled || err != nil {
+			return err
+		}
 		return fmt.Errorf("intent %d currently has no running work (it may have finished or was never claimed)", intentID)
 	}
 	e.steerMu.Lock()
@@ -696,6 +715,9 @@ func (e *Engine) KillWork(intentID int64) error {
 	run := e.work[intentID]
 	e.workMu.Unlock()
 	if run == nil {
+		if handled, err := e.remoteWorkSignal(intentID, db.WorkSignalKill, ""); handled || err != nil {
+			return err
+		}
 		return fmt.Errorf("intent %d currently has no running work (it may have finished or was never claimed)", intentID)
 	}
 	run.cancel(agent.AbortKilledByPlanner)
@@ -833,7 +855,11 @@ func (e *Engine) ReadyFor(t *Task) bool {
 // but no-op until an LLM is configured (so a task created while idle picks up
 // automatically once LLM is set from the UI).
 func (e *Engine) Run(ctx context.Context, t *Task) {
-	workers := e.m.Workers()
+	workers := e.node.localWorkers(e.m.Workers)
+	routines := 2 + workers
+	if e.distributed() {
+		routines++ // remoteSettleLoop
+	}
 	e.deleteMu.RLock()
 	if e.IsDeleting(t.ID) {
 		e.deleteMu.RUnlock()
@@ -844,7 +870,7 @@ func (e *Engine) Run(ctx context.Context, t *Task) {
 		t.Notify() // already running — just nudge a planning round
 		return
 	}
-	rt := e.registerTaskRoutines(ctx, t.ID, 2+workers)
+	rt := e.registerTaskRoutines(ctx, t.ID, routines)
 	e.deleteMu.RUnlock()
 	if rt == nil {
 		e.started.Delete(t.ID)
@@ -854,8 +880,11 @@ func (e *Engine) Run(ctx context.Context, t *Task) {
 	runTaskRoutine(rt, func(loopCtx context.Context) { e.plannerLoop(loopCtx, t) })
 	runTaskRoutine(rt, func(loopCtx context.Context) { e.claimSweepLoop(loopCtx, t) })
 	for i := 0; i < workers; i++ {
-		name := fmt.Sprintf("work#%d", i+1)
+		name := e.node.workerName(i + 1)
 		runTaskRoutine(rt, func(loopCtx context.Context) { e.workerLoop(loopCtx, t, name) })
+	}
+	if e.distributed() {
+		runTaskRoutine(rt, func(loopCtx context.Context) { e.remoteSettleLoop(loopCtx, t) })
 	}
 	e.startDeadlineCoordinator(ctx, t) // task-level timeout timer (only when timeout>0; deduplicated)
 	// Kick the first planning round only when there are no active intents at all
@@ -1152,6 +1181,12 @@ func (e *Engine) workerLoop(ctx context.Context, t *Task, name string) {
 				return
 			}
 			continue // run budget below one worker's estimate: dispatch no new worker (the planner loop settles the task)
+		}
+		if e.node.Role == RoleWorker && !e.workerClaimAllowed(t) {
+			if sleepCtx(ctx, distributedPoll) {
+				return
+			}
+			continue // worker node: the task's shared control state forbids a claim (or cannot be read)
 		}
 		if isTerminalStatus(e.m.TaskStatus(t.ID)) {
 			if sleepCtx(ctx, 1000*time.Millisecond) {
