@@ -2,6 +2,7 @@ package server
 
 import (
 	"fmt"
+	"reflect"
 	"strconv"
 	"testing"
 	"time"
@@ -73,6 +74,7 @@ func TestEndedAuthorizationPausesTaskPG(t *testing.T) {
 		t.Fatal("the sweep did not pause a task whose authorization expired")
 	}
 	g.s.pauseEndedAuthorizations() // a paused task is skipped, not paused twice
+	assertTaskAuthorization(t, g, task.ID, map[string]any{"version": float64(1), "revoked": false, "ended": true})
 	if code, out := g.do(t, "POST", "/api/tasks/"+task.ID+"/control", `{"action":"resume"}`); code != 409 {
 		t.Fatalf("resume with an expired artifact: %d %v, want 409", code, out)
 	}
@@ -89,6 +91,7 @@ func TestEndedAuthorizationPausesTaskPG(t *testing.T) {
 	if paused() {
 		t.Fatal("still paused after resume")
 	}
+	assertTaskAuthorization(t, g, task.ID, map[string]any{"version": float64(2), "revoked": false, "ended": false})
 	// Revocation pauses at once, without waiting for the sweep.
 	if code, out := g.do(t, "POST", "/api/tasks/"+task.ID+"/authorization/revoke", `{"note":"stop"}`); code != 200 {
 		t.Fatalf("revoke: %d %v", code, out)
@@ -96,4 +99,27 @@ func TestEndedAuthorizationPausesTaskPG(t *testing.T) {
 	if !paused() {
 		t.Fatal("a revocation did not pause the task")
 	}
+	assertTaskAuthorization(t, g, task.ID, map[string]any{"version": float64(3), "revoked": true, "ended": true})
+}
+
+// assertTaskAuthorization checks the summary the console reads from both the
+// task view and the task list, so it can explain a refused resume or gate-off
+// before the click.
+func assertTaskAuthorization(t *testing.T, g *gateServer, id string, want map[string]any) {
+	t.Helper()
+	code, out := g.do(t, "GET", "/api/tasks/"+id, "")
+	if code != 200 || !reflect.DeepEqual(out["authorization"], want) {
+		t.Fatalf("task view authorization: %d %v, want %v", code, out["authorization"], want)
+	}
+	code, out = g.do(t, "GET", "/api/tasks", "")
+	rows, _ := out["tasks"].([]any)
+	for _, r := range rows {
+		if row, _ := r.(map[string]any); row["id"] == id {
+			if !reflect.DeepEqual(row["authorization"], want) {
+				t.Fatalf("task list authorization: %v, want %v", row["authorization"], want)
+			}
+			return
+		}
+	}
+	t.Fatalf("task %s missing from the list (%d)", id, code)
 }

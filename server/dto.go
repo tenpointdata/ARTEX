@@ -64,6 +64,8 @@ type TaskDTO struct {
 	CoverageEnabled    bool               `json:"coverage_enabled"` // asset coverage feature switch (fixed at creation)
 	PlanQuietMode      bool               `json:"plan_quiet_mode"`  // planner quiet-mode switch (#86), editable mid-run
 	TargetGate         bool               `json:"target_gate"`      // approval gate for asset targets, opt-in, editable mid-run
+	// Authorization summarizes the newest engagement authorization version; nil = none.
+	Authorization *TaskAuthorizationDTO `json:"authorization,omitempty"`
 }
 
 // FindingSeverityDTO is the per-severity finding count shown in the task list (critical/high/medium/low).

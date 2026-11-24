@@ -1238,6 +1238,7 @@ func (s *Server) listTasks(w http.ResponseWriter, r *http.Request) {
 		log.Printf("[tasks] list metrics query failed — metrics zeroed: %v", err)
 	}
 	archiveBlockers, _ := s.m.PG().TaskArchiveBlockers()
+	authorizations := s.taskAuthorizationSummaries()
 	// company keeps the tasks scoped to that company (the sidebar switcher). A
 	// non-numeric id, or one no task is scoped to, returns an empty list.
 	companyParam := strings.TrimSpace(r.URL.Query().Get("company"))
@@ -1249,6 +1250,7 @@ func (s *Server) listTasks(w http.ResponseWriter, r *http.Request) {
 		}
 		dto := taskDTO(t, s.resolvedTaskStatus(t))
 		applyTaskArchiveBlocker(&dto, archiveBlockers)
+		applyTaskAuthorizationSummary(&dto, authorizations)
 		s.applyTaskMetrics(&dto, t, metrics[t.ExpID])
 		dtos = append(dtos, dto)
 	}
@@ -2127,6 +2129,7 @@ func (s *Server) getTask(w http.ResponseWriter, r *http.Request) {
 	taskID, _ := strconv.ParseInt(t.ID, 10, 64)
 	blocker, _ := s.m.PG().TaskArchiveBlocker(taskID)
 	applyTaskArchiveBlockerID(&dto, blocker)
+	s.applyTaskAuthorization(&dto)
 	writeJSON(w, 200, dto)
 }
 
