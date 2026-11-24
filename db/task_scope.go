@@ -7,6 +7,8 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+
+	"github.com/Autumn-27/artex/methodology"
 )
 
 // TaskScope is one row of a task's test scope — coverage scope, not enforced: it is
@@ -377,6 +379,9 @@ type Coverage struct {
 	// Coverage ledger (entries, gaps, unexamined, findings_by_class, completeness),
 	// flattened into the same document; nil when the feature is off.
 	*CoverageLedger
+	// Checklist completion per applicable methodology (coverage_methodology.go);
+	// omitted when the feature is off.
+	Methodologies []methodology.Score `json:"methodologies,omitempty"`
 }
 
 // CoverageEnabled reports whether a task has the asset-coverage feature turned on

@@ -2724,5 +2724,13 @@
   "Search company…": "搜索企业…",
   "Failed to load companies": "加载企业失败",
   "No company found": "未找到企业",
-  "Manage companies": "管理企业"
+  "Manage companies": "管理企业",
+  "{covered}/{total} covered": "已覆盖 {covered}/{total}",
+  "{count} in progress": "{count} 项进行中",
+  "{count} open": "{count} 项未开始",
+  "Filter by status": "按状态筛选",
+  "Covered": "已覆盖",
+  "Item": "条目",
+  "Intents": "意图",
+  "No items": "无条目"
 }
