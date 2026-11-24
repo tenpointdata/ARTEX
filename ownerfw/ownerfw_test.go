@@ -183,6 +183,10 @@ func TestKeeperDriftAndRemove(t *testing.T) {
 	if d, err := k.Ensure(ctx); !strings.Contains(d, "rule 1") || err != nil || ft.output[0] == "-A OUTPUT -j ACCEPT" {
 		t.Fatalf("drift %q err %v output %v", d, err, ft.output)
 	}
+	ft.output[0] = strings.Replace(ft.output[0], "-m owner --uid-owner", "-m owner ! --uid-owner", 1) // same uid, negated
+	if d, _ := k.Ensure(ctx); !strings.Contains(d, "rule 1 differs") || strings.Contains(ft.output[0], "!") {
+		t.Fatalf("drift %q output %v", d, ft.output)
+	}
 	ft.chain = ft.chain[:1] // flushed by a reload
 	if d, _ := k.Ensure(ctx); !strings.Contains(d, "differs") || len(ft.chain) < 3 {
 		t.Fatalf("drift %q chain %v", d, ft.chain)

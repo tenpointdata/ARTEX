@@ -145,6 +145,23 @@ Operator-facing changes:
   Root tests in Docker: build the test binary into a 0755 dir (`go test -c -o /t/server.test`). The
   default 0700 go-build dir makes the isolation self-tests fail on `main` too.
 
+**2026-11-24: agent egress floor kept in force (card `c-02e554`, in review).** Builds on `c-b73542`
+(this branch merges its unmerged branch `ej/20261124-113533-f16c00`). `ownerfw.Keeper` installs a family in
+one `iptables-restore -w --noflush` transaction: the chain is rebuilt and every OUTPUT jump to it is
+replaced by tagged (`-m comment --comment artex-floor`) jumps at the top of OUTPUT. A restart has no
+empty-chain window, and jumps for an old uid range or MCP uid are removed. `AgentEgressFloor.Watch`
+(`server/egress_floor_keep.go`, started in `cmd/artex/main.go`) checks every 60 s that `-S ARTEX_AGENT_FLOOR`
+matches the post-install snapshot and that OUTPUT starts with the owners' jumps. On drift it logs
+`[egress] ALERT` and re-applies. `ARTEX_EGRESS_FILTER=0` or no privilege drop removes an earlier start's
+floor and says so. Port 53 now passes only to resolv.conf nameservers in a refused range, re-read on every
+check. A family whose install failed at start-up is retried by each check; jumps are compared exactly with
+the post-install `-S` lines, so a negated or extended jump counts as drift. Removal runs only as root.
+Root tests in `server/egress_floor_keep_root_linux_test.go` cover a failed start retried, a flush, a rule above the jumps, a
+deleted jump, a flushed OUTPUT, an atomic rebuild (curl checked after every iptables call; a flush-then-append
+mutation fails it), stale jumps and the filter turned off, and DNS. They pass as root with NET_ADMIN in
+`golang:1.26.11-bookworm` on both the nf_tables and legacy backends; the full `./server` suite passes as
+root there too.
+
 **2026-11-24: agent egress floor (card `c-b73542`, in review).** On Linux with the privilege drop on,
 the server now installs its own iptables chain `ARTEX_AGENT_FLOOR` at start-up, so native root installs
 without `egress.sh` are covered too. The chain refuses `intercept.MetadataPrefixes()` (link-local, metadata
@@ -187,8 +204,9 @@ the newer main (`-exec-uid-range`, #18).
    scope's client connections, by a test, or a recorded acceptance.
 4. *(unclaimed)* — **SEC: logout revocation** (S), card `c-a0af33`. Done = a token replayed after
    logout or a password change gets 401, by a test.
-5. *(unclaimed)* — **SEC: agent egress floor follow-ups** (S), card `c-02e554`: re-check the floor
-   while running, rebuild it atomically, remove stale jumps. Done = a root-Linux test for each.
+5. *(unclaimed)* — **SEC: egress floor with two servers in one netns** (S), card `c-7e0087`. Done = a
+   root test where re-applying one instance's floor never opens the other's. (`c-02e554` is in review; land
+   `c-b73542`'s branch first, since this branch carries it.)
 6. *(unclaimed)* — **SEC: Docker Desktop named volumes** (S), card `c-775dc2`. Done = `docker compose up`
    starts on a Mac with the isolation self-test passing; Linux bind-mount path documented.
 7. *(unclaimed)* — **E1 Client-grade reporting & deliverables** (M). Turn `report/` into
@@ -261,6 +279,7 @@ Card ids in brackets:
 - **SEC** [`c-12df03`] Single-uid start-up fails on a socket in a run dir; MCP uid is not egress-filtered.
 - **SEC** [`c-e70e5c`] Per-task uids: release ended tasks at start-up; per-key lock.
 - **SEC** [`c-cc25b6`] Low-severity audit items.
+- **SEC** [`c-7e0087`] Agent egress floor: two ARTEX servers in one network namespace replace each other's jumps.
 - **E10** [`c-72dd9d`] Code-security testing lane (SAST/dependency ingest) feeding the same dual-graph + evidence model.
 
 ## Known issues and gotchas
@@ -292,13 +311,22 @@ Card ids in brackets:
   container, so the isolation self-test refuses to start. Use named volumes (`c-775dc2`).
 - **Egress floor test:** `TestAgentEgressFloorRefusesMetadataAsRoot` needs root, NET_ADMIN, iptables,
   iproute2 and curl (`apt-get install -y iptables iproute2` in `golang:1.26.11-bookworm`); it skips without
-  them. The floor's rules show up in `iptables -S ARTEX_AGENT_FLOOR`.
+  them. The floor's rules show up in `iptables -S ARTEX_AGENT_FLOOR`; its jumps in `iptables -S OUTPUT`
+  (comment `artex-floor`). It needs `iptables-restore` (in the `iptables` package).
 - **Egress probes:** as the executor, `/app/artex __artex-exec-drop 10001 10001 -- curl …`; rule hits
   show up in `iptables -L ARTEX_EGRESS -v -n -x`.
 - **Secrets** are AES-256-GCM sealed with per-column AAD; losing the key (`keys/secret.key` or
   `ARTEX_SECRET_KEY`) loses stored secrets.
 
 ## Decisions
+
+- **2026-11-24** — c-02e554: the floor is rebuilt with `iptables-restore --noflush` rather than a temp
+  chain and a jump swap: one transaction rebuilds the chain and replaces the jumps, works on both the
+  nf_tables and legacy backends, and needs no second chain name. Every OUTPUT jump to the chain counts as
+  the floor's, tagged or not, so the untagged jumps of `c-b73542` starts are removed too. Drift is a
+  comparison with the `-S` snapshot taken right after install, not a parse of the chain's rules, so
+  iptables' own print format never matters. On drift the floor is re-applied and logged as an ALERT; the
+  server does not stop, since the next check would have the same effect and stopping would end live tasks.
 
 - **2026-11-24** — c-b73542: the agent egress floor is a separate chain (`ARTEX_AGENT_FLOOR`) installed by
   the server, and `egress.sh` was not rewritten. Rebuilding egress.sh's `ARTEX_EGRESS` from Go would have

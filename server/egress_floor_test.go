@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"net"
+	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -58,17 +60,31 @@ func TestAgentEgressRulesDNS(t *testing.T) {
 	}
 }
 
-// fakeIPTables answers -S with an empty OUTPUT and an existing chain, and
-// records every call.
-type fakeIPTables struct{ calls []string }
+// fakeIPTables answers -S with an existing chain and the OUTPUT jumps its last
+// restore inserted (per binary), and records every call.
+type fakeIPTables struct {
+	calls  []string
+	output map[string][]string
+}
 
 func (f *fakeIPTables) run(_ context.Context, stdin, name string, args ...string) ([]byte, error) {
 	f.calls = append(f.calls, name+" "+strings.Join(args, " ")+"\n"+stdin)
-	if args[len(args)-1] == "OUTPUT" {
-		return []byte("-P OUTPUT ACCEPT"), nil
+	bin := strings.TrimSuffix(name, "-restore")
+	if f.output == nil {
+		f.output = map[string][]string{}
 	}
 	if strings.HasSuffix(name, "-restore") {
+		var top []string
+		for _, l := range strings.Split(stdin, "\n") {
+			if r, ok := strings.CutPrefix(l, "-I OUTPUT 1 "); ok {
+				top = append([]string{"-A OUTPUT " + r}, top...)
+			}
+		}
+		f.output[bin] = top
 		return nil, nil
+	}
+	if args[len(args)-1] == "OUTPUT" {
+		return []byte(strings.Join(append([]string{"-P OUTPUT ACCEPT"}, f.output[bin]...), "\n")), nil
 	}
 	return []byte("-N " + args[len(args)-1]), nil
 }
@@ -99,9 +115,11 @@ func TestInstallAgentEgressFloor(t *testing.T) {
 			t.Errorf("missing %q in %v", want, fake.calls)
 		}
 	}
-	// The fake's OUTPUT never holds the jumps: each check sees that and re-applies.
-	before := len(fake.calls)
-	if d := f.check(context.Background()); len(d) != 2 || !strings.Contains(d[0], "ipv4: OUTPUT rule 1") || !fake.has("ip6tables-restore") || len(fake.calls) <= before {
+	if d := f.check(context.Background()); d != nil {
+		t.Fatalf("drift right after install: %v", d)
+	}
+	fake.output["iptables"] = nil // a reload drops the jumps
+	if d := f.check(context.Background()); len(d) != 1 || !strings.HasPrefix(d[0], "ipv4: OUTPUT rule 1") || len(fake.output["iptables"]) != 2 {
 		t.Fatalf("check: %v", d)
 	}
 	// Ipv6 refused: ipv4 still counts, the problem says so.
@@ -111,13 +129,34 @@ func TestInstallAgentEgressFloor(t *testing.T) {
 		}
 		return fake.run(ctx, stdin, name, args...)
 	}
-	if f := installAgentEgressFloor("linux", p, no6); len(f.Status.Installed) != 1 || len(f.keepers) != 1 || !strings.Contains(f.Status.String(), "ipv6 rules not installed") {
-		t.Fatalf("status %+v", f.Status)
+	f6 := installAgentEgressFloor("linux", p, no6)
+	if len(f6.Status.Installed) != 1 || len(f6.keepers) != 2 || !strings.Contains(f6.Status.String(), "ipv6 rules not installed") {
+		t.Fatalf("status %+v", f6.Status)
+	}
+	// Watch retries the family that failed; a repeated error is logged once.
+	if d := f6.check(context.Background()); !slices.Contains(d, "ipv6: "+ownerfw.DriftNotInstalled) || f6.lastErr[ownerfw.IPv6] == "" {
+		t.Fatalf("retry: %v %v", d, f6.lastErr)
+	}
+	if d := f6.check(context.Background()); slices.Contains(d, "ipv6: "+ownerfw.DriftNotInstalled) {
+		t.Fatalf("a repeated error was reported again: %v", d)
+	}
+	f6.keepers[1].Run = fake.run // ip6tables works now
+	if f6.check(context.Background()); f6.lastErr[ownerfw.IPv6] != "" {
+		t.Fatalf("not cleared: %v", f6.lastErr)
+	}
+	noBin := func(ctx context.Context, stdin, name string, args ...string) ([]byte, error) {
+		if strings.HasPrefix(name, "ip6tables") {
+			return nil, exec.ErrNotFound
+		}
+		return fake.run(ctx, stdin, name, args...)
+	}
+	if f := installAgentEgressFloor("linux", p, noBin); len(f.keepers) != 1 {
+		t.Fatalf("no ip6tables is retried: %d keepers", len(f.keepers))
 	}
 	fail := func(context.Context, string, string, ...string) ([]byte, error) {
 		return []byte("Permission denied"), errors.New("exit 4")
 	}
-	if f := installAgentEgressFloor("linux", p, fail); len(f.Status.Installed) != 0 || len(f.keepers) != 0 || !strings.Contains(f.Status.String(), "CAP_NET_ADMIN") {
+	if f := installAgentEgressFloor("linux", p, fail); len(f.Status.Installed) != 0 || len(f.keepers) != 2 || !strings.Contains(f.Status.String(), "CAP_NET_ADMIN") {
 		t.Fatalf("status %+v", f.Status)
 	}
 	never := func(context.Context, string, string, ...string) ([]byte, error) {
@@ -128,6 +167,8 @@ func TestInstallAgentEgressFloor(t *testing.T) {
 		t.Fatalf("status %+v", f.Status)
 	}
 	// Off on Linux: a floor an earlier start left is removed, and the status says so.
+	geteuid = func() int { return 0 }
+	t.Cleanup(func() { geteuid = os.Geteuid })
 	for _, c := range []struct {
 		p    ExecPrivilege
 		env  string
@@ -147,6 +188,11 @@ func TestInstallAgentEgressFloor(t *testing.T) {
 		if st := installAgentEgressFloor("linux", c.p, fail); strings.Contains(st.Status.Problem, "removed") {
 			t.Errorf("%s, iptables unreadable: %+v", c.want, st.Status)
 		}
+		geteuid = func() int { return 1000 }
+		if st := installAgentEgressFloor("linux", c.p, never); strings.Contains(st.Status.Problem, "removed") {
+			t.Errorf("%s, not root: %+v", c.want, st.Status)
+		}
+		geteuid = func() int { return 0 }
 	}
 }
 

@@ -34,10 +34,17 @@ var resolvConfPath = "/etc/resolv.conf"
 
 // AgentEgressFloor is the floor a start installed, kept while the server runs.
 type AgentEgressFloor struct {
-	Status  EgressFloorStatus
-	priv    ExecPrivilege
+	Status EgressFloorStatus
+	priv   ExecPrivilege
+	// keepers hold every family the floor is for, installed or not: Watch
+	// retries one that failed at start-up (a held xtables lock, a firewall
+	// restarting).
 	keepers []*ownerfw.Keeper
+	lastErr map[ownerfw.Family]string // the last error Watch logged per family
 }
+
+// geteuid is os.Geteuid, replaced in tests.
+var geteuid = os.Geteuid
 
 // floorRules are the floor's rules now: the operator's exceptions and the
 // resolver from the environment and resolv.conf.
@@ -60,12 +67,16 @@ func InstallAgentEgressFloor(goos string, p ExecPrivilege, run ownerfw.Runner) *
 		log.Printf("[egress] WARNING: %s", st)
 	default:
 		log.Printf("[egress] %s for uids %s", st, strings.Join(f.keepers[0].Rules.Owners, ", "))
+		return f
+	}
+	if len(f.keepers) > len(st.Installed) {
+		log.Printf("[egress] the agent egress floor is retried every %s until it installs", EgressFloorCheckInterval)
 	}
 	return f
 }
 
 func installAgentEgressFloor(goos string, p ExecPrivilege, run ownerfw.Runner) *AgentEgressFloor {
-	f := &AgentEgressFloor{priv: p}
+	f := &AgentEgressFloor{priv: p, lastErr: map[ownerfw.Family]string{}}
 	off := ""
 	switch {
 	case goos != "linux":
@@ -79,7 +90,10 @@ func installAgentEgressFloor(goos string, p ExecPrivilege, run ownerfw.Runner) *
 	ctx, cancel := context.WithTimeout(context.Background(), egressFloorTimeout)
 	defer cancel()
 	if off != "" {
-		f.Status.Problem = off + removeAgentEgressFloor(ctx, run)
+		f.Status.Problem = off
+		if geteuid() == 0 { // only root can have installed one
+			f.Status.Problem += removeAgentEgressFloor(ctx, run)
+		}
 		return f
 	}
 	rules, bad, err := floorRules(p)
@@ -90,19 +104,28 @@ func installAgentEgressFloor(goos string, p ExecPrivilege, run ownerfw.Runner) *
 		f.Status.Problem = err.Error()
 		return f
 	}
-	for _, fam := range []ownerfw.Family{ownerfw.IPv4, ownerfw.IPv6} {
-		k := &ownerfw.Keeper{Rules: rules, Family: fam, Run: run}
-		if err := k.Apply(ctx); err != nil {
-			if fam == ownerfw.IPv4 {
-				f.Status.Problem = egressFloorHint(err)
-				return f
-			}
-			f.Status.Problem = "ipv6 rules not installed (" + egressFloorHint(err) + "); fd00:ec2::254 and fe80::/10 stay reachable if the host has IPv6"
-			continue
+	v4 := &ownerfw.Keeper{Rules: rules, Family: ownerfw.IPv4, Run: run}
+	v6 := &ownerfw.Keeper{Rules: rules, Family: ownerfw.IPv6, Run: run}
+	if err := v4.Apply(ctx); err != nil {
+		// Without the ipv4 floor there is no floor; Watch retries both families
+		// unless iptables is missing.
+		f.Status.Problem = egressFloorHint(err)
+		if !errors.Is(err, ownerfw.ErrNoBinary) {
+			f.keepers = []*ownerfw.Keeper{v4, v6}
 		}
-		f.keepers = append(f.keepers, k)
-		f.Status.Installed = append(f.Status.Installed, fam)
+		return f
 	}
+	f.keepers = []*ownerfw.Keeper{v4}
+	f.Status.Installed = []ownerfw.Family{ownerfw.IPv4}
+	if err := v6.Apply(ctx); err != nil {
+		f.Status.Problem = "ipv6 rules not installed (" + egressFloorHint(err) + "); fd00:ec2::254 and fe80::/10 stay reachable if the host has IPv6"
+		if !errors.Is(err, ownerfw.ErrNoBinary) {
+			f.keepers = append(f.keepers, v6) // retried by Watch
+		}
+		return f
+	}
+	f.keepers = append(f.keepers, v6)
+	f.Status.Installed = append(f.Status.Installed, ownerfw.IPv6)
 	return f
 }
 
@@ -157,9 +180,21 @@ func (f *AgentEgressFloor) check(parent context.Context) []string {
 	for _, k := range f.keepers {
 		k.Rules = rules
 		d, err := k.Ensure(ctx)
+		if msg := fmt.Sprint(err); err != nil && f.lastErr[k.Family] == msg {
+			continue // logged already; the next change is logged again
+		} else if err != nil {
+			f.lastErr[k.Family] = msg
+		} else if f.lastErr[k.Family] != "" {
+			delete(f.lastErr, k.Family)
+			log.Printf("[egress] the %s agent egress floor can be checked again", k.Family)
+		}
 		switch {
 		case d == "" && err != nil:
-			log.Printf("[egress] ALERT: cannot check the %s agent egress floor: %v", k.Family, err)
+			log.Printf("[egress] ALERT: cannot check the %s agent egress floor: %v (logged once until it changes)", k.Family, err)
+		case err != nil && d == ownerfw.DriftNotInstalled:
+			log.Printf("[egress] ALERT: the %s agent egress floor still cannot be installed: %v (logged once until it changes)", k.Family, err)
+		case d == ownerfw.DriftNotInstalled:
+			log.Printf("[egress] the %s agent egress floor is installed now (it failed at start-up)", k.Family)
 		case err != nil:
 			log.Printf("[egress] ALERT: the %s agent egress floor changed while running (%s) and could not be re-applied: %v; agent processes may reach the cloud instance-metadata addresses", k.Family, d, err)
 		case d == ownerfw.DriftRulesChanged:

@@ -4,6 +4,7 @@ package server
 
 import (
 	"context"
+	"errors"
 	"net"
 	"net/http"
 	"os"
@@ -227,5 +228,32 @@ func TestAgentEgressFloorDNSOnlyToResolverAsRoot(t *testing.T) {
 	}
 	if reaches(t, p.UID, "http://169.254.169.253:53/") || !reaches(t, p.UID, "http://169.254.169.254:53/") {
 		t.Fatal("the floor did not follow the new resolver")
+	}
+}
+
+// A start whose install failed (here a held lock, simulated) is retried by the
+// next check, and the executor is refused from then on.
+func TestAgentEgressFloorFailedStartRetriedAsRoot(t *testing.T) {
+	p := floorRootFixture(t)
+	const url = "http://169.254.169.254/"
+	serveOnLo(t, "169.254.169.254", "80")
+	locked := func(ctx context.Context, stdin, name string, args ...string) ([]byte, error) {
+		if strings.HasSuffix(name, "-restore") {
+			return []byte("Another app is currently holding the xtables lock."), errors.New("exit 4")
+		}
+		return ownerfw.ExecRunner(ctx, stdin, name, args...)
+	}
+	f := installAgentEgressFloor("linux", p, locked)
+	if len(f.Status.Installed) != 0 || len(f.keepers) != 2 || !reaches(t, p.UID, url) {
+		t.Fatalf("failed start: %+v, %d keepers", f.Status, len(f.keepers))
+	}
+	for _, k := range f.keepers {
+		k.Run = ownerfw.ExecRunner // the lock is free again
+	}
+	if d := f.check(context.Background()); len(d) == 0 || !strings.HasSuffix(d[0], ownerfw.DriftNotInstalled) {
+		t.Fatalf("retry: %v", d)
+	}
+	if reaches(t, p.UID, url) {
+		t.Fatal("executor reaches metadata after the retry installed the floor")
 	}
 }

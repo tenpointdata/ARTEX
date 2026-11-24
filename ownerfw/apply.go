@@ -68,6 +68,7 @@ type Keeper struct {
 
 	applied string   // Rules.Render at the last Apply
 	chain   []string // iptables -S Chain right after the last Apply
+	jumps   []string // the first OUTPUT rules (the jumps) right after the last Apply
 }
 
 // Apply installs the rules in one transaction (see the package comment) and
@@ -83,14 +84,24 @@ func (k *Keeper) Apply(ctx context.Context) error {
 	if err := restore(ctx, k.Run, k.Family, k.Rules.restoreInput(k.Family, output)); err != nil {
 		return err
 	}
+	k.applied, k.chain, k.jumps = "", nil, nil
 	chain, ok, err := list(ctx, k.Run, k.Family, k.Rules.Chain)
 	if err != nil || !ok {
-		k.applied, k.chain = "", nil
 		return fmt.Errorf("%s: chain %s missing right after it was installed (%v)", k.Family, k.Rules.Chain, err)
 	}
-	k.applied, k.chain = k.Rules.Render(k.Family), chain
+	output, _, err = list(ctx, k.Run, k.Family, "OUTPUT")
+	if err != nil {
+		return err
+	}
+	if d := jumpDrift(k.Rules, output); d != "" {
+		return fmt.Errorf("%s: right after the install, %s", k.Family, d)
+	}
+	k.applied, k.chain, k.jumps = k.Rules.Render(k.Family), chain, outputRules(output)[:len(k.Rules.Owners)]
 	return nil
 }
+
+// DriftNotInstalled is the Drift of a Keeper whose last Apply failed or never ran.
+const DriftNotInstalled = "not installed yet"
 
 // DriftRulesChanged is the Drift when the Rules, not the kernel, changed.
 const DriftRulesChanged = "the rules to install changed"
@@ -101,7 +112,7 @@ const DriftRulesChanged = "the rules to install changed"
 // other jump to the chain.
 func (k *Keeper) Drift(ctx context.Context) (string, error) {
 	if k.applied == "" {
-		return "not installed yet", nil
+		return DriftNotInstalled, nil
 	}
 	if k.Rules.Render(k.Family) != k.applied {
 		return DriftRulesChanged, nil
@@ -120,17 +131,33 @@ func (k *Keeper) Drift(ctx context.Context) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return jumpDrift(k.Rules, output), nil
+	if d := jumpDrift(k.Rules, output); d != "" {
+		return d, nil
+	}
+	// The same jumps, but changed (a negated owner match, an added -o): compare
+	// them exactly with what the install left.
+	for i, l := range outputRules(output)[:len(k.jumps)] {
+		if l != k.jumps[i] {
+			return fmt.Sprintf("OUTPUT rule %d differs from the jump installed", i+1), nil
+		}
+	}
+	return "", nil
 }
 
-// jumpDrift checks the OUTPUT rules against r's jumps.
-func jumpDrift(r Rules, output []string) string {
+// outputRules are the -A lines of iptables -S OUTPUT.
+func outputRules(output []string) []string {
 	var rules []string
 	for _, l := range output {
 		if strings.HasPrefix(l, "-A OUTPUT") {
 			rules = append(rules, l)
 		}
 	}
+	return rules
+}
+
+// jumpDrift checks the OUTPUT rules against r's jumps.
+func jumpDrift(r Rules, output []string) string {
+	rules := outputRules(output)
 	for i, o := range r.Owners {
 		if i >= len(rules) || !isJumpTo(rules[i], r.Chain) {
 			return fmt.Sprintf("OUTPUT rule %d is not the jump to %s for uid %s", i+1, r.Chain, o)

@@ -40,7 +40,7 @@ boundary and trusted proxies. No password or token value is ever logged there.
 | Untrusted-output boundary | on by default; `ARTEX_UNTRUSTED_BOUNDARY=0\|false\|off\|no` disables it | `agent/untrusted_boundary.go` |
 | Trusted proxies for login rate limit | `ARTEX_TRUSTED_PROXIES` (comma-separated IPs/CIDRs; empty trusts none) | `server.ParseTrustedProxies` |
 | Target user agent | `ARTEX_TARGET_USER_AGENT` (applied by non-`off` noise profiles) | `egress.ProfileByName` |
-| Agent egress floor | on (Linux, privilege drop on); `ARTEX_EGRESS_FILTER=0` turns it and `egress.sh` off; `ARTEX_EGRESS_ALLOW` exceptions; `ARTEX_ALLOW_METADATA_EGRESS=1` lets a start go on when the executor reaches cloud metadata | `server/egress_floor.go` |
+| Agent egress floor | on (Linux, privilege drop on); `ARTEX_EGRESS_FILTER=0` turns it and `egress.sh` off (and removes an earlier start's floor); re-checked every 60 s, `[egress] ALERT` on drift; `ARTEX_EGRESS_ALLOW` exceptions; `ARTEX_ALLOW_METADATA_EGRESS=1` lets a start go on when the executor reaches cloud metadata | `server/egress_floor.go` |
 | Budgets | `ARTEX_TASK_BUDGET_TOKENS` / `_TURNS`, `ARTEX_INTENT_BUDGET_TOKENS` / `_TURNS` | `agent/budget.go` |
 | Live model judge test | `ARTEX_REVIEW_LIVE_CONFIG` (opt-in integration test only) | `server/intercept_live_test.go` |
 
