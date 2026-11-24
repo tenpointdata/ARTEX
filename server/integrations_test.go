@@ -349,9 +349,42 @@ func TestScanImportCreatesAssetsAndUnverifiedFindings(t *testing.T) {
 			if len(again.NewFindings) != 0 || again.Import.FindingsExisting != out.Import.FindingsNew {
 				t.Fatalf("re-import must add nothing: %+v", again.Import)
 			}
+			// The findings list filtered by import shows exactly that import's new findings;
+			// the re-import, which only matched them by dedup key, shows none.
+			for importID, want := range map[int64]int{out.Import.ID: len(out.NewFindings), again.Import.ID: 0} {
+				w := request("GET", fmt.Sprintf("/api/exploration/findings?page=1&limit=200&import_id=%d", importID), "")
+				var page struct {
+					Items []FindingDTO `json:"items"`
+					Total int          `json:"total"`
+				}
+				if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &page) != nil || page.Total != want || len(page.Items) != want {
+					t.Fatalf("import_id=%d: code %d total %d items %d, want %d", importID, w.Code, page.Total, len(page.Items), want)
+				}
+			}
 		})
 	}
 	if w := request("POST", "/api/integrations/imports?format=bogus", "x"); w.Code != 400 {
 		t.Fatalf("bogus format: %d", w.Code)
+	}
+	// The imports list pages: limit/offset select a window, total counts them all.
+	var first, second struct {
+		Imports []db.ScanImport `json:"imports"`
+		Total   int             `json:"total"`
+	}
+	for i := 0; i < 3; i++ {
+		im := &db.ScanImport{Format: "nmap-xml", ToolName: "nmap", FileSHA256: "page"}
+		if err := pg.CreateScanImport(ctx, im); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _, _ = pg.Exec(`DELETE FROM scan_imports WHERE id=$1`, im.ID) })
+	}
+	w := request("GET", "/api/integrations/imports?limit=2", "")
+	if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &first) != nil || len(first.Imports) != 2 || first.Total < 3 {
+		t.Fatalf("imports page 1: %d %s", w.Code, w.Body.String())
+	}
+	w = request("GET", "/api/integrations/imports?limit=2&offset=1", "")
+	if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &second) != nil || len(second.Imports) != 2 ||
+		second.Total != first.Total || second.Imports[0].ID != first.Imports[1].ID {
+		t.Fatalf("imports page with offset: %d %s", w.Code, w.Body.String())
 	}
 }

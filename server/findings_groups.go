@@ -35,7 +35,9 @@ func findingFilterFromQuery(q url.Values) db.FindingFilter {
 		VerificationStatus: normFilter(q.Get("verification_status")),
 		VulnClass:          normFilter(q.Get("vulnclass")),
 		// task_id (independent of the task param, which switches to the per-task-node branch): filters the global table by task.
-		TaskID:     normFilter(q.Get("task_id")),
+		TaskID: normFilter(q.Get("task_id")),
+		// import_id: the findings one scanner import created (Scanner imports → Past imports).
+		ImportID:   normFilter(q.Get("import_id")),
 		Query:      q.Get("q"),
 		Sort:       q.Get("sort"),
 		AssetScope: strings.TrimSpace(q.Get("asset_scope")),

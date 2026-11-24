@@ -3,6 +3,7 @@ package db
 import (
 	"context"
 	"encoding/json"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -114,5 +115,59 @@ func TestFindingTicketUpsert(t *testing.T) {
 	all, _ := d.FindingTicketsByTracker(ctx, tid)
 	if len(all) != 1 {
 		t.Fatalf("want one link, got %d", len(all))
+	}
+}
+
+// An import_id filter shows exactly the findings that import created: a later
+// import that only re-matched one of them by dedup key does not claim it.
+func TestFindingFilterByImport(t *testing.T) {
+	d := notifyTestDB(t)
+	ctx := context.Background()
+	newImport := func() int64 {
+		im := &ScanImport{Format: "nuclei-jsonl", ToolName: "nuclei", FileSHA256: "abc"}
+		if err := d.CreateScanImport(ctx, im); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { d.Exec(`DELETE FROM scan_imports WHERE id=$1`, im.ID) })
+		return im.ID
+	}
+	add := func(importID int64, key string) int64 {
+		id, _, err := d.AddImportedFinding(ctx, ImportedFinding{ImportID: importID, VulnClass: "x", Name: "x",
+			Severity: SeverityLow, Summary: "s", Worker: "import:nuclei", Tool: "nuclei", RuleID: "x",
+			DedupKey: "imp-filter-" + t.Name() + "-" + key})
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { d.Exec(`DELETE FROM findings WHERE id=$1`, id) })
+		return id
+	}
+	a, b := newImport(), newImport()
+	f1, f2 := add(a, "1"), add(a, "2")
+	f3 := add(b, "3")
+	if again := add(b, "1"); again != f1 {
+		t.Fatalf("dedup re-match created %d, want %d", again, f1)
+	}
+	ids := func(importID string) map[int64]bool {
+		rows, total, err := d.ListFindingsPage(FindingFilter{ImportID: importID}, 1, 200)
+		if err != nil {
+			t.Fatal(err)
+		}
+		out := map[int64]bool{}
+		for _, r := range rows {
+			out[r.ID] = true
+		}
+		if total != len(rows) {
+			t.Fatalf("import %s: total %d, rows %d", importID, total, len(rows))
+		}
+		return out
+	}
+	if got := ids(strconv.FormatInt(a, 10)); len(got) != 2 || !got[f1] || !got[f2] {
+		t.Fatalf("import a: %v, want {%d %d}", got, f1, f2)
+	}
+	if got := ids(strconv.FormatInt(b, 10)); len(got) != 1 || !got[f3] {
+		t.Fatalf("import b: %v, want {%d}", got, f3)
+	}
+	if got := ids("999999999"); len(got) != 0 {
+		t.Fatalf("unknown import matched %v", got)
 	}
 }

@@ -257,14 +257,15 @@ func (s *Server) importScan(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, out)
 }
 
-// listScanImports: GET /api/integrations/imports
+// listScanImports: GET /api/integrations/imports?limit=&offset= → {imports, total}
 func (s *Server) listScanImports(w http.ResponseWriter, r *http.Request) {
 	pg := s.pg(w)
 	if pg == nil {
 		return
 	}
 	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
-	list, err := pg.ListScanImports(r.Context(), limit)
+	offset, _ := strconv.Atoi(r.URL.Query().Get("offset"))
+	list, total, err := pg.ListScanImports(r.Context(), limit, offset)
 	if err != nil {
 		writeErr(w, 500, err.Error())
 		return
@@ -272,5 +273,5 @@ func (s *Server) listScanImports(w http.ResponseWriter, r *http.Request) {
 	if list == nil {
 		list = []*db.ScanImport{}
 	}
-	writeJSON(w, 200, map[string]any{"imports": list})
+	writeJSON(w, 200, map[string]any{"imports": list, "total": total})
 }

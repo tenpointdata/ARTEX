@@ -57,14 +57,28 @@ func (d *DB) FinishScanImport(ctx context.Context, im *ScanImport) error {
 	return err
 }
 
-// ListScanImports returns the newest imports first.
-func (d *DB) ListScanImports(ctx context.Context, limit int) ([]*ScanImport, error) {
+// ListScanImports returns one page of imports, newest first, and the total
+// number of imports (for the pager). limit is clamped to 1..500 (default 100);
+// a negative offset counts as 0.
+func (d *DB) ListScanImports(ctx context.Context, limit, offset int) ([]*ScanImport, int, error) {
 	if limit <= 0 || limit > 500 {
 		limit = 100
 	}
+	if offset < 0 {
+		offset = 0
+	}
+	var total int
+	if err := d.QueryRowContext(ctx, `SELECT count(*) FROM scan_imports`).Scan(&total); err != nil {
+		return nil, 0, err
+	}
+	out, err := d.scanImportPage(ctx, limit, offset)
+	return out, total, err
+}
+
+func (d *DB) scanImportPage(ctx context.Context, limit, offset int) ([]*ScanImport, error) {
 	rows, err := d.QueryContext(ctx, `SELECT id, format, tool_name, tool_version, file_name, file_sha256, task_id, imported_by,
 	records, assets, findings_new, findings_existing, skipped, informational, truncated, created_at
-FROM scan_imports ORDER BY created_at DESC, id DESC LIMIT $1`, limit)
+FROM scan_imports ORDER BY created_at DESC, id DESC LIMIT $1 OFFSET $2`, limit, offset)
 	if err != nil {
 		return nil, err
 	}
