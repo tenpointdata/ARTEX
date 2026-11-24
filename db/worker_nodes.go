@@ -262,3 +262,54 @@ WHERE n.id=$1 AND n.kind='intent' AND n.state='running'`, intentID).Scan(&taskID
 	}
 	return taskID, o.String, true, nil
 }
+
+// FindingNode is a finding written into an exploration: its node, the worker
+// that wrote it (the node's origin), the intent it was found on and its summary.
+type FindingNode struct {
+	ID       int64
+	Worker   string
+	IntentID int64 // 0 when neither an edge nor the writer's claim names one
+	Summary  string
+}
+
+// maxFindingNodesPerPoll bounds one FindingNodesSince page.
+const maxFindingNodesPerPoll = 200
+
+// FindingNodesSince returns the exploration's finding nodes with an id above
+// after, oldest first, and the newest id seen (after when there are none). The
+// intent is the one the finding yields from (exploration_edges), or else the
+// intent the writer holds the claim on, as a local worker's wake-up falls back
+// to its own intent.
+func (s *ExplorationStore) FindingNodesSince(after int64) ([]FindingNode, int64, error) {
+	rows, err := s.db.Query(`SELECT n.id, COALESCE(n.origin,''),
+  COALESCE((SELECT e.src_id FROM exploration_edges e WHERE e.exploration_id=n.exploration_id AND e.dst_id=n.id AND e.rel=$3 ORDER BY e.src_id LIMIT 1),
+           (SELECT i.id FROM exploration_nodes i WHERE i.exploration_id=n.exploration_id AND i.kind='intent' AND i.owner=n.origin ORDER BY i.updated_at DESC LIMIT 1), 0),
+  COALESCE(n.payload->>'summary','')
+FROM exploration_nodes n WHERE n.exploration_id=$1 AND n.kind='finding' AND n.id > $2 ORDER BY n.id LIMIT $4`,
+		s.expID, after, RelYields, maxFindingNodesPerPoll)
+	if err != nil {
+		return nil, after, err
+	}
+	defer rows.Close()
+	var out []FindingNode
+	last := after
+	for rows.Next() {
+		var f FindingNode
+		if err := rows.Scan(&f.ID, &f.Worker, &f.IntentID, &f.Summary); err != nil {
+			return nil, after, err
+		}
+		out = append(out, f)
+		last = f.ID
+	}
+	if err := rows.Err(); err != nil {
+		return nil, after, err
+	}
+	return out, last, nil
+}
+
+// LatestFindingNodeID is the newest finding node id of the exploration (0 = none).
+func (s *ExplorationStore) LatestFindingNodeID() (int64, error) {
+	var id int64
+	err := s.db.QueryRow(`SELECT COALESCE(max(id),0) FROM exploration_nodes WHERE exploration_id=$1 AND kind='finding'`, s.expID).Scan(&id)
+	return id, err
+}

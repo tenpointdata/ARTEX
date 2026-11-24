@@ -149,13 +149,19 @@ func (e *Engine) awaitRemoteSettle(ctx context.Context, intentID int64) error {
 }
 
 // remoteSettleLoop runs on the control node per task: it wakes the planner for
-// intents a worker node settled (NotifyDone, as a local worker does) and
-// republishes the worker nodes' activity on this node's live stream.
+// intents a worker node settled (NotifyDone, as a local worker does) and for
+// findings a worker node reported (NotifyFinding, as a local worker's
+// report_finding does), and republishes the worker nodes' activity on this
+// node's live stream.
 func (e *Engine) remoteSettleLoop(ctx context.Context, t *Task) {
 	var since time.Time // zero: the first poll only sets the cursor
 	lastAct, err := t.Store.LatestActivityID()
 	if err != nil {
 		log.Printf("[engine] task %s remote activity cursor: %v", t.ID, err)
+	}
+	lastFinding, err := t.Store.LatestFindingNodeID()
+	if err != nil {
+		log.Printf("[engine] task %s remote finding cursor: %v", t.ID, err)
 	}
 	tick := time.NewTicker(distributedPoll)
 	defer tick.Stop()
@@ -179,6 +185,10 @@ func (e *Engine) remoteSettleLoop(ctx context.Context, t *Task) {
 				}
 			}
 		}
+		if found, next, err := t.Store.FindingNodesSince(lastFinding); err == nil {
+			lastFinding = next
+			relayRemoteFindings(t, found)
+		}
 		acts, cursor, err := t.Store.ActivityList(nil, lastAct, 500)
 		if err != nil {
 			continue
@@ -189,6 +199,17 @@ func (e *Engine) remoteSettleLoop(ctx context.Context, t *Task) {
 				e.bc.Publish(t.ID, a)
 				e.touch(t.ID)
 			}
+		}
+	}
+}
+
+// relayRemoteFindings wakes t's planner for each finding a worker node wrote.
+// A finding written on this node already woke it (agent ToolSet notifyFinding),
+// so only remote writers are relayed: each finding wakes the planner once.
+func relayRemoteFindings(t *Task, found []db.FindingNode) {
+	for _, f := range found {
+		if remoteOwner(f.Worker) {
+			t.NotifyFinding(f.IntentID, f.Summary)
 		}
 	}
 }
