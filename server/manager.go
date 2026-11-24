@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"net/url"
 	"os"
@@ -304,6 +305,11 @@ type Manager struct {
 	node         NodeConfig
 	remoteProxy  *remoteTaskProxy
 	remoteCACert string
+	// proxyRelay is a worker node's loopback TLS relay to the control proxy;
+	// proxyFront the control node's TLS front for it (proxy_tls.go). Either
+	// may be nil.
+	proxyRelay io.Closer
+	proxyFront io.Closer
 	// controlRPC reaches the control node's capture and evidence stores
 	// (node_rpc.go). Worker nodes only.
 	controlRPC *controlRPC
@@ -1080,6 +1086,11 @@ func (m *Manager) SetGlobalProxy(raw string) error {
 func (m *Manager) Close() error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	for _, c := range []io.Closer{m.proxyFront, m.proxyRelay} {
+		if c != nil {
+			_ = c.Close()
+		}
+	}
 	if m.traffic != nil {
 		m.traffic.Close()
 	}
@@ -2273,6 +2284,14 @@ func (m *Manager) configureNodeProxy() error {
 		if err != nil {
 			return fmt.Errorf("ARTEX_CONTROL_PROXY: %w", err)
 		}
+		// An https:// control proxy is reached through a loopback TLS relay
+		// (proxy_tls.go): the agents' proxy URL is the relay's.
+		base, relay, err := controlProxyBase(rp.base, m.node.ControlCA, m.node.ControlProxyTLSName)
+		if err != nil {
+			return fmt.Errorf("ARTEX_CONTROL_PROXY: %w", err)
+		}
+		rp.base = base
+		m.proxyRelay = relay
 		ca, err := fetchProxyCACert(m.pg, m.dir)
 		if err != nil {
 			return fmt.Errorf("control node CA certificate (start the control node first): %w", err)

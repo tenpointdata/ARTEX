@@ -32,17 +32,22 @@ spec:
         - name: artex
           image: {{ include "artex.image" . | quote }}
           imagePullPolicy: {{ .Values.image.pullPolicy }}
-          args: ["-role", "control", "-addr", ":8787", "-proxy", {{ .Values.control.proxyAddr | quote }}]
+          args: ["-role", "control", "-addr", ":8787", "-proxy", {{ include "artex.controlProxyBind" . | quote }}]
           envFrom:
             {{- include "artex.envFrom" . | nindent 12 }}
           env:
             {{- $tlsEnv := dict }}
             {{- if .Values.controlTLS.enabled }}
-            {{- $tlsEnv = dict "ARTEX_TLS_CERT" "/app/tls/tls.crt" "ARTEX_TLS_KEY" "/app/tls/tls.key" }}
+            {{- $tlsEnv = dict "ARTEX_TLS_CERT" "/app/tls/tls.crt" "ARTEX_TLS_KEY" "/app/tls/tls.key" "ARTEX_PROXY_TLS_ADDR" (printf ":%v" .Values.control.proxyTLSPort) }}
             {{- end }}
             {{- include "artex.sharedEnv" (dict "ctx" . "extra" (merge (dict "ARTEX_ROLE" "control" "ARTEX_LOCAL_WORKERS" (toString .Values.control.localWorkers) "ARTEX_PROXY_ALLOW_NONLOOPBACK" "1") $tlsEnv .Values.control.extraEnv)) | nindent 12 }}
           ports:
             - {name: http, containerPort: 8787}
+            {{- if .Values.controlTLS.enabled }}
+            - {name: proxy-tls, containerPort: {{ .Values.control.proxyTLSPort }}}
+            {{- else }}
+            - {name: proxy, containerPort: 8788}
+            {{- end }}
           {{- $scheme := include "artex.controlScheme" . | upper }}
           startupProbe:
             httpGet: {path: /api/health, port: http, scheme: {{ $scheme }}}

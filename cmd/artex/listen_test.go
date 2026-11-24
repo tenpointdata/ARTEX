@@ -4,6 +4,8 @@ import (
 	"crypto/tls"
 	"strings"
 	"testing"
+
+	"github.com/Autumn-27/artex/server"
 )
 
 func TestIsLoopbackListenAddr(t *testing.T) {
@@ -38,5 +40,29 @@ func TestCheckListenSecurity(t *testing.T) {
 func TestServerTLSConfigMinVersion(t *testing.T) {
 	if serverTLSConfig().MinVersion < tls.VersionTLS12 {
 		t.Fatal("minimum TLS version below 1.2")
+	}
+}
+
+func TestCheckProxyTLS(t *testing.T) {
+	cases := []struct {
+		name                    string
+		front, proxy, cert, key string
+		role                    server.NodeRole
+		ok                      bool
+	}{
+		{"off", "", "", "", "", server.RoleControl, true},
+		{"control with cert", ":8789", "127.0.0.1:8788", "c.pem", "k.pem", server.RoleControl, true},
+		{"single process with cert", "127.0.0.1:8789", "127.0.0.1:8788", "c.pem", "k.pem", server.RoleAll, true},
+		{"worker", ":8789", "", "c.pem", "k.pem", server.RoleWorker, false},
+		{"no proxy", ":8789", "", "c.pem", "k.pem", server.RoleControl, false},
+		{"no cert", ":8789", "127.0.0.1:8788", "", "", server.RoleControl, false},
+		{"cert without key", ":8789", "127.0.0.1:8788", "c.pem", "", server.RoleControl, false},
+		{"bad address", "8789", "127.0.0.1:8788", "c.pem", "k.pem", server.RoleControl, false},
+	}
+	for _, c := range cases {
+		err := checkProxyTLS(c.front, c.proxy, c.cert, c.key, c.role)
+		if (err == nil) != c.ok {
+			t.Errorf("%s: err = %v, want ok=%v", c.name, err, c.ok)
+		}
 	}
 }

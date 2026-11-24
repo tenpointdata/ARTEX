@@ -2,7 +2,6 @@ package traffic
 
 import (
 	"errors"
-	"io"
 	"net"
 	"net/url"
 	"sync"
@@ -29,10 +28,7 @@ type ScopeRelay struct {
 	t     *Traffic
 	token string
 	once  sync.Once
-	mu    sync.Mutex
-	done  bool // Close ran; no connection is tracked from then
-	conns map[net.Conn]struct{}
-	slots chan struct{} // one per client connection relayed at once (maxRelayConns)
+	conns *connSet // open connections, at most maxRelayConns clients at once
 }
 
 // maxRelayConns caps the client connections one relay serves at once; a
@@ -65,8 +61,8 @@ func (t *Traffic) StartScopeRelay(proxyURL string) (string, *ScopeRelay, error) 
 	if err != nil {
 		return "", nil, err
 	}
-	r := &ScopeRelay{URL: "http://" + ln.Addr().String(), ln: ln, t: t, token: tok, conns: map[net.Conn]struct{}{}, slots: make(chan struct{}, maxRelayConns)}
-	go r.serve(u.Host)
+	r := &ScopeRelay{URL: "http://" + ln.Addr().String(), ln: ln, t: t, token: tok, conns: newConnSet(maxRelayConns)}
+	go r.conns.serveConns(ln, func(down net.Conn) { r.relay(down, u.Host) })
 	return r.URL, r, nil
 }
 
@@ -77,49 +73,9 @@ func (r *ScopeRelay) Close() error {
 	}
 	r.once.Do(func() {
 		_ = r.ln.Close()
-		r.mu.Lock()
-		r.done = true
-		for c := range r.conns {
-			_ = c.Close()
-		}
-		r.mu.Unlock()
+		r.conns.closeAll()
 	})
 	return nil
-}
-
-func (r *ScopeRelay) serve(proxyHost string) {
-	for {
-		down, err := r.ln.Accept()
-		if err != nil {
-			return
-		}
-		select {
-		case r.slots <- struct{}{}:
-			go func() {
-				defer func() { <-r.slots }()
-				r.relay(down, proxyHost)
-			}()
-		default:
-			_ = down.Close() // over maxRelayConns
-		}
-	}
-}
-
-// track adds c to the open connections; false once the relay is closed.
-func (r *ScopeRelay) track(c net.Conn) bool {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if r.done {
-		return false
-	}
-	r.conns[c] = struct{}{}
-	return true
-}
-
-func (r *ScopeRelay) untrack(c net.Conn) {
-	r.mu.Lock()
-	delete(r.conns, c)
-	r.mu.Unlock()
 }
 
 // relayDialTimeout bounds a relay's dial of the recording proxy (loopback).
@@ -146,21 +102,5 @@ func (r *ScopeRelay) relay(down net.Conn, proxyHost string) {
 	key := up.LocalAddr().String()
 	r.t.sink.relayed.Store(key, r.token)
 	defer r.t.sink.relayed.CompareAndSwap(key, r.token, endedRelayToken)
-	if !r.track(down) || !r.track(up) {
-		return
-	}
-	defer r.untrack(down)
-	defer r.untrack(up)
-	done := make(chan struct{}, 2)
-	pipe := func(dst, src net.Conn) {
-		_, _ = io.Copy(dst, src)
-		if cw, ok := dst.(interface{ CloseWrite() error }); ok {
-			_ = cw.CloseWrite()
-		}
-		done <- struct{}{}
-	}
-	go pipe(up, down)
-	go pipe(down, up)
-	<-done
-	<-done
+	r.conns.splice(down, up)
 }

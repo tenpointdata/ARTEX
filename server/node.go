@@ -56,7 +56,8 @@ type NodeConfig struct {
 	// with 0 leaves every intent to the worker nodes.
 	Workers int
 	// ControlProxy is the control node's recording proxy as worker nodes reach
-	// it (for example http://artex-control:8788). Worker nodes only.
+	// it (for example https://artex-control-proxy:8789, its TLS front, or
+	// http://artex-control:8788). Worker nodes only.
 	ControlProxy string
 	// ControlAPI is the control node's API as worker nodes reach it (for
 	// example http://artex-control:8787); worker nodes call its node RPC for
@@ -67,6 +68,11 @@ type NodeConfig struct {
 	// certificate (ARTEX_CONTROL_CA). Set, the worker reaches the control API
 	// only over https:// and trusts only this CA (node_tls.go). Worker nodes only.
 	ControlCA string
+	// ControlProxyTLSName is the name an https:// ControlProxy's certificate
+	// is checked against (ARTEX_CONTROL_PROXY_TLS_NAME); empty: its host. The
+	// Helm chart reaches the proxy through its own Service and checks the
+	// control API's name, which the certificate covers (proxy_tls.go).
+	ControlProxyTLSName string
 }
 
 // Distributed reports whether other processes may run this database's intents.
@@ -86,7 +92,7 @@ func remoteOwner(owner string) bool { return strings.Contains(owner, "/work#") }
 
 // NodeConfigFromEnv reads ARTEX_NODE_ID (default: host name), ARTEX_LOCAL_WORKERS
 // (control) or ARTEX_NODE_WORKERS (worker), ARTEX_CONTROL_PROXY and
-// ARTEX_CONTROL_API and ARTEX_CONTROL_CA.
+// ARTEX_CONTROL_API, ARTEX_CONTROL_CA and ARTEX_CONTROL_PROXY_TLS_NAME.
 func NodeConfigFromEnv(role NodeRole) (NodeConfig, error) {
 	host, _ := os.Hostname()
 	c := NodeConfig{Role: role, Host: host, Workers: -1, NodeID: strings.TrimSpace(os.Getenv("ARTEX_NODE_ID"))}
@@ -114,6 +120,7 @@ func NodeConfigFromEnv(role NodeRole) (NodeConfig, error) {
 		c.ControlProxy = strings.TrimSpace(os.Getenv("ARTEX_CONTROL_PROXY"))
 		c.ControlAPI = strings.TrimSpace(os.Getenv("ARTEX_CONTROL_API"))
 		c.ControlCA = strings.TrimSpace(os.Getenv("ARTEX_CONTROL_CA"))
+		c.ControlProxyTLSName = strings.TrimSpace(os.Getenv("ARTEX_CONTROL_PROXY_TLS_NAME"))
 	}
 	return c, nil
 }

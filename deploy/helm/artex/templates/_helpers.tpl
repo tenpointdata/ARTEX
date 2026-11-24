@@ -170,3 +170,28 @@ capabilities:
 {{- end }}
 {{- end }}
 {{- end }}
+
+{{/* ---- Recording proxy hop (docs/DISTRIBUTED.md "Transport", c-677166) ----
+With controlTLS.enabled the plain proxy binds loopback only (the control node's
+own agents) and worker nodes reach its TLS front on control.proxyTLSPort through the
+<release>-control-proxy Service, checking the certificate against
+<release>-control (ARTEX_CONTROL_PROXY_TLS_NAME), the name every controlTLS
+source already covers. */}}
+{{- define "artex.controlProxyBind" -}}
+{{- if .Values.control.proxyAddr -}}
+{{ .Values.control.proxyAddr }}
+{{- else if .Values.controlTLS.enabled -}}
+127.0.0.1:8788
+{{- else -}}
+0.0.0.0:8788
+{{- end -}}
+{{- end }}
+
+{{/* ARTEX_CONTROL_PROXY for worker nodes. */}}
+{{- define "artex.controlProxyURL" -}}
+{{- if .Values.controlTLS.enabled -}}
+{{ printf "https://%s-control-proxy:%v" (include "artex.fullname" .) .Values.control.proxyTLSPort }}
+{{- else -}}
+{{ printf "http://%s-control-proxy:8788" (include "artex.fullname" .) }}
+{{- end -}}
+{{- end }}

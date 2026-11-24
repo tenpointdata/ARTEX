@@ -138,7 +138,7 @@ Worker nodes make two kinds of connection to the control node:
 | Connection | Carries | Default protection |
 | --- | --- | --- |
 | Control API (`ARTEX_CONTROL_API`), node RPC | `tool`/`preview` payloads with captured target traffic (session cookies, credentials), findings | **TLS, CA pinned** (Helm and compose), plus the HMAC on every request and reply |
-| Recording proxy (`ARTEX_CONTROL_PROXY`) | the agents' target traffic | plain HTTP to the proxy; HTTPS targets stay TLS inside `CONNECT` |
+| Recording proxy (`ARTEX_CONTROL_PROXY`) | the agents' target traffic and the per-task scope token | **TLS, CA pinned** (Helm and compose): a loopback relay on the worker dials the proxy's TLS front |
 
 - **Control side.** The control node serves its API over TLS when
   `ARTEX_TLS_CERT`/`ARTEX_TLS_KEY` (or `-tls-cert`/`-tls-key`) are set. It
@@ -178,14 +178,43 @@ Worker nodes make two kinds of connection to the control node:
   CA key is discarded, so nothing else can be signed with it. Existing files
   are kept, so it is safe to run on every start. To renew, delete the files,
   rerun the command and restart the workers.
-- **The proxy hop is still plain HTTP.** Agent tools speak to the recording
-  proxy as an ordinary HTTP proxy, and most of them cannot use a TLS proxy.
-  HTTPS targets are unaffected: the MITM TLS session runs from the worker to
-  the control proxy inside `CONNECT`. Plain-HTTP target traffic and the
-  per-task scope token in `Proxy-Authorization` do cross the network in clear
-  text. Until a worker-side TLS relay exists (card c-677166), keep
-  the proxy port on a trusted network. The Helm `networkPolicy.enabled` admits
-  only worker pods to it.
+- **The proxy hop (c-677166).** Agent tools (curl, nuclei, sqlmap,
+  Playwright) speak to their proxy as an ordinary plain-HTTP proxy, and most
+  cannot use a TLS proxy, so the TLS runs between two relays:
+  - *Control side:* `-proxy-tls <addr>` (`ARTEX_PROXY_TLS_ADDR`) serves the
+    recording proxy's TLS front with the control API's certificate
+    (`-tls-cert`/`-tls-key`, reloaded the same way). It terminates TLS and
+    hands each connection to the proxy over loopback, marked as a remote
+    client: the proxy still refuses a client without an active scope token,
+    although the bytes reach it from loopback. Starting the front turns
+    `RequireScopeForRemoteClients` on.
+  - *Worker side:* when `ARTEX_CONTROL_PROXY` is `https://host:port`, the
+    worker starts a loopback relay (`127.0.0.1:<free port>`) that dials it over
+    TLS, trusting only `ARTEX_CONTROL_CA` (else the system roots) and checking
+    the certificate against `ARTEX_CONTROL_PROXY_TLS_NAME` (default: the URL's
+    host). The agents' proxy URL is `http://artex-scope:<token>@127.0.0.1:<port>`;
+    the relay adds and checks nothing, so the scope decision stays on the
+    control node. A dial failure (wrong CA, wrong name) is logged at most once
+    a minute and the agent's request fails; nothing falls back to clear text.
+  - *Plain HTTP:* an `http://` `ARTEX_CONTROL_PROXY` still works, with a
+    WARNING at start-up: plain-HTTP target traffic and the token then cross the
+    network in clear text (HTTPS targets stay TLS inside `CONNECT`).
+  - *Helm:* with `controlTLS.enabled` the plain proxy binds `127.0.0.1:8788`
+    (the control node's own agents), the front listens on
+    `control.proxyTLSPort` (8789), and the ClusterIP Service
+    `<release>-control-proxy` exposes only that port. Workers get
+    `ARTEX_CONTROL_PROXY=https://<release>-control-proxy:8789` and
+    `ARTEX_CONTROL_PROXY_TLS_NAME=<release>-control`, a name every
+    `controlTLS.source` certificate already covers, so no certificate needs
+    reissuing. `networkPolicy.enabled` admits only worker pods to the port.
+  - *Compose:* the control node runs `-proxy-tls :8789`; workers use
+    `https://artex:8789` (the certificate names `artex`). The plain proxy keeps
+    `0.0.0.0:8788` so the base file's host port `127.0.0.1:8788` still reaches
+    it; it refuses token-less remote clients.
+  - *Egress floors:* a worker's agents now dial `127.0.0.1:<relay port>`
+    rather than the control host, so a host egress filter must allow the
+    agent identity to reach loopback (it already must for a single-process
+    deployment's proxy).
 
 ## Deploying
 
@@ -199,14 +228,14 @@ Worker nodes make two kinds of connection to the control node:
   `secretKey.existingSecret`. `lookup` cannot keep a generated key across
   renders.
 - **Separate hosts by hand.** Run the control node with
-  `-role control -proxy :8788`. On each other host, run
+  `-role control -proxy 127.0.0.1:8788 -proxy-tls :8789`. On each other host, run
   `-role worker -health-addr :8790` with the same database environment,
-  `ARTEX_SECRET_KEY`, LLM configuration, `ARTEX_CONTROL_PROXY=http://<control>:8788`,
+  `ARTEX_SECRET_KEY`, LLM configuration, `ARTEX_CONTROL_PROXY=https://<control>:8789`,
   `ARTEX_CONTROL_API=https://<control>:<api port>` and `ARTEX_CONTROL_CA`.
   Make the files with `artex node-tls -dir tls -names <control host> -ips
   <control ip>`, start the control node with `ARTEX_TLS_CERT=tls/tls.crt
   ARTEX_TLS_KEY=tls/tls.key`, and copy only `tls/ca.crt` to the workers.
-  Worker nodes must reach the control API as well as the proxy.
+  Worker nodes must reach the control API as well as the proxy's TLS front.
 
 ## Limits
 

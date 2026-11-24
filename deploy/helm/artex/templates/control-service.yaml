@@ -20,8 +20,10 @@ spec:
     {{- include "artex.selector" (dict "ctx" . "component" "control") | nindent 4 }}
 ---
 # The recording proxy, for worker nodes only. ClusterIP; the proxy refuses a
-# non-loopback client that presents no task scope token, and the optional
-# NetworkPolicy admits only worker pods to this port.
+# remote client that presents no task scope token, and the optional
+# NetworkPolicy admits only worker pods to this port. With controlTLS.enabled
+# it is the proxy's TLS front (docs/DISTRIBUTED.md "Transport"); workers check
+# its certificate against <release>-control (ARTEX_CONTROL_PROXY_TLS_NAME).
 apiVersion: v1
 kind: Service
 metadata:
@@ -31,8 +33,14 @@ metadata:
 spec:
   type: ClusterIP
   ports:
+    {{- if .Values.controlTLS.enabled }}
+    - name: proxy-tls
+      port: {{ .Values.control.proxyTLSPort }}
+      targetPort: proxy-tls
+    {{- else }}
     - name: proxy
       port: 8788
       targetPort: 8788
+    {{- end }}
   selector:
     {{- include "artex.selector" (dict "ctx" . "component" "control") | nindent 4 }}

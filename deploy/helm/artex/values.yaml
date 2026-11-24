@@ -158,13 +158,16 @@ control:
     tls: []
     #  - secretName: artex-tls
     #    hosts: [artex.example.com]
-  # Capture proxy bind inside the control pod. Worker nodes reach it through the
-  # ClusterIP Service <release>-control-proxy:8788. In the control role the proxy
-  # refuses any non-loopback client that presents no worker scope token. The proxy
-  # hop is plain HTTP (controlTLS covers the API only): HTTPS targets stay TLS inside
-  # CONNECT, but plain-HTTP target traffic and the scope token cross in clear text;
-  # see docs/DISTRIBUTED.md "Transport".
-  proxyAddr: "0.0.0.0:8788"
+  # Capture proxy bind inside the control pod. Empty picks the default: with
+  # controlTLS.enabled, 127.0.0.1:8788 (the control node's own agents) plus a TLS
+  # front on proxyTLSPort, which worker nodes reach through <release>-control-proxy:<proxyTLSPort>
+  # via a loopback relay pinned to the control CA (certificate name <release>-control), so plain-HTTP target traffic and
+  # the scope token never cross the network in clear text. Without controlTLS,
+  # 0.0.0.0:8788 behind the Service <release>-control-proxy:8788 (plain HTTP).
+  # Either way the proxy refuses a remote client that presents no worker scope
+  # token. See docs/DISTRIBUTED.md "Transport".
+  proxyAddr: ""
+  proxyTLSPort: 8789
   terminationGracePeriodSeconds: 60
   podAnnotations: {}
   podLabels: {}

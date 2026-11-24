@@ -53,6 +53,7 @@ func (s *sink) ClientDisconnected(c *mproxy.ClientConn) {
 		s.unbindScope(c)
 		if key := clientKey(c); key != "" {
 			s.relayed.Delete(key) // scope_relay.go: the relay connection is gone
+			s.fronted.Delete(key) // proxy_tls_front.go: likewise
 			s.clients.CompareAndDelete(key, c)
 		}
 	}

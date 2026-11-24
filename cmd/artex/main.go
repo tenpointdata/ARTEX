@@ -107,6 +107,8 @@ func run() int {
 		tlsCert = flag.String("tls-cert", os.Getenv(envTLSCert), "TLS certificate file (PEM); with -tls-key serves HTTPS (env ARTEX_TLS_CERT)")
 		tlsKey  = flag.String("tls-key", os.Getenv(envTLSKey), "TLS private key file (PEM) (env ARTEX_TLS_KEY)")
 		proxy   = flag.String("proxy", "127.0.0.1:8788", "traffic recording proxy address (empty to disable)")
+		// TLS front of the recording proxy for worker nodes (c-677166).
+		proxyTLS = flag.String("proxy-tls", os.Getenv(envProxyTLSAddr), "listen address of the recording proxy's TLS front for worker nodes, with the -tls-cert/-tls-key certificate (e.g. :8789; empty: none) (env ARTEX_PROXY_TLS_ADDR)")
 		// Identity of every agent process (Bash, the shell, custom tools, MCP stdio).
 		// A negative uid turns the drop off; 0 (root) is refused.
 		execUID = flag.Int("exec-uid", server.DefaultExecUID, "uid that agent processes run as (Bash, shell, custom tools, MCP stdio); -1 turns the drop off")
@@ -144,6 +146,11 @@ func run() int {
 			fmt.Fprintln(os.Stderr, "artex:", err)
 			return 2
 		}
+	}
+
+	if err := checkProxyTLS(*proxyTLS, *proxy, *tlsCert, *tlsKey, role); err != nil {
+		fmt.Fprintln(os.Stderr, "artex:", err)
+		return 2
 	}
 
 	printBanner(*addr)
@@ -273,14 +280,26 @@ func run() int {
 		ReadTimeout:       30 * time.Minute,
 		IdleTimeout:       2 * time.Minute,
 	}
-	if useTLS {
-		reloader, err := newCertReloader(*tlsCert, *tlsKey, 30*time.Second)
-		if err != nil {
+	// One reloader serves the API listener and the proxy TLS front: both use
+	// the -tls-cert/-tls-key pair.
+	var reloader *certReloader
+	if useTLS || *proxyTLS != "" {
+		if reloader, err = newCertReloader(*tlsCert, *tlsKey, 30*time.Second); err != nil {
 			log.Printf("[tls] %v", err)
 			return 1
 		}
+	}
+	if useTLS {
 		httpSrv.TLSConfig = serverTLSConfig()
 		httpSrv.TLSConfig.GetCertificate = reloader.GetCertificate
+	}
+	if *proxyTLS != "" {
+		cfg := serverTLSConfig()
+		cfg.GetCertificate = reloader.GetCertificate
+		if err := mgr.ServeProxyTLS(*proxyTLS, cfg); err != nil {
+			log.Printf("[tls] %v", err)
+			return 1
+		}
 	}
 
 	go func() {
