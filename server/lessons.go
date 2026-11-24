@@ -33,6 +33,18 @@ func rsiLessonsMode() string {
 	}
 }
 
+// rsiLessonsShared reads the cross-engagement opt-in. Unset (default), a task
+// sees lessons only from its own company or declared target. With
+// ARTEX_RSI_LESSONS_SHARED=1, scrubbed lessons from other engagements are also
+// selectable, flagged cross_scope and without evidence ids. Read per call.
+func rsiLessonsShared() bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("ARTEX_RSI_LESSONS_SHARED"))) {
+	case "1", "true", "yes", "on":
+		return true
+	}
+	return false
+}
+
 // wireTaskLessons selects the lessons visible to a task and, in inject mode,
 // attaches the rendered block to the planner and worker. The block is
 // code-owned: it is appended after the rendered prompt and cannot be removed
@@ -47,7 +59,7 @@ func (s *Server) wireTaskLessons(t *Task, wk *agent.Worker, pl *agent.Planner) {
 	if err != nil {
 		return
 	}
-	lessons, err := s.m.PG().TaskLessons(context.Background(), taskID, 8)
+	lessons, err := s.m.PG().TaskLessonsShared(context.Background(), taskID, 8, rsiLessonsShared())
 	if err != nil {
 		log.Printf("[rsi] lesson selection failed for task %s: %v", t.ID, err)
 		return
@@ -73,7 +85,7 @@ func (s *Server) taskLessons(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 400, "invalid task id")
 		return
 	}
-	lessons, err := s.m.PG().TaskLessons(r.Context(), id, 50)
+	lessons, err := s.m.PG().TaskLessonsShared(r.Context(), id, 50, rsiLessonsShared())
 	if errors.Is(err, sql.ErrNoRows) {
 		writeErr(w, 404, "task not found")
 		return
@@ -86,6 +98,7 @@ func (s *Server) taskLessons(w http.ResponseWriter, r *http.Request) {
 	block, _ := db.RenderLessons(lessons, 1800)
 	writeJSON(w, 200, map[string]any{
 		"mode":    rsiLessonsMode(),
+		"shared":  rsiLessonsShared(),
 		"lessons": lessons,
 		"block":   block,
 		"count":   len(lessons),
