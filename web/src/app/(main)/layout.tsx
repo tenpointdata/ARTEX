@@ -5,7 +5,9 @@ import * as React from "react";
 
 import { AppSidebar } from "@/app/(main)/_components/sidebar/app-sidebar";
 import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
+import { SessionProvider } from "@/hooks/use-session";
 import { auth } from "@/lib/auth";
+import type { SessionInfo } from "@/lib/governance-types";
 import { getClientCookie } from "@/lib/cookie.client";
 import {
   SIDEBAR_COLLAPSIBLE_VALUES,
@@ -32,13 +34,13 @@ export default function Layout({ children }: Readonly<{ children: ReactNode }>) 
   // Client-side auth gate — replaces the Next proxy/middleware that static export
   // disables. No token → bounce to /login; render nothing until confirmed so no
   // protected UI (or its API calls) flashes for a logged-out visitor.
-  const [authed, setAuthed] = React.useState(false);
+  const [session, setSession] = React.useState<SessionInfo | null>(null);
   React.useEffect(() => {
     let cancelled = false;
-    void auth.isAuthenticated().then(async (ok) => {
+    void auth.session().then(async (s) => {
       if (cancelled) return;
-      if (ok) {
-        setAuthed(true);
+      if (s.authenticated) {
+        setSession(s);
       } else {
         // Clear a stale cookie server-side too: otherwise proxy.ts, going by "cookie exists"
         // alone, would bounce us from /login back to the main UI in an infinite redirect.
@@ -63,9 +65,10 @@ export default function Layout({ children }: Readonly<{ children: ReactNode }>) 
     PREFERENCE_DEFAULTS.sidebar_collapsible,
   );
 
-  if (!authed) return null;
+  if (!session) return null;
 
   return (
+    <SessionProvider value={session}>
     <SidebarProvider
       defaultOpen={defaultOpen}
       style={
@@ -88,5 +91,6 @@ export default function Layout({ children }: Readonly<{ children: ReactNode }>) 
         <MainContent>{children}</MainContent>
       </SidebarInset>
     </SidebarProvider>
+    </SessionProvider>
   );
 }
