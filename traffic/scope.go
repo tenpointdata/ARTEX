@@ -216,6 +216,10 @@ func clientKey(c *mproxy.ClientConn) string {
 // tunnel are left alone: there the CONNECT fixed the server, and a Host header
 // (or an absolute-form target, legal inside a TLS tunnel) that differs from it
 // is the client's to send; rerouting it would also drop the TLS.
+//
+// Still unfixed upstream through v1.9.5. The drafted upstream report and patch,
+// and the removal steps for when a fixed release ships, are in
+// docs/upstream/go-mitmproxy-keepalive-host-pinning.md (card c-9b48b7).
 func unpinHostChange(f *mproxy.Flow) {
 	raw := f.Request.Raw()
 	sc := f.ConnContext.ServerConn

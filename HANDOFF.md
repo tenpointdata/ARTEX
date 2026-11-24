@@ -186,6 +186,9 @@ the newer main (`-exec-uid-range`, #18).
   artifact should be for your use.
 - **SEC: live Playwright scope-relay check** (S), card `c-517c2d`: a real task with capture on and the
   seeded Playwright MCP. Done = the browser's dials show the task scope and an out-of-scope host is refused.
+- **SEC: approve filing the go-mitmproxy keep-alive host-pinning bug upstream** (XS), card `c-9b48b7`.
+  Draft issue + tested patch: `docs/upstream/go-mitmproxy-keepalive-host-pinning.md`. Done = issue and PR
+  open at lqqyt2423/go-mitmproxy (an agent can file once approved).
 
 **Blocked**
 - Nothing blocked.
@@ -229,7 +232,7 @@ Card ids in brackets:
 - **E9** [`c-73af97`] Frontend/UX pass (tables over cards, fewer-clicks triage workflow, live engagement dashboard).
 - **SEC** [`c-517c2d`] Live Playwright task check of the scope relay (human/bench: needs an LLM key and an authorized target).
 - **SEC** [`c-3b9252`] Capture-proxy upstream connection reuse across scopes (rules checked only at dial time).
-- **SEC** [`c-9b48b7`] Report go-mitmproxy keep-alive host pinning upstream; drop `unpinHostChange` once fixed.
+- **SEC** [`c-9b48b7`] go-mitmproxy keep-alive host pinning: report and patch drafted and tested (`docs/upstream/go-mitmproxy-keepalive-host-pinning.md`), **not filed: waiting on Ian's go-ahead** to file upstream. Still unfixed through v1.9.5; then bump and drop `unpinHostChange`.
 - **SEC** [`c-dadc14`] Verify the security branch on Linux root, in Docker and against Postgres, plus the web typecheck.
 - **SEC** [`c-a0af33`] Logout does not revoke the session token (valid until the 7-day JWT TTL).
 - **SEC** [`c-775dc2`] Docker Desktop bind mounts defeat executor isolation; stock compose will not start on a Mac.
@@ -244,6 +247,7 @@ Card ids in brackets:
 
 ## Known issues and gotchas
 
+- go-mitmproxy (v1.9.2 through v1.9.5) pins a keep-alive plain-HTTP client connection to the first host's upstream; `unpinHostChange` (`traffic/scope.go`) works around it until an upstream fix ships (`c-9b48b7`). Bumping to v1.9.5 alone does not fix it.
 - go-mitmproxy v1.9.2 has no upstream dial hook. Every capture-proxy upstream dial goes through its
   upstream-proxy URL, which is our loopback gate (random credential, `traffic/upstream_gate.go`). Do not
   set `SetUpstreamProxy` back to returning nil: nil means a bare `net.Dialer` as root, with no checks (`c-485de0`).

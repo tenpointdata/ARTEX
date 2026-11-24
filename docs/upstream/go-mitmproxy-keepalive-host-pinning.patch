@@ -1,0 +1,87 @@
+diff --git a/proxy/attacker.go b/proxy/attacker.go
+index 44e1a09..599c8a3 100644
+--- a/proxy/attacker.go
++++ b/proxy/attacker.go
+@@ -190,6 +190,7 @@ func (a *attacker) ServeHTTP(res http.ResponseWriter, req *http.Request) {
+ 
+ func (a *attacker) initHttpDialFn(req *http.Request) {
+ 	connCtx := req.Context().Value(connContextKey).(*ConnContext)
++	connCtx.plainHttpProxy = true
+ 	connCtx.dialFn = func(ctx context.Context) error {
+ 		addr := helper.CanonicalAddr(req.URL)
+ 		c, err := a.proxy.getUpstreamConn(ctx, req)
+@@ -595,6 +596,14 @@ func (a *attacker) attack(res http.ResponseWriter, req *http.Request) {
+ 			useSeparateClient = true
+ 		}
+ 	}
++	// A keep-alive plain HTTP proxy connection may name a different host in
++	// each request. ServerConn was dialled for the first one, so a request to
++	// another host must not be sent over it.
++	if !useSeparateClient && f.ConnContext.plainHttpProxy {
++		if sc := f.ConnContext.ServerConn; sc != nil && sc.Address != helper.CanonicalAddr(f.Request.URL) {
++			useSeparateClient = true
++		}
++	}
+ 
+ 	var proxyRes *http.Response
+ 	if useSeparateClient {
+diff --git a/proxy/connection.go b/proxy/connection.go
+index 9dd273c..9777c0d 100644
+--- a/proxy/connection.go
++++ b/proxy/connection.go
+@@ -84,6 +84,7 @@ type ConnContext struct {
+ 	proxy              *Proxy
+ 	closeAfterResponse bool                        // after http response, http server will close the connection
+ 	dialFn             func(context.Context) error // when begin request, if there no ServerConn, use this func to dial
++	plainHttpProxy     bool                        // client sends absolute-form plain HTTP proxy requests on this connection
+ }
+ 
+ func newConnContext(c net.Conn, proxy *Proxy) *ConnContext {
+diff --git a/proxy/keepalive_host_test.go b/proxy/keepalive_host_test.go
+new file mode 100644
+index 0000000..4375dbd
+--- /dev/null
++++ b/proxy/keepalive_host_test.go
+@@ -0,0 +1,42 @@
++package proxy
++
++import (
++	"io"
++	"net"
++	"net/http"
++	"net/url"
++	"testing"
++	"time"
++)
++
++// A keep-alive plain HTTP proxy connection that names a second host must
++// reach that host, not the server dialled for the first request.
++func TestProxyKeepAliveHostChange(t *testing.T) {
++	serve := func(body string) string {
++		ln, err := net.Listen("tcp", "127.0.0.1:0")
++		handleError(t, err)
++		srv := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
++			io.WriteString(w, body)
++		})}
++		go srv.Serve(ln)
++		t.Cleanup(func() { srv.Close() })
++		return "http://" + ln.Addr().String() + "/"
++	}
++	urlA, urlB := serve("A"), serve("B")
++
++	p, err := NewProxy(&Options{Addr: "127.0.0.1:29091"})
++	handleError(t, err)
++	go p.Start()
++	t.Cleanup(func() { p.Close() })
++	time.Sleep(100 * time.Millisecond)
++
++	tr := &http.Transport{
++		Proxy:           func(*http.Request) (*url.URL, error) { return url.Parse("http://127.0.0.1:29091") },
++		MaxConnsPerHost: 1, // one client connection to the proxy, reused for both hosts
++	}
++	t.Cleanup(tr.CloseIdleConnections)
++	client := &http.Client{Transport: tr}
++	testSendRequest(t, urlA, client, "A")
++	testSendRequest(t, urlB, client, "B")
++	testSendRequest(t, urlA, client, "A")
++}
