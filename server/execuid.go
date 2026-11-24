@@ -39,7 +39,11 @@ func (r ExecUIDRange) String() string {
 	return execIDString(r.Lo) + "-" + execIDString(r.Hi)
 }
 
-// ParseExecUIDRange parses "LO-HI". An empty string is no range.
+// minExecRangeID is the lowest id a range may start at: below it are the system
+// accounts and groups (a task gid 42 would be shadow on Debian).
+const minExecRangeID = 1000
+
+// ParseExecUIDRange parses "LO-HI" (decimal). An empty string is no range.
 func ParseExecUIDRange(s string) (ExecUIDRange, error) {
 	s = strings.TrimSpace(s)
 	if s == "" {
@@ -48,8 +52,8 @@ func ParseExecUIDRange(s string) (ExecUIDRange, error) {
 	lo, hi, ok := strings.Cut(s, "-")
 	l, errL := strconv.ParseUint(strings.TrimSpace(lo), 10, 31)
 	h, errH := strconv.ParseUint(strings.TrimSpace(hi), 10, 31)
-	if !ok || errL != nil || errH != nil || l == 0 || h < l {
-		return ExecUIDRange{}, fmt.Errorf("-exec-uid-range %q must be LO-HI with 0 < LO <= HI < 2^31", s)
+	if !ok || errL != nil || errH != nil || l < minExecRangeID || h < l {
+		return ExecUIDRange{}, fmt.Errorf("-exec-uid-range %q must be LO-HI with %d <= LO <= HI < 2^31", s, minExecRangeID)
 	}
 	return ExecUIDRange{Lo: uint32(l), Hi: uint32(h)}, nil
 }
@@ -137,6 +141,17 @@ func (p *execUIDPool) adopt(key string, uid uint32) bool {
 		}
 	}
 	return true
+}
+
+// quarantine keeps uid out of the pool for the rest of this run: its release did
+// not complete, so it may still own files or processes.
+func (p *execUIDPool) quarantine(uid uint32, key string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if k, ok := p.byUID[uid]; ok && k == key {
+		delete(p.byKey, key)
+	}
+	p.byUID[uid] = "quarantined:" + key
 }
 
 // release frees key's uid and returns it.

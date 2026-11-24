@@ -13,7 +13,8 @@ func TestParseExecUIDRange(t *testing.T) {
 	}{
 		{"", ExecUIDRange{}, true},
 		{"20000-29999", ExecUIDRange{20000, 29999}, true},
-		{" 5 - 5 ", ExecUIDRange{5, 5}, true},
+		{" 5000 - 5000 ", ExecUIDRange{5000, 5000}, true},
+		{"42-2000", ExecUIDRange{}, false},
 		{"0-10", ExecUIDRange{}, false},
 		{"10-5", ExecUIDRange{}, false},
 		{"20000", ExecUIDRange{}, false},

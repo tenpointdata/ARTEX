@@ -139,6 +139,12 @@ func (e *execRuns) makeRunDir(base, leaf string) error {
 	}
 	switch {
 	case fresh:
+		// A process of an earlier holder of uid that outlived its release (a
+		// custom tool started during it) must not get this key's files.
+		if err := reapExecUID(uid); err != nil {
+			e.pool.quarantine(uid, key)
+			return fmt.Errorf("stop the earlier processes of uid %d: %w", uid, err)
+		}
 		return e.ownKey(key, uid)
 	case statErr == nil:
 		return ownRunDir(leaf, uid)
@@ -214,8 +220,11 @@ func disownRunDir(dir string) error {
 	return err
 }
 
-// release frees key's uid: its processes are killed first, then its entries go
-// back to root. Errors are logged; a release never fails the caller.
+// release frees key's uid. Its run directories are closed first (root 0700), so
+// no new process resolves to uid (the shims check again after the drop), then its
+// processes are killed and its entries and fallback homes go back to root. A uid
+// whose release failed is quarantined, never handed out again in this run. Errors
+// are logged; a release never fails the caller.
 func (e *execRuns) release(key string) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
@@ -223,12 +232,80 @@ func (e *execRuns) release(key string) {
 	if !ok {
 		return
 	}
+	var errs []error
+	errs = append(errs, e.closeKey(key))
 	if err := reapExecUID(uid); err != nil {
-		log.Printf("[exec] stop the processes of uid %d (%s): %v", uid, key, err)
+		errs = append(errs, fmt.Errorf("stop the processes of uid %d: %w", uid, err))
 	}
-	if err := e.disownKey(key); err != nil {
-		log.Printf("[exec] give the run directories of %s back to root: %v", key, err)
+	errs = append(errs, e.disownKey(key), removeFallbackHomes(uid))
+	if err := errors.Join(errs...); err != nil {
+		e.pool.quarantine(uid, key)
+		log.Printf("[exec] release of uid %d (%s) incomplete, uid quarantined: %v", uid, key, err)
 	}
+}
+
+// closeKey makes every run directory of key root:root 0700 without walking it.
+func (e *execRuns) closeKey(key string) error {
+	dir, isLeaf := e.keyDir(key)
+	leaves := []string{dir}
+	if !isLeaf {
+		leaves = nil
+		entries, err := os.ReadDir(dir)
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		for _, ent := range entries {
+			if agent.IsRunDirName(ent.Name()) && ent.IsDir() {
+				leaves = append(leaves, filepath.Join(dir, ent.Name()))
+			}
+		}
+	}
+	var errs []error
+	for _, leaf := range leaves {
+		if err := setDirOwnerTo(leaf, 0, 0, releasedRunDirMode); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			errs = append(errs, err)
+		}
+	}
+	return errors.Join(errs...)
+}
+
+// removeFallbackHomes removes the homes under exec-home made for uid (execHomeFor
+// names them p<uid>-<hex>), so a later holder of uid finds none of them.
+func removeFallbackHomes(uid uint32) error {
+	base := os.Getenv(envExecHome)
+	if base == "" {
+		return nil
+	}
+	matches, err := filepath.Glob(filepath.Join(base, "p"+execIDString(uid)+"-*"))
+	if err != nil {
+		return err
+	}
+	var errs []error
+	for _, m := range matches {
+		errs = append(errs, os.RemoveAll(m)) // does not follow symlinks
+	}
+	return errors.Join(errs...)
+}
+
+// checkRunDirStill fails when the working directory of a process that dropped to a
+// per-run uid no longer belongs to that uid: its key was released between the
+// lookup and the drop. Any error counts as a mismatch.
+func checkRunDirStill(id processIdentity, r ExecUIDRange) error {
+	if !r.Contains(id.UID) {
+		return nil
+	}
+	fi, err := os.Stat(".")
+	if err != nil {
+		return fmt.Errorf("the run directory was released: %w", err)
+	}
+	st, ok := fi.Sys().(*syscall.Stat_t)
+	if !ok || st.Uid != id.UID {
+		return errors.New("the run directory was released")
+	}
+	return nil
 }
 
 // adoptAll applies the layout to what is on disk at start-up: a key whose run

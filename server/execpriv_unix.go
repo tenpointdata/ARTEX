@@ -654,6 +654,21 @@ func changeOpenedEntry(f *os.File, o entryOwner) error {
 			}
 			continue
 		}
+		if err != nil && !o.refuseLinks && unopenable(err) {
+			// A socket (ENXIO), a leased file or one root cannot open. Given to
+			// root by name without following a link; never given to another uid by
+			// name, which a swap could redirect.
+			if o.uid == 0 {
+				err = unix.Fchownat(int(f.Fd()), name, 0, o.gid, unix.AT_SYMLINK_NOFOLLOW)
+			} else {
+				log.Printf("[exec] %s: %v: its owner is left as it is", name, err)
+				err = nil
+			}
+			if err != nil {
+				return fmt.Errorf("%s: %w", name, err)
+			}
+			continue
+		}
 		if err != nil {
 			return fmt.Errorf("%s: %w", name, err)
 		}
@@ -753,7 +768,11 @@ func runBashShim(argv []string) {
 	cwd, _ := os.Getwd()
 	// Norma starts bash in the run directory the server chose (tc.WorkingDir); its
 	// owner is the identity of the run (identityIn).
-	if err := enterExecutor(p.identityIn(execDataDir(), cwd), true); err != nil {
+	id := p.identityIn(execDataDir(), cwd)
+	if err := enterExecutor(id, true); err != nil {
+		shimFail(err)
+	}
+	if err := checkRunDirStill(id, r); err != nil {
 		shimFail(err)
 	}
 	shimExec(os.Getenv(envExecBash), argv)
@@ -835,6 +854,9 @@ func dropTo(id processIdentity) error {
 	if len(groups) == 0 {
 		groups = []int{gid}
 	}
+	if err := setNoNewPrivs(); err != nil {
+		return err
+	}
 	if err := syscall.Setgroups(groups); err != nil {
 		return fmt.Errorf("setgroups: %w", err)
 	}
@@ -860,4 +882,11 @@ func shimExec(target string, argv []string) {
 func shimFail(err error) {
 	fmt.Fprintf(os.Stderr, "artex: agent process not started: %v\n", err)
 	os.Exit(126)
+}
+
+// unopenable reports an error of opening a directory entry that does not stop the
+// ownership walk: a socket, a leased file, a file system that refuses the open.
+func unopenable(err error) bool {
+	return errors.Is(err, syscall.ENXIO) || errors.Is(err, syscall.EWOULDBLOCK) ||
+		errors.Is(err, syscall.EACCES) || errors.Is(err, syscall.EPERM) || errors.Is(err, syscall.EOPNOTSUPP)
 }

@@ -79,11 +79,15 @@ egress_apply() {
 	esac
 	case "$port" in ''|*[!0-9]*) port=8787 ;; esac
 	# artex refuses a malformed range, so an unreadable one never runs unfiltered.
+	# Canonical decimal, as artex reads it: iptables would read a leading zero as
+	# octal, and artex trims spaces.
+	uidrange="$(echo "$uidrange" | tr -d ' ')"
 	if [ -n "$uidrange" ]; then
 		lo="${uidrange%%-*}"; hi="${uidrange#*-}"
 		case "$lo:$hi" in
-			*[!0-9:]*|:*|*:) egress_log "WARNING: unreadable -exec-uid-range '$uidrange'; egress filter NOT installed"; return 0 ;;
+			*[!0-9:]*|:*|*:) egress_log "WARNING: unreadable -exec-uid-range '$uidrange'; egress filter NOT installed (artex refuses to start with it)"; return 1 ;;
 		esac
+		uidrange="$(expr "$lo" + 0)-$(expr "$hi" + 0)"
 	fi
 
 	if [ "$(id -u)" != "0" ]; then

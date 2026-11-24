@@ -177,7 +177,9 @@ func TestExecUIDRangeReleaseAsRoot(t *testing.T) {
 	f := newExecRangeFixture(t)
 	b := agent.EnsureRunDir(f.data, 2, 1)
 	ub, _, _ := ownerOf(t, b)
-	f.bash(t, b, "echo b > own")
+	// A socket in the run directory (a stale ssh ControlMaster) cannot be opened:
+	// the release must still close the directory and give it to root.
+	f.bash(t, b, `echo b > own; python3 -c "import socket; socket.socket(socket.AF_UNIX).bind('sock')"`)
 	// A process of task 2 that outlives its tool call.
 	c := exec.Command("sleep", "300")
 	c.Dir = b
@@ -195,7 +197,7 @@ func TestExecUIDRangeReleaseAsRoot(t *testing.T) {
 		_ = c.Process.Kill()
 		t.Fatal("the process of the released uid is still running")
 	}
-	for _, p := range []string{b, filepath.Join(b, "own"), filepath.Join(b, runHomeName)} {
+	for _, p := range []string{b, filepath.Join(b, "own"), filepath.Join(b, "sock"), filepath.Join(b, runHomeName)} {
 		if u, g, _ := ownerOf(t, p); u != 0 || g != 0 {
 			t.Errorf("%s is %d:%d after the release, want root", p, u, g)
 		}
