@@ -7,6 +7,7 @@ import Link from "next/link";
 import { ArrowLeftIcon, UploadIcon } from "lucide-react";
 import { toast } from "sonner";
 
+import { TablePagination } from "@/components/table-pagination";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -15,7 +16,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { intlLocale, t } from "@/i18n";
-import { detectImportFormat, IMPORT_FORMATS } from "@/lib/integrations";
+import { detectImportFormat, IMPORT_FORMATS, importFindingsHref } from "@/lib/integrations";
 import { integrationsApi } from "@/lib/integrations-api";
 import type { ScanImport, ScanImportFormat, ScanImportOutcome } from "@/lib/types";
 
@@ -48,16 +49,22 @@ export default function ScanImportsPage() {
   const [busy, setBusy] = React.useState(false);
   const [outcome, setOutcome] = React.useState<ScanImportOutcome | null>(null);
   const [imports, setImports] = React.useState<ScanImport[]>([]);
+  const [total, setTotal] = React.useState(0);
+  const [page, setPage] = React.useState(1);
+  const [pageSize, setPageSize] = React.useState(20);
   const [loaded, setLoaded] = React.useState(false);
   const inputRef = React.useRef<HTMLInputElement>(null);
 
   const load = React.useCallback(() => {
     integrationsApi
-      .imports()
-      .then(setImports)
+      .imports(pageSize, (page - 1) * pageSize)
+      .then((r) => {
+        setImports(r.items);
+        setTotal(r.total);
+      })
       .catch((e) => toast.error(t("Failed to load imports: {error}", { error: (e as Error).message })))
       .finally(() => setLoaded(true));
-  }, []);
+  }, [page, pageSize]);
   React.useEffect(load, [load]);
 
   // Picking a file detects its format, so the usual flow is pick → Import.
@@ -89,7 +96,9 @@ export default function ScanImportsPage() {
       );
       setFile(null);
       if (inputRef.current) inputRef.current.value = "";
-      load();
+      // The new import is the newest row: show page one (setPage(1) alone does not reload when already there).
+      if (page === 1) load();
+      else setPage(1);
     } catch (e) {
       toast.error(t("Import failed: {error}", { error: (e as Error).message }), { duration: 10000 });
     } finally {
@@ -184,7 +193,7 @@ export default function ScanImportsPage() {
                 )}
               </p>
               {outcome.new_findings.length > 0 && (
-                <Link className="text-primary text-sm hover:underline" href="/function/findings">
+                <Link className="text-primary text-sm hover:underline" href={importFindingsHref(outcome.import.id)}>
                   {t("Review the new findings")}
                 </Link>
               )}
@@ -206,6 +215,19 @@ export default function ScanImportsPage() {
         </CardHeader>
         <CardContent className="px-0">
           <ImportsTable imports={imports} loaded={loaded} />
+          {total > 0 && (
+            <TablePagination
+              page={page}
+              pageSize={pageSize}
+              total={total}
+              onPageChange={setPage}
+              onPageSizeChange={(size) => {
+                setPageSize(size);
+                setPage(1);
+              }}
+              pageSizeOptions={[20, 50, 100]}
+            />
+          )}
         </CardContent>
       </Card>
     </div>
@@ -262,7 +284,19 @@ function ImportsTable({ imports, loaded }: { imports: ScanImport[]; loaded: bool
             </TableCell>
             <TableCell className="text-right tabular-nums">{im.records}</TableCell>
             <TableCell className="text-right tabular-nums">{im.assets}</TableCell>
-            <TableCell className="text-right tabular-nums">{im.findings_new}</TableCell>
+            <TableCell className="text-right tabular-nums">
+              {im.findings_new > 0 ? (
+                <Link
+                  className="text-primary hover:underline"
+                  href={importFindingsHref(im.id)}
+                  aria-label={t("Show the {count} new findings of import #{id}", { count: im.findings_new, id: im.id })}
+                >
+                  {im.findings_new}
+                </Link>
+              ) : (
+                im.findings_new
+              )}
+            </TableCell>
             <TableCell className="text-right tabular-nums">{im.findings_existing}</TableCell>
             <TableCell className="text-right tabular-nums">{im.informational}</TableCell>
             <TableCell className="text-xs">{im.imported_by}</TableCell>

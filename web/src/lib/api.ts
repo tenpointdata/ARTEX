@@ -17,8 +17,6 @@ import type {
   Asset,
   AssetInterceptRule,
   AssetInterceptRuleInput,
-  TaskCredential,
-  TaskCredentialInput,
   Audit,
   BatchCategoryItem,
   BatchControlItem,
@@ -43,8 +41,8 @@ import type {
   FindingDeepenResponse,
   FindingGroupsPage,
   FindingQuery,
-  FindingRetest,
   FindingReportState,
+  FindingRetest,
   FindingStats,
   FindingStatus,
   FindingsPage,
@@ -97,6 +95,9 @@ import type {
   TaskAssetScopeMutation,
   TaskCategory,
   TaskConstraint,
+  TaskCoverage,
+  TaskCredential,
+  TaskCredentialInput,
   TaskGoal,
   TaskLLMResolutions,
   TaskNode,
@@ -120,7 +121,6 @@ import type {
   UsageStats,
   WorkspaceFile,
   WorkspaceListing,
-  TaskCoverage,
 } from "@/lib/types";
 
 // Combined file data per attachment upload; matches maxChatUpload in server/chatupload.go.
@@ -262,6 +262,7 @@ function findingFilterParams(q: Omit<FindingQuery, "page" | "pageSize">): URLSea
   if (q.sort) p.set("sort", q.sort);
   if (q.assetScope) p.set("asset_scope", q.assetScope);
   if (q.company) p.set("company", q.company);
+  if (q.importId) p.set("import_id", q.importId);
   return p;
 }
 
@@ -433,8 +434,7 @@ export const api = {
   // ---- stats ----
   stats: (task?: string) => get<Stats>(`/stats${tq(task)}`),
   // Asset test coverage (rough estimate, for reference): share of in-scope assets touched by facts + total/tested per type.
-  taskCoverage: (id: string) =>
-    get<TaskCoverage>(`/tasks/${id}/coverage`),
+  taskCoverage: (id: string) => get<TaskCoverage>(`/tasks/${id}/coverage`),
   // Asset coverage graph: every in-scope asset + root-domain/company nodes used for connection, with tested/in_scope.
   taskCoverageGraph: (id: string) => get<CoverageGraphData>(`/tasks/${id}/coverage-graph`),
   // Global llm_usage aggregate (the dashboard's new token view): totals per profile + daily buckets.
@@ -747,7 +747,13 @@ export const api = {
   // Save a vulnerability's name/class/severity in one call (inline edit in the findings list); only present fields are sent.
   updateFinding: (
     id: string,
-    fields: { name?: string; vulnclass?: string; severity?: Severity; status?: FindingStatus; report_state?: FindingReportState },
+    fields: {
+      name?: string;
+      vulnclass?: string;
+      severity?: Severity;
+      status?: FindingStatus;
+      report_state?: FindingReportState;
+    },
   ) => patch<Finding>(`/exploration/findings/${id}`, fields),
   // Delete a vulnerability: removes the findings record + the source exploration node (gone from the findings list, the task findings tab, and the exploration graph together).
   deleteFinding: (id: string) => del<{ deleted: boolean; id: number }>(`/exploration/findings/${id}`),
@@ -1016,8 +1022,7 @@ export const api = {
   // Channels are multi-instance resources (several bots of the same kind, each with its own
   // filter rules), so they form their own group instead of the flat settings key/value store.
   notifyMeta: () => get<NotificationMeta>(`/notify/meta`),
-  notifyChannels: () =>
-    get<{ channels: NotificationChannel[] }>(`/notify/channels`).then((r) => arr(r.channels)),
+  notifyChannels: () => get<{ channels: NotificationChannel[] }>(`/notify/channels`).then((r) => arr(r.channels)),
   notifyCreateChannel: (payload: {
     name: string;
     kind: string;
@@ -1299,8 +1304,12 @@ export const api = {
     t: Pick<Tool, "description" | "schema" | "agents" | "enabled" | "kind" | "exec" | "deferred">,
   ) => put<{ ok: boolean }>(`/tools/custom/${key}`, t),
   deleteCustomTool: (key: string) => del<{ deleted: string }>(`/tools/custom/${key}`),
-  testCustomTool: (body: { key?: string; kind: string; exec: Record<string, unknown>; params: Record<string, unknown> }) =>
-    post<{ output: string; is_error: boolean }>("/tools/custom/test", body),
+  testCustomTool: (body: {
+    key?: string;
+    kind: string;
+    exec: Record<string, unknown>;
+    params: Record<string, unknown>;
+  }) => post<{ output: string; is_error: boolean }>("/tools/custom/test", body),
   detectPython: () => post<{ python_interpreter: string }>("/settings/python/detect", {}),
 
   // ---- mcp ----

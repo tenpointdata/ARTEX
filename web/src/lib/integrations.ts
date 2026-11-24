@@ -120,3 +120,15 @@ export function trackerDestination(tr: Pick<TicketTracker, "kind" | "config">): 
   const fn = DESTINATION[tr.kind];
   return fn ? fn(tr.config) : urlHost(configText(tr.config, "base_url"));
 }
+
+// importIdParam normalizes an import_id query value: a positive integer as a
+// string, or "" (no import filter) for anything else.
+export function importIdParam(raw: string | null | undefined): string {
+  const v = (raw ?? "").trim();
+  return /^[1-9]\d{0,17}$/.test(v) ? v : "";
+}
+
+// importFindingsHref links to the findings one scanner import created.
+export function importFindingsHref(importId: number | string): string {
+  return `/function/findings?import_id=${encodeURIComponent(String(importId))}`;
+}

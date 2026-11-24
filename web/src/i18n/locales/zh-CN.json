@@ -2923,5 +2923,8 @@
   "e.g. rbac.denied, or row. for all row changes": "例如 rbac.denied，或用 row. 表示所有行变更",
   "empty (covers every target; the target gate still applies)": "空（覆盖所有目标；目标门禁仍然生效）",
   "you": "你",
-  "{name} sees only the reports and findings of the companies checked here. With none checked the account is refused everywhere.": "{name} 只能看到此处勾选的企业的报告和发现。若一个都不勾选，该账号在所有位置都会被拒绝。"
+  "{name} sees only the reports and findings of the companies checked here. With none checked the account is refused everywhere.": "{name} 只能看到此处勾选的企业的报告和发现。若一个都不勾选，该账号在所有位置都会被拒绝。",
+  "Import #{id}": "导入 #{id}",
+  "Clear the import filter": "清除导入筛选",
+  "Show the {count} new findings of import #{id}": "查看导入 #{id} 的 {count} 条新发现"
 }

@@ -3,6 +3,8 @@ import {
   chunk,
   detectImportFormat,
   evidenceEnabled,
+  importFindingsHref,
+  importIdParam,
   pushableFindingIds,
   summarizePush,
   summarizeSync,
@@ -118,4 +120,14 @@ test("trackerDestination and evidenceEnabled", () => {
   );
   assert.equal(evidenceEnabled({ include_evidence: true }), true);
   assert.equal(evidenceEnabled({ include_evidence: "true" }), false);
+});
+
+test("importIdParam keeps only a positive integer", () => {
+  assert.equal(importIdParam("42"), "42");
+  assert.equal(importIdParam(" 7 "), "7");
+  for (const bad of [null, undefined, "", "0", "-1", "1.5", "abc", "1e3", "01"]) assert.equal(importIdParam(bad), "");
+});
+
+test("importFindingsHref links to the findings list filtered by import", () => {
+  assert.equal(importFindingsHref(12), "/function/findings?import_id=12");
 });

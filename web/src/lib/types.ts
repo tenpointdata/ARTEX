@@ -603,6 +603,8 @@ export interface FindingQuery {
   assetScope?: string;
   // company id from the sidebar switcher; also narrows the asset tree. Empty = all companies.
   company?: string;
+  // scanner import id: only the findings that import created. Empty = no import filter.
+  importId?: string;
 }
 
 // ---- Findings by asset (asset view) ----
@@ -1458,7 +1460,6 @@ export type TaskCredential = TaskCredentialInput & {
   created_at: string;
   updated_at: string;
 };
-
 
 export interface AssetInterceptRule {
   id: number;

@@ -41,8 +41,11 @@ export const integrationsApi = {
     http<{ results: TicketSyncResult[] }>(`/integrations/trackers/${trackerId}/sync`, { method: "POST" }).then(
       (r) => r.results ?? [],
     ),
-  imports: (limit = 100) =>
-    http<{ imports: ScanImport[] | null }>(`/integrations/imports?limit=${limit}`).then((r) => r.imports ?? []),
+  // One page of past imports, newest first, with the total for the pager.
+  imports: (limit = 100, offset = 0) =>
+    http<{ imports: ScanImport[] | null; total: number }>(`/integrations/imports?limit=${limit}&offset=${offset}`).then(
+      (r) => ({ items: r.imports ?? [], total: r.total ?? 0 }),
+    ),
   // importScan posts the raw file as the body; format and provenance travel in the query.
   importScan: (file: File, format: ScanImportFormat, taskId?: number) => {
     const q = new URLSearchParams({ format, file_name: file.name });
