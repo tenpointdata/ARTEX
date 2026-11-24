@@ -55,7 +55,8 @@ func (s *SessionTranscripts) Acquire(ctx context.Context, session, holder string
 	}
 	var n int
 	if err := tx.QueryRowContext(ctx, `INSERT INTO session_transcripts(session_id, exploration_id, holder) VALUES ($1,$2,$3)
-ON CONFLICT (session_id) DO UPDATE SET holder=EXCLUDED.holder, updated_at=now()
+ON CONFLICT (session_id) DO UPDATE SET holder=EXCLUDED.holder, updated_at=now(),
+  exploration_id=COALESCE(session_transcripts.exploration_id, EXCLUDED.exploration_id)
 RETURNING lines`, session, exp, holder).Scan(&n); err != nil {
 		return nil, err
 	}
@@ -82,7 +83,7 @@ WHERE session_id=$1 AND holder=$2 AND lines=$3`, session, holder, from, len(line
 		return err
 	}
 	if n, _ := res.RowsAffected(); n == 0 {
-		return transcriptsync.ErrFenced
+		return s.retriedAppend(ctx, tx, session, holder, from, lines)
 	}
 	seqs := make([]int64, len(lines))
 	texts := make([]string, len(lines))
@@ -95,6 +96,53 @@ ON CONFLICT (session_id, seq) DO UPDATE SET line=EXCLUDED.line`, session, seqs, 
 		return err
 	}
 	return tx.Commit()
+}
+
+// retriedAppend tells a fenced Append from a retry of one that committed
+// although the caller saw an error (a timeout or dropped connection): the
+// holder is unchanged and exactly these lines are stored at from. A retry is a
+// success; anything else is ErrFenced.
+func (s *SessionTranscripts) retriedAppend(ctx context.Context, tx *sql.Tx, session, holder string, from int, lines [][]byte) error {
+	var cur string
+	var n int
+	err := tx.QueryRowContext(ctx, `SELECT holder, lines FROM session_transcripts WHERE session_id=$1`, session).Scan(&cur, &n)
+	if errors.Is(err, sql.ErrNoRows) || (err == nil && (cur != holder || n != from+len(lines))) {
+		return transcriptsync.ErrFenced
+	}
+	if err != nil {
+		return err
+	}
+	stored, err := sessionLines(ctx, tx, session, n)
+	if err != nil {
+		return err
+	}
+	for i, ln := range lines {
+		if string(stored[from+i]) != string(ln) {
+			return transcriptsync.ErrFenced
+		}
+	}
+	return nil
+}
+
+// explorationPattern is the LIKE pattern of an exploration's session ids.
+func explorationPattern(explorationID int64) string {
+	return "exp" + strconv.FormatInt(explorationID, 10) + `-%`
+}
+
+// LinkExplorationTranscripts ties sessions stored before their exploration row
+// existed (seeded during an archive restore) to it, so they cascade with it.
+func (s *SessionTranscripts) LinkExplorationTranscripts(ctx context.Context, explorationID int64) error {
+	_, err := s.d.ExecContext(ctx, `UPDATE session_transcripts SET exploration_id=$1
+WHERE exploration_id IS NULL AND session_id LIKE $2`, explorationID, explorationPattern(explorationID))
+	return err
+}
+
+// DeleteUnlinkedTranscripts removes an exploration's sessions that were never
+// linked to it (a restore that failed after seeding).
+func (s *SessionTranscripts) DeleteUnlinkedTranscripts(ctx context.Context, explorationID int64) error {
+	_, err := s.d.ExecContext(ctx, `DELETE FROM session_transcripts WHERE exploration_id IS NULL AND session_id LIKE $1`,
+		explorationPattern(explorationID))
+	return err
 }
 
 // Lines reads a session's stored lines without acquiring it.

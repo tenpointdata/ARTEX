@@ -59,6 +59,17 @@ See `docs/ARCHITECTURE.md` for the code-level map. Summary:
 
 ## Current state
 
+**2026-11-24 — E7 follow-up: worker transcripts resume across nodes (`c-29ff19`, in review)** on
+`ej/20261124-155356-7b374f`, which merges the unmerged E7 branch `ej/20261124-150525-1a95b3` (land them
+together, E7 first). On a distributed node a worker run leases its session from PostgreSQL before resuming
+(`transcriptsync/` generic fenced mirror, `db/session_transcripts.go`, migration **0025**, cascades with the
+exploration); the local JSONL stays the SDK's write path, lines push every 2 s and at run end, and a
+takeover fences the old holder. Archive gathers stored transcripts first; restore seeds them. Test
+`TestIntentResumesOnAnotherNodeFromSharedTranscript` (node A claims and runs a tool, its claim is revoked,
+node B's first request carries A's history) plus `transcriptsync` and `db` fencing tests, on Postgres 16.
+Not shared: planner/main/chat sessions (control-node only), sidechains, spills and run dirs (see
+`docs/DISTRIBUTED.md` "Transcripts"/"Limits").
+
 **2026-11-24 — SSE 401 after console login (`c-13e86c`, fixed; pre-E5).** Streams are same-origin only
 (`web/src/lib/sse.ts`), dev gzip off, `openSSE` writes `: open`. Test `server/activity_stream_auth_pg_test.go`;
 browser-checked on the E5 stack.
@@ -285,6 +296,7 @@ Card ids in brackets:
 - **TEST** [`c-3157b4`] `TestGateOffTaskIsUnchanged` fails on main with Postgres (also fails before E5).
 - **E6** [`c-cb0093`] Cost/observability dashboard + OpenTelemetry export, building on existing context telemetry.
 - **E7** [`c-d60149`] Distributed/remote workers (queue-backed intents) for larger engagements; Helm chart.
+  Follow-up [`c-29ff19`] worker transcripts shared through PostgreSQL (landed on `ej/20261124-155356-7b374f`, in review).
 - **E8** [`c-5487e8`] Planner/worker evaluation suite (regression targets, prompt-version A/B via the benchmark gate).
 - **E9** [`c-73af97`] Frontend/UX pass (tables over cards, fewer-clicks triage workflow, live engagement dashboard).
 - **SEC** [`c-517c2d`] Live Playwright task check of the scope relay (human/bench: needs an LLM key and an authorized target).
@@ -363,6 +375,13 @@ Card ids in brackets:
   `ARTEX_SECRET_KEY`) loses stored secrets.
 
 ## Decisions
+
+- **2026-11-24** — c-29ff19: transcripts are mirrored, not moved. Norma's `transcript.Store` is a concrete
+  disk type in an external module, so the local file stays its write path and `transcriptsync` mirrors it
+  into PostgreSQL under a fencing token (the session's holder), separate from the intent claim token so the
+  package stays generic. PostgreSQL is authoritative: a local file is kept only when the stored lines are its
+  prefix. Only distributed nodes mirror (role=all is unchanged). Migration numbered 0025 because 0023 and
+  0024 are taken on open branches.
 
 - **2026-11-24** — c-13e86c: SSE streams are same-origin only, with no cross-origin override. The cookie is
   the only credential a script-free EventSource can present, and the backend's CORS answers `*`, which a

@@ -395,9 +395,14 @@ func (s *Server) restoreTaskArchivePayload(job *pgdb.TaskArchive, snapshot *pgdb
 	databaseRestored := false
 	defer func() {
 		if !databaseRestored {
-			runErr = errors.Join(runErr, files.rollback())
+			runErr = errors.Join(runErr, files.rollback(), s.m.unseedTranscripts(snapshot.ExplorationID))
 		}
 	}()
+	// Worker nodes resume from the database: store the restored transcripts
+	// before the task becomes claimable.
+	if err := s.m.seedTranscripts(s.ctx, snapshot.ExplorationID); err != nil {
+		return err
+	}
 	_ = s.m.pg.UpdateTaskArchiveProgress(job.ID, "restore_database", 70)
 	var warnings []string
 	if llmRecordsFile != nil {
@@ -412,6 +417,10 @@ func (s *Server) restoreTaskArchivePayload(job *pgdb.TaskArchive, snapshot *pgdb
 	}
 	if err != nil {
 		return err
+	}
+	if err := s.m.linkTranscripts(snapshot.ExplorationID); err != nil {
+		// Not fatal: each session's next Acquire links it too.
+		log.Printf("[task-archive] task %d: link restored transcripts: %v", job.TaskID, err)
 	}
 	for _, warning := range warnings {
 		log.Printf("[task-archive] restored task %d with warning: %s", job.TaskID, warning)
@@ -433,11 +442,6 @@ func (s *Server) restoreTaskArchivePayload(job *pgdb.TaskArchive, snapshot *pgdb
 	}
 	if err := s.m.pg.CompleteTaskArchiveRestore(job.ID); err != nil {
 		return err
-	}
-	if err := s.m.seedTranscripts(s.ctx, snapshot.ExplorationID); err != nil {
-		// The task is restored; its intents still resume on this node, whose disk
-		// holds the files, and a later run here seeds the store.
-		log.Printf("[task-archive] task %d: %v", job.TaskID, err)
 	}
 	s.loadRestoredTask(job.TaskID)
 	return nil

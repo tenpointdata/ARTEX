@@ -34,6 +34,28 @@ The work queue is the intent rows already in `exploration_nodes`.
   `<ARTEX_NODE_ID>/work#N`, so the owner column says which host ran an intent.
   Local loops on the control node keep the `work#N` name.
 
+## Transcripts
+
+A worker's conversation (`exp<E>-worker-i<I>.jsonl`) is shared through
+PostgreSQL on a distributed node (`transcriptsync/`, `db/session_transcripts.go`,
+migration 0025), so the node that takes over a claim, the node that reruns a
+reopened intent, and the control node's human-message path
+(`runDetachedIntent`) all resume from the last node's history.
+
+- **Lease.** Before the resume reads the local file, the run acquires the
+  session: it becomes the only writer (`session_transcripts.holder`) and gets
+  the stored lines. If they are a prefix of the local file the local file is
+  kept and its extra lines are pushed (this node was the last writer, or a
+  legacy/restored file seeds the store); otherwise the local file is replaced.
+- **Push.** The SDK still appends to the local file. Complete lines are pushed
+  every 2 s and when the run ends. A push is conditional on the holder and the
+  stored line count, so a node whose claim (and session) was taken over cannot
+  add lines after the new holder's.
+- **Lifetime.** Rows cascade with the exploration (task delete and archive). The
+  archive gathers stored transcripts onto the control node's disk before packing;
+  a restore seeds the store from the restored files.
+- A single-process deployment (`role=all`) keeps local files only.
+
 ## Identical gating
 
 A worker node is built by the same `server.New` as the control node. It gets the
@@ -104,9 +126,12 @@ the task's TargetScope, and paces the traffic.
 
 These are known and carded on the ARTEX board:
 
-- **Transcripts stay on the node that ran the intent.** If a claim is taken
-  over by another host, or a reopened intent is rerun elsewhere, the run starts
-  over instead of resuming its transcript.
+- **Only worker transcripts are shared.** Planner, main-agent, chat and side
+  question sessions run on the control node and stay on its disk; subagent
+  sidechain files are not mirrored (they are never resumed). Command-output
+  spills and run directories also stay on the node that wrote them.
+- **A crash loses up to 2 s of transcript.** Lines a node wrote but had not
+  pushed when it died are gone; the next node resumes from the last pushed line.
 - **Finding wake-ups are not relayed.** The planner sees a worker node's
   findings on its next round. That round is triggered by the intent's
   settlement.

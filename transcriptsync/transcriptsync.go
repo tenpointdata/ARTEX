@@ -48,7 +48,9 @@ type Backend interface {
 	// holder) and returns the stored lines in order, without line terminators.
 	Acquire(ctx context.Context, session, holder string) ([][]byte, error)
 	// Append stores lines at positions from, from+1, ... when holder still holds
-	// the session and exactly from lines are stored; ErrFenced otherwise.
+	// the session and exactly from lines are stored; ErrFenced otherwise. A
+	// retry of an Append that committed although its caller saw an error must
+	// succeed (the lines are already stored at from), not report ErrFenced.
 	Append(ctx context.Context, session, holder string, from int, lines [][]byte) error
 }
 
@@ -128,7 +130,7 @@ func (m *Mirror) Begin(ctx context.Context, path, session string) (*Lease, error
 func (l *Lease) Session() string { return l.session }
 
 // Close stops the background push and pushes the remaining complete lines. It
-// returns the first push error of the lease (ErrFenced when it was taken over).
+// returns ErrFenced when the lease was taken over, else the final push's error.
 func (l *Lease) Close() error {
 	if l == nil {
 		return nil
@@ -180,9 +182,8 @@ func (l *Lease) push(ctx context.Context) error {
 			l.offset += consumed
 		}
 	}
-	if err != nil && (l.err == nil || errors.Is(err, ErrFenced)) {
-		l.err = err
-	}
+	// ErrFenced is final; any other error stands only until a push succeeds.
+	l.err = err
 	return err
 }
 

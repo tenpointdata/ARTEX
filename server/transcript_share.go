@@ -61,7 +61,10 @@ func (m *Manager) gatherTranscripts(ctx context.Context, explorationID int64) er
 }
 
 // seedTranscripts stores the worker transcripts a restored archive put on this
-// node's disk, so the restored task's intents resume on any node.
+// node's disk, so the restored task's intents resume on any node. It runs
+// before the database restore makes the task claimable, so no node can start
+// an intent of it from an empty store first; the rows are linked to the
+// exploration once its row exists (LinkExplorationTranscripts).
 func (m *Manager) seedTranscripts(ctx context.Context, explorationID int64) error {
 	mirror := m.transcriptMirror()
 	if mirror == nil {
@@ -94,4 +97,20 @@ func (m *Manager) seedTranscripts(ctx context.Context, explorationID int64) erro
 		return fmt.Errorf("seed restored transcripts: %v", errs)
 	}
 	return nil
+}
+
+// linkTranscripts ties seeded transcripts to the restored exploration row.
+func (m *Manager) linkTranscripts(explorationID int64) error {
+	if m.transcriptMirror() == nil {
+		return nil
+	}
+	return m.pg.SessionTranscripts().LinkExplorationTranscripts(context.Background(), explorationID)
+}
+
+// unseedTranscripts drops what seedTranscripts stored when the restore fails.
+func (m *Manager) unseedTranscripts(explorationID int64) error {
+	if m.transcriptMirror() == nil {
+		return nil
+	}
+	return m.pg.SessionTranscripts().DeleteUnlinkedTranscripts(context.Background(), explorationID)
 }
