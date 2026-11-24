@@ -8,6 +8,7 @@ import (
 
 	"github.com/Autumn-27/artex/db"
 	"github.com/Autumn-27/artex/traffic"
+	"github.com/Autumn-27/artex/vulnmeta"
 )
 
 // DTO/serialization layer: each handler emits EXACTLY the frontend's spec shapes
@@ -328,6 +329,10 @@ type FindingDTO struct {
 	VerificationNote      string                     `json:"verification_note"`
 	Counterevidence       string                     `json:"counterevidence,omitempty"`      // what was tested and did not work; optional
 	ConfidenceRationale   string                     `json:"confidence_rationale,omitempty"` // why the conclusion holds; optional
+	// Client-grade classification (E1), flattened: cvss {vector, score, rating},
+	// epss, remediation, framework_tags. Omitted while unclassified and on
+	// per-task node DTOs, which carry no standalone row.
+	vulnmeta.Classification
 
 	ID          string `json:"id"`
 	FindingID   string `json:"finding_id,omitempty"` // standalone findings-table id — the handle for status updates
@@ -475,15 +480,16 @@ func findingFromDB(f *db.DBFinding, assets map[int64]*db.Asset) FindingDTO {
 		ReportStale: f.Report != "" && f.EvidenceVersion != f.ReportEvidenceVersion, TrafficBindings: f.TrafficBindings,
 		PoELevel: f.PoELevel, VerificationStatus: f.VerificationStatus, VerificationNote: f.VerificationNote,
 		Counterevidence: f.Counterevidence, ConfidenceRationale: f.ConfidenceRationale,
-		VulnClass:   f.VulnClass,
-		Name:        f.Name,
-		Severity:    f.Severity,
-		Status:      status,
-		ReportState: reportState,
-		Summary:     f.Summary,
-		Evidence:    f.Evidence,
-		Report:      f.Report,
-		TS:          rfc3339(f.CreatedAt),
+		Classification: f.Classification,
+		VulnClass:      f.VulnClass,
+		Name:           f.Name,
+		Severity:       f.Severity,
+		Status:         status,
+		ReportState:    reportState,
+		Summary:        f.Summary,
+		Evidence:       f.Evidence,
+		Report:         f.Report,
+		TS:             rfc3339(f.CreatedAt),
 	}
 	d.Assets = findingAssetDTOs(f.AssetIDs, assets)
 	if f.TaskID != nil {
