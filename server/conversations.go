@@ -226,6 +226,7 @@ func (s *Server) pgDeleteConversation(w http.ResponseWriter, r *http.Request) {
 	}
 	s.removeConversationSpill(c.ID)
 	releaseSessionExecIdentity(s.convBusyKey(c.ID)) // the session's executor uid goes back
+	s.m.forgetConversationScope(c.ID) // a proxy client still naming it is refused
 	writeJSON(w, 200, map[string]any{"deleted": c.ID})
 }
 
@@ -301,6 +302,7 @@ func (s *Server) pgDeleteConversationsBatch(w http.ResponseWriter, r *http.Reque
 		deletedSet[id] = struct{}{}
 		s.removeConversationSpill(id)
 		releaseSessionExecIdentity(s.convBusyKey(id))
+		s.m.forgetConversationScope(id)
 	}
 	items := make([]conversationDeleteItem, 0, len(ids))
 	for _, id := range ids {

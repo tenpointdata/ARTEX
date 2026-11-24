@@ -274,6 +274,10 @@ type Traffic struct {
 	// gate is the loopback proxy every upstream dial goes through when upstream
 	// is nil, so the platform's egress checks apply to them (upstream_gate.go).
 	gate *upstreamGate
+	// scopes are the run scopes a proxy client may name in its credential
+	// (scope.go); sink binds client connections to them.
+	scopes scopeRegistry
+	sink   *sink
 	// rewriteRules is the compiled snapshot of the rewrite rules, replaced as a
 	// whole by SetRewriteRules and applied by the sink (rewrite_flow.go).
 	rewriteRules atomic.Pointer[rewrite.Set]
@@ -375,7 +379,7 @@ func Open(dir, addr string) (*Traffic, error) {
 	// "Directly" means through the upstream gate (upstream_gate.go): go-mitmproxy
 	// has no dial hook, so its upstream is a loopback proxy that dials with the
 	// platform's checks (SetUpstreamDialer), never a bare net.Dialer.
-	gate, err := startUpstreamGate(nil)
+	gate, err := startUpstreamGate(nil, t.scopes.lookup)
 	if err != nil {
 		db.Close()
 		return nil, fmt.Errorf("start the upstream gate: %w", err)
@@ -388,7 +392,8 @@ func Open(dir, addr string) (*Traffic, error) {
 	p.SetShouldInterceptRule(func(req *http.Request) bool {
 		return !t.tunneling(hostOnly(req.Host))
 	})
-	p.AddAddon(&sink{t: t})
+	t.sink = &sink{t: t}
+	p.AddAddon(t.sink)
 	t.proxy = p
 	t.sweeping.Go(t.sweepSnapshots) // stops on t.closed; Close waits for it
 	return t, nil
@@ -681,6 +686,7 @@ type sink struct {
 	mproxy.BaseAddon
 	t       *Traffic
 	paced   sync.Map // ClientConn.Id of a marked connection -> struct{}
+	scoped  sync.Map // client remote address -> scopeBinding (scope.go)
 	streams sync.Map // *mproxy.Flow of a live WebSocket/SSE stream -> *streamState (stream.go)
 	bypass  sync.Map // flowKey of a replay flow bypassing rewrite rules -> struct{}
 }

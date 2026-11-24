@@ -621,7 +621,7 @@ func assessmentRedirectCheck(check func(*http.Request, []*http.Request) error) f
 // dials the proxy, which makes the connection to the target. A direct call in
 // a gated scope connects through the pinned dialer, to addresses a pin covers.
 func (s *Server) httpToolTransport(ctx context.Context, key string, spec httpExec) *http.Transport {
-	if tr := s.httpProxyTransport(spec); tr != nil {
+	if tr := s.httpProxyTransport(ctx, spec); tr != nil {
 		return tr
 	}
 	if !intercept.GateOn(ctx) {
@@ -641,13 +641,14 @@ func (s *Server) httpToolTransport(ctx context.Context, key string, spec httpExe
 }
 
 // httpProxyTransport builds a Transport for the http tool's proxy config, or nil
-// (direct). use_recording_proxy routes through the recording proxy + trusts its CA.
-func (s *Server) httpProxyTransport(spec httpExec) *http.Transport {
+// (direct). use_recording_proxy routes through the recording proxy + trusts its CA,
+// on the URL that carries the scope of the calling run (ScopedProxyAddr).
+func (s *Server) httpProxyTransport(ctx context.Context, spec httpExec) *http.Transport {
 	proxyStr := proxyURLString(spec.Proxy)
 	var caFile string
 	if spec.UseRecordingProxy {
 		if tr := s.m.Traffic(); tr != nil && s.m.TrafficEnabled() {
-			proxyStr = proxyURLString(tr.ProxyAddr())
+			proxyStr = proxyURLString(s.m.ScopedProxyAddr(ctx))
 			caFile = tr.CACertPath()
 		} else if addr := proxyURLString(s.m.GlobalProxy()); addr != "" {
 			proxyStr = addr

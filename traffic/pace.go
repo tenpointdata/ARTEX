@@ -23,6 +23,9 @@ const paceWaitMax = 30 * time.Second
 // (egress.PaceUser), the client connection is marked; every request on it,
 // including those inside its tunnel, is then paced by the current noise
 // profile before it goes upstream. Unmarked connections are not paced here.
+// A scope token in the credential binds the connection to its run's scope
+// (scope.go), and a plain-HTTP request to another host than the connection's
+// upstream is unpinned from it (unpinHostChange).
 func (s *sink) Requestheaders(f *mproxy.Flow) {
 	if f.Request == nil || f.ConnContext == nil || f.ConnContext.ClientConn == nil {
 		return
@@ -31,10 +34,12 @@ func (s *sink) Requestheaders(f *mproxy.Flow) {
 	if egress.IsPaceMarker(f.Request.Header.Get("Proxy-Authorization")) {
 		s.paced.Store(id, struct{}{})
 	}
+	s.bindScope(f)
 	f.Request.Header.Del("Proxy-Authorization")
 	if f.Request.Method == http.MethodConnect || f.Request.URL == nil {
 		return
 	}
+	unpinHostChange(f)
 	if _, marked := s.paced.Load(id); marked {
 		pace(f)
 	}
@@ -45,6 +50,7 @@ func (s *sink) Requestheaders(f *mproxy.Flow) {
 func (s *sink) ClientDisconnected(c *mproxy.ClientConn) {
 	if c != nil {
 		s.paced.Delete(c.Id)
+		s.unbindScope(c)
 	}
 	if s.t != nil {
 		s.t.snaps.requestSweep()

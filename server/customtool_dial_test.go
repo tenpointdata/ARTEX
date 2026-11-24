@@ -152,7 +152,7 @@ func TestHTTPProxyTransportProxyScheme(t *testing.T) {
 		{"operator proxy as bare host:port", "", httpExec{Proxy: " 10.0.0.5:8080 "}, "http://10.0.0.5:8080"},
 	} {
 		s := &Server{m: &Manager{globalProxy: c.globalProxy}}
-		tr := s.httpProxyTransport(c.spec)
+		tr := s.httpProxyTransport(context.Background(), c.spec)
 		if tr == nil || tr.Proxy == nil {
 			t.Fatalf("%s: transport %+v, want a proxy transport", c.name, tr)
 		}
