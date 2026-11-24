@@ -40,8 +40,11 @@ import { Spinner } from "@/components/ui/spinner";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
+import { useCan } from "@/hooks/use-session";
+import { t } from "@/i18n";
 import { api } from "@/lib/api";
 import { getLocalStorageValue, setLocalStorageValue } from "@/lib/local-storage.client";
+import { setVisibleInterval } from "@/lib/polling";
 import { statusMeta } from "@/lib/status";
 import type {
   ActiveFindingRetest,
@@ -73,9 +76,8 @@ import {
   VERIFICATION_META,
   VERIFICATION_STATUSES,
 } from "./_components/findings-table";
-import { setVisibleInterval } from "@/lib/polling";
-import { t } from "@/i18n";
-import { useCan } from "@/hooks/use-session";
+import { ImportFilterChip, useImportFilter } from "./_components/import-filter";
+import { PushToTrackerSelect, useEnabledTrackers } from "./_components/push-to-tracker";
 
 const FINDING_LIST_PREFERENCE_KEY = "artex_finding_list_preferences";
 
@@ -142,11 +144,22 @@ const EMPTY_STATS: FindingStats = {
   tasks: [],
 };
 
+// useSearchParams (the import_id deep link) must sit under a Suspense boundary for static export.
 export default function FindingsPage() {
+  return (
+    <React.Suspense fallback={null}>
+      <FindingsPageInner />
+    </React.Suspense>
+  );
+}
+
+function FindingsPageInner() {
   // The sidebar's company switcher narrows everything below on the server: the
   // flat and grouped lists, the asset tree and the stat cards all send `company`.
   // Undefined means all companies.
   const company = useActiveCompany();
+  // Scanner imports → Past imports link here with ?import_id=N: only that import's findings.
+  const { importId, clear: clearImportFilter } = useImportFilter();
   const [view, setView] = React.useState<FindingView>("flat");
   const [severity, setSeverity] = React.useState<"all" | Severity>("all");
   const [status, setStatus] = React.useState<"all" | FindingStatus>("all");
@@ -192,6 +205,7 @@ export default function FindingsPage() {
     sort,
     query,
     company,
+    importId,
   ]);
   const activeFilterFingerprint = React.useRef(filterFingerprint);
   activeFilterFingerprint.current = filterFingerprint;
@@ -294,6 +308,7 @@ export default function FindingsPage() {
   // Export selection: tracked by finding_id (the standalone table's id), preserved across pages.
   const [selectedIds, setSelectedIds] = React.useState<Set<string>>(() => new Set());
   const [bulkBusy, setBulkBusy] = React.useState(false);
+  const trackers = useEnabledTrackers();
   // Export dialog state: scope (current filter / all / selected) × format (single md / per-finding md zip / csv / json).
   const [exportOpen, setExportOpen] = React.useState(false);
   const [exportScope, setExportScope] = React.useState<"filtered" | "all" | "selected">("filtered");
@@ -343,6 +358,7 @@ export default function FindingsPage() {
           sort,
           assetScope: activeAssetScope ?? undefined,
           company,
+          importId,
         },
         ids: [...selectedIds],
       });
@@ -399,6 +415,7 @@ export default function FindingsPage() {
         sort,
         assetScope: activeAssetScope ?? undefined,
         company,
+        importId,
       });
       if (request !== flatRequest.current || activeFilterFingerprint.current !== requestFilter) return;
       setFlat({ items: result.items, total: result.total, loaded: true, loading: false });
@@ -410,6 +427,7 @@ export default function FindingsPage() {
   }, [
     activeAssetScope,
     company,
+    importId,
     filterFingerprint,
     flatPage,
     flatPageSize,
@@ -441,6 +459,7 @@ export default function FindingsPage() {
         query,
         sort,
         company,
+        importId,
       });
       if (request !== assetTreeRequest.current || activeFilterFingerprint.current !== requestFilter) return;
       setAssetTree({
@@ -458,6 +477,7 @@ export default function FindingsPage() {
     }
   }, [
     company,
+    importId,
     filterFingerprint,
     reportState,
     severity,
@@ -486,6 +506,7 @@ export default function FindingsPage() {
         query,
         sort,
         company,
+        importId,
       });
       if (request !== groupsRequest.current || activeFilterFingerprint.current !== requestFilter) return;
       setGroups(result.items);
@@ -496,6 +517,7 @@ export default function FindingsPage() {
     }
   }, [
     company,
+    importId,
     filterFingerprint,
     page,
     pageSize,
@@ -539,6 +561,7 @@ export default function FindingsPage() {
           query,
           sort,
           company,
+          importId,
         });
         if (groupRequests.current[key] !== request || activeFilterFingerprint.current !== requestFilter) return;
         setGroupFindings((current) => ({
@@ -569,7 +592,7 @@ export default function FindingsPage() {
         }));
       }
     },
-    [company, filterFingerprint, reportState, severity, status, verificationStatus, vulnclass, query, sort],
+    [company, filterFingerprint, importId, reportState, severity, status, verificationStatus, vulnclass, query, sort],
   );
 
   React.useEffect(() => {
@@ -1055,6 +1078,7 @@ export default function FindingsPage() {
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
+          <ImportFilterChip importId={importId} onClear={clearImportFilter} />
           <InputGroup className="w-full sm:w-72">
             <InputGroupInput
               type="search"
@@ -1233,6 +1257,7 @@ export default function FindingsPage() {
                     ))}
                   </SelectContent>
                 </Select>
+                <PushToTrackerSelect findingIds={selectedIds} trackers={trackers} />
               </div>
             )}
             <Button size="sm" variant="outline" onClick={openExport}>
