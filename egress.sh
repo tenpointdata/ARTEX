@@ -17,10 +17,37 @@
 #   ARTEX_EGRESS_DENY    extra space/comma separated CIDRs or IPs to deny
 #   ARTEX_EGRESS_ALLOW   CIDRs or IPs accepted before any deny rule (exceptions, for
 #                        example one host service the engagement needs)
+#   ARTEX_EGRESS_DENY_HOSTS   host names resolved once at start (every IPv4/IPv6
+#                        address) and denied like ARTEX_EGRESS_DENY: the database
+#                        and the control API Services in Kubernetes. A name that
+#                        does not resolve after a few tries is logged loudly.
+#   ARTEX_EGRESS_ALLOW_HOSTS  host names resolved the same way and accepted like
+#                        ARTEX_EGRESS_ALLOW (the control node's recording proxy when
+#                        the cluster's CIDRs are denied)
 # Needs root and CAP_NET_ADMIN (docker-compose.yml adds it). Without them it logs a
 # loud warning and the agent runs unfiltered.
 
 egress_log() { echo "[artex] egress: $*" >&2; }
+
+# egress_resolve NAMES...: prints every address the names resolve to. Each name is
+# retried for a few seconds (cluster DNS can lag a fresh pod); one that never
+# resolves is logged and skipped.
+egress_resolve() {
+	for h in "$@"; do
+		tries=0
+		while :; do
+			addrs="$(getent ahosts "$h" 2>/dev/null | awk '{print $1}' | sort -u)"
+			[ -n "$addrs" ] && break
+			tries=$((tries + 1))
+			if [ "$tries" -ge "${ARTEX_EGRESS_RESOLVE_TRIES:-10}" ]; then
+				egress_log "WARNING: $h does not resolve; it is NOT in the egress rules"
+				break
+			fi
+			sleep 1
+		done
+		[ -n "$addrs" ] && echo "$addrs"
+	done
+}
 
 # egress_build IPTABLES FAMILY: (re)creates the ARTEX_EGRESS chain and the OUTPUT jump.
 egress_build() {
@@ -104,6 +131,12 @@ egress_apply() {
 	hd4="$(getent ahostsv4 host.docker.internal 2>/dev/null | awk '{print $1; exit}')"
 	allow="$(echo "${ARTEX_EGRESS_ALLOW:-}" | tr ',' ' ')"
 	extra="$(echo "${ARTEX_EGRESS_DENY:-}" | tr ',' ' ')"
+	# shellcheck disable=SC2046 # word splitting of the name lists is intended
+	denyhosts="$(egress_resolve $(echo "${ARTEX_EGRESS_DENY_HOSTS:-}" | tr ',' ' ') | tr '\n' ' ')"
+	# shellcheck disable=SC2046
+	allowhosts="$(egress_resolve $(echo "${ARTEX_EGRESS_ALLOW_HOSTS:-}" | tr ',' ' ') | tr '\n' ' ')"
+	extra="$(echo $extra $denyhosts)"
+	allow="$(echo $allow $allowhosts)"
 
 	if egress_build iptables 4; then
 		egress_log "installed for uid $uid${uidrange:+ and uids $uidrange} (ipv4): deny metadata, gateway ${gw4:-none}, host.docker.internal ${hd4:-none}, local port $port${extra:+, extra: $extra}${allow:+; allow: $allow}"
