@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'">
+<title>{{.Title}}{{with .Brand.Client}} — {{.}}{{end}}</title>
+<style>
+  :root { --accent: {{.Accent}}; --ink: #1d232a; --muted: #5b6672; --line: #d8dee4; }
+  * { box-sizing: border-box; }
+  body { font: 14px/1.5 -apple-system, "Segoe UI", Helvetica, Arial, sans-serif; color: var(--ink); margin: 0; }
+  main { max-width: 960px; margin: 0 auto; padding: 32px 40px 64px; }
+  header.cover { border-bottom: 4px solid var(--accent); padding-bottom: 16px; margin-bottom: 24px; }
+  .marking { display: inline-block; color: #fff; background: var(--accent); font-weight: 600; letter-spacing: .08em; padding: 2px 10px; font-size: 12px; }
+  h1 { font-size: 28px; margin: 12px 0 4px; }
+  h2 { color: var(--accent); border-bottom: 1px solid var(--line); padding-bottom: 4px; margin-top: 36px; }
+  h3 { margin: 28px 0 8px; }
+  .meta { color: var(--muted); }
+  table { border-collapse: collapse; width: 100%; margin: 12px 0; }
+  th, td { border: 1px solid var(--line); padding: 6px 10px; text-align: left; vertical-align: top; }
+  th { background: #f3f5f7; font-weight: 600; }
+  .sev { font-weight: 700; text-transform: uppercase; font-size: 12px; }
+  .sev-critical { color: #8b0000; } .sev-high { color: #c0392b; } .sev-medium { color: #b9770e; } .sev-low { color: #1e8449; }
+  .headline { font-size: 16px; }
+  pre, .prose { white-space: pre-wrap; word-break: break-word; }
+  pre { background: #f6f8fa; border: 1px solid var(--line); padding: 10px; font-size: 12px; }
+  .gap { color: var(--muted); font-style: italic; }
+  code { font-size: 12px; word-break: break-all; }
+  footer { color: var(--muted); border-top: 1px solid var(--line); margin-top: 48px; padding-top: 8px; font-size: 12px; }
+  section.finding { page-break-inside: avoid; }
+  @media print { main { padding: 0; } h2 { page-break-after: avoid; } section.finding { page-break-before: auto; } }
+</style>
+</head>
+<body>
+<main>
+<header class="cover">
+  {{with .Brand.Marking}}<span class="marking">{{.}}</span>{{end}}
+  <h1>{{.Title}}</h1>
+  <div class="meta">
+    {{with .Brand.Client}}Prepared for <strong>{{.}}</strong>{{end}}{{with .Brand.Organization}} by <strong>{{.}}</strong>{{end}}<br>
+    Generated {{time .GeneratedAt}} · {{.Summary.Total}} finding(s)
+  </div>
+</header>
+
+<h2>Executive Summary</h2>
+<p class="headline">{{.Summary.Headline}}</p>
+<table>
+  <tr><th>Severity</th><th>Count</th></tr>
+  {{range .Summary.Severities}}<tr><td class="sev sev-{{.Severity}}">{{.Label}}</td><td>{{.Count}}</td></tr>{{end}}
+</table>
+{{if .Summary.Total}}
+<table>
+  <tr><th>Verified</th><td>{{.Summary.Verified}} of {{.Summary.Total}}</td></tr>
+  <tr><th>CVSS v4.0 scored</th><td>{{.Summary.Scored}} of {{.Summary.Total}}{{with .Summary.MaxCVSS}} (highest {{cvss .}} {{title .Rating}}){{end}}</td></tr>
+  {{if .Summary.UrgentWithoutRemediation}}<tr><th>Remediation gap</th><td>{{.Summary.UrgentWithoutRemediation}} high/critical finding(s) have no remediation guidance yet</td></tr>{{end}}
+</table>
+<h3>Most urgent</h3>
+<table>
+  <tr><th>#</th><th>Severity</th><th>Finding</th><th>CVSS v4.0</th></tr>
+  {{range $i, $t := .Summary.Top}}<tr><td>{{inc $i}}</td><td class="sev sev-{{$t.Severity}}">{{sevLabel $t.Severity}}</td><td>{{$t.Title}}</td><td>{{with $t.Classification.CVSS}}{{cvss .}}{{else}}<span class="gap">not scored</span>{{end}}</td></tr>{{end}}
+</table>
+{{if .Summary.Frameworks}}
+<h3>Framework mapping</h3>
+<table>
+  <tr><th>Framework</th><th>Most frequent</th></tr>
+  {{range .Summary.Frameworks}}<tr><td>{{.Framework.Label}}</td><td>{{range $j, $t := .Tags}}{{if $j}}, {{end}}{{$t.ID}} ({{$t.Count}}){{end}}</td></tr>{{end}}
+</table>
+{{end}}
+{{end}}
+
+{{if .Findings}}
+<h2>Findings</h2>
+<table>
+  <tr><th>#</th><th>Severity</th><th>Finding</th><th>CVSS v4.0</th><th>Status</th></tr>
+  {{range .Findings}}<tr><td>{{.Index}}</td><td class="sev sev-{{.Severity}}">{{sevLabel .Severity}}</td><td>{{.Title}}</td><td>{{with .Classification.CVSS}}{{cvss .}}{{else}}<span class="gap">not scored</span>{{end}}</td><td>{{.Status}}</td></tr>{{end}}
+</table>
+{{range .Findings}}
+<section class="finding">
+  <h3>{{.Index}}. <span class="sev sev-{{.Severity}}">[{{upper .Severity}}]</span> {{.Title}}</h3>
+  <table>
+    {{with .VulnClass}}<tr><th>Class</th><td>{{.}}</td></tr>{{end}}
+    <tr><th>Status</th><td>{{.Status}}</td></tr>
+    <tr><th>Verification</th><td>{{verify .VerificationStatus}}{{with trim .VerificationNote}} — {{.}}{{end}}</td></tr>
+    <tr><th>CVSS v4.0</th><td>{{with .Classification.CVSS}}{{cvss .}} {{title .Rating}}<br><code>{{.Vector}}</code>{{else}}<span class="gap">not scored</span>{{end}}</td></tr>
+    {{with .Classification.EPSS}}<tr><th>EPSS</th><td>{{epss .}}</td></tr>{{end}}
+    {{range frameRows .Classification}}<tr><th>{{index . 0}}</th><td>{{index . 1}}</td></tr>{{end}}
+    {{with .TaskDescription}}<tr><th>Task</th><td>{{.}}</td></tr>{{end}}
+    <tr><th>Found at</th><td>{{time .CreatedAt}}</td></tr>
+  </table>
+  {{with trim .Summary}}<h4>Summary</h4><div class="prose">{{.}}</div>{{end}}
+  {{with trim .Evidence}}<h4>Evidence</h4><pre>{{.}}</pre>{{end}}
+  <h4>Remediation</h4>
+  {{with trim .Classification.Remediation}}<div class="prose">{{.}}</div>{{else}}<p class="gap">No remediation guidance recorded yet.</p>{{end}}
+  {{with trim .Report}}<h4>Detailed report</h4><div class="prose">{{.}}</div>{{end}}
+</section>
+{{end}}
+{{end}}
+
+<footer>{{with .Brand.Footer}}<div class="prose">{{.}}</div>{{end}}{{with .Brand.Marking}}{{.}} · {{end}}{{.Title}}</footer>
+</main>
+</body>
+</html>

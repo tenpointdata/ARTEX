@@ -87,24 +87,35 @@ func Markdown(in Input) string {
 	}
 	b.WriteString("\n\n")
 
+	fs := make([]findingView, 0, len(in.Findings))
+	items := make([]SummaryItem, 0, len(in.Findings))
+	for _, n := range in.Findings {
+		v := parseFinding(n)
+		v.Q = qualityFromRows(n.ID, in.Quality)
+		fs = append(fs, v)
+		items = append(items, SummaryItem{Title: nz(v.Name, nz(v.VulnClass, "Uncategorized")), Severity: v.Severity,
+			Verified: v.Q.Verification == db.VerificationVerified, Classification: v.Q.Classification})
+	}
+	b.WriteString(Summarize(items).Markdown())
+
 	// findings
 	fmt.Fprintf(&b, "## Findings\n\n")
-	if len(in.Findings) == 0 {
+	if len(fs) == 0 {
 		b.WriteString("_No vulnerabilities confirmed this time._\n\n")
 	} else {
-		fs := make([]findingView, 0, len(in.Findings))
-		for _, n := range in.Findings {
-			v := parseFinding(n)
-			v.Q = qualityFromRows(n.ID, in.Quality)
-			fs = append(fs, v)
-		}
 		sort.SliceStable(fs, func(i, j int) bool { return sevRank[fs[i].Severity] < sevRank[fs[j].Severity] })
 		for i, f := range fs {
 			fmt.Fprintf(&b, "### %d. [%s] %s\n\n", i+1, strings.ToUpper(nz(f.Severity, "info")), nz(f.Name, nz(f.VulnClass, "Uncategorized")))
 			fmt.Fprintf(&b, "%s\n\n", nz(f.Summary, ""))
 			b.WriteString(qualityBullets(f.Q, true)) // honest proof strength, including its gaps
+			if !f.Q.Missing && !f.Q.Unavailable {
+				b.WriteString(classificationBullets(f.Q.Classification))
+			}
 			if f.PoC != "" {
 				fmt.Fprintf(&b, "**PoC / Evidence:**\n\n```\n%s\n```\n\n", f.PoC)
+			}
+			if !f.Q.Missing && !f.Q.Unavailable {
+				b.WriteString(remediationSection(f.Q.Classification, "**Remediation:**"))
 			}
 			b.WriteString(qualityNarrative(f.Q)) // why it holds / what failed, only when written
 			// The same warning, from the same helper, that the findings export prints: a
