@@ -6,7 +6,8 @@
     body { font: 13px system-ui, sans-serif; width: 320px; margin: 0; padding: 12px; }
     h1 { font-size: 14px; margin: 0 0 10px; }
     label { display: block; margin: 8px 0 2px; color: #444; }
-    input { width: 100%; box-sizing: border-box; padding: 5px; }
+    input, textarea { width: 100%; box-sizing: border-box; padding: 5px; font: inherit; }
+    textarea { height: 56px; resize: vertical; }
     button { margin-top: 10px; padding: 6px 12px; cursor: pointer; }
     #start { background: #1d4ed8; color: #fff; border: 0; border-radius: 4px; }
     #stop { background: #eee; border: 1px solid #ccc; border-radius: 4px; }
@@ -23,6 +24,10 @@
   <label for="token">Token</label>
   <input id="token" type="password" placeholder="ARTEX JWT (localStorage artex_token)" />
 
+  <label for="skipHosts">Also never capture these hosts (one per line, *.example.com)</label>
+  <textarea id="skipHosts" placeholder="sso.corp.example"></textarea>
+  <div class="muted" id="defaults"></div>
+
   <button id="save">Save settings</button>
   <button id="start">Start capture</button>
   <button id="stop">Stop</button>
@@ -35,9 +40,12 @@
     Start on the tab you are browsing, log in and use the app normally;
     captured text requests/responses land in your local ARTEX traffic store
     (Traffic page) as evidence. Stop when done. Binary bodies (images, fonts)
-    are skipped.
+    are skipped. The extension only asks Chrome for access to your ARTEX
+    server (never the sites you browse). Sign-in provider hosts (listed above,
+    plus yours) are never captured.
   </p>
 
+  <script src="hosts.js"></script>
   <script src="popup.js"></script>
 </body>
 </html>

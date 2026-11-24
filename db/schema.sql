@@ -1559,6 +1559,12 @@ CREATE TABLE IF NOT EXISTS rsi_lessons (
     created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+-- scope_key: engagement of a lesson with no company (digest of the source task's
+-- declared scope, else the task); '' for a company lesson (company_id scopes it).
+-- scrubbed: target-specific strings were replaced with placeholders at write time;
+-- only scrubbed lessons may be reused outside their engagement (opt-in).
+ALTER TABLE rsi_lessons ADD COLUMN IF NOT EXISTS scope_key TEXT NOT NULL DEFAULT '';
+ALTER TABLE rsi_lessons ADD COLUMN IF NOT EXISTS scrubbed BOOLEAN NOT NULL DEFAULT false;
 CREATE INDEX IF NOT EXISTS idx_rsi_lessons_scope ON rsi_lessons(company_id, category_id, status);
 CREATE INDEX IF NOT EXISTS idx_rsi_lessons_kind  ON rsi_lessons(kind, updated_at DESC);
 

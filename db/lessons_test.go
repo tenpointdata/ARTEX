@@ -144,10 +144,22 @@ func TestTaskLessonsUsesTaskScopeAndRanksCompanyFirst(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { cleanupExec(t, d, `DELETE FROM rsi_lessons WHERE id=$1`, bID) })
+	bare, err := d.CreateTaskWithOptions("lesson scope none", "goal", TaskCreateOptions{
+		Name: fmt.Sprintf("lesson-none-%d", stamp),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { cleanupErr(t, "task none", d.DeleteTask(bare.ID)) })
+	bareKey, err := lessonScopeKey(t.Context(), d.DB, bare.ID, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
 	// Generic last: without the company rank term, id DESC would put this first.
+	// It belongs to the company-less task's own engagement (its scope key).
 	if err := d.QueryRow(`
-		INSERT INTO rsi_lessons(dedupe_key,kind,cue,action,company_id)
-		VALUES ($1,'positive','xss','generic prior',NULL) RETURNING id`, genericKey).Scan(&genericID); err != nil {
+		INSERT INTO rsi_lessons(dedupe_key,kind,cue,action,company_id,scope_key)
+		VALUES ($1,'positive','xss','generic prior',NULL,$2) RETURNING id`, genericKey, bareKey).Scan(&genericID); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { cleanupExec(t, d, `DELETE FROM rsi_lessons WHERE id=$1`, genericID) })
@@ -180,13 +192,6 @@ func TestTaskLessonsUsesTaskScopeAndRanksCompanyFirst(t *testing.T) {
 		t.Fatal("task A saw company B's lesson")
 	}
 
-	bare, err := d.CreateTaskWithOptions("lesson scope none", "goal", TaskCreateOptions{
-		Name: fmt.Sprintf("lesson-none-%d", stamp),
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { cleanupErr(t, "task none", d.DeleteTask(bare.ID)) })
 	gotNone, err := d.TaskLessons(t.Context(), bare.ID, 8)
 	if err != nil {
 		t.Fatal(err)
@@ -381,17 +386,17 @@ func TestTaskLessonsRanksCategoryBeforeGeneric(t *testing.T) {
 
 	var catID, genericID int64
 	if err := d.QueryRow(`
-		INSERT INTO rsi_lessons(dedupe_key,kind,cue,action,category_id)
-		VALUES ($1,'positive','xss','category prior',$2) RETURNING id`,
-		fmt.Sprintf("lesson-cat-%d", stamp), category.ID).Scan(&catID); err != nil {
+		INSERT INTO rsi_lessons(dedupe_key,kind,cue,action,category_id,scope_key)
+		VALUES ($1,'positive','xss','category prior',$2,$3) RETURNING id`,
+		fmt.Sprintf("lesson-cat-%d", stamp), category.ID, fmt.Sprintf("task:%d", task.ID)).Scan(&catID); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { cleanupExec(t, d, `DELETE FROM rsi_lessons WHERE id=$1`, catID) })
 	// Generic last: without the category rank term, id DESC would put this first.
 	if err := d.QueryRow(`
-		INSERT INTO rsi_lessons(dedupe_key,kind,cue,action)
-		VALUES ($1,'positive','xss','generic prior') RETURNING id`,
-		fmt.Sprintf("lesson-cat-generic-%d", stamp)).Scan(&genericID); err != nil {
+		INSERT INTO rsi_lessons(dedupe_key,kind,cue,action,scope_key)
+		VALUES ($1,'positive','xss','generic prior',$2) RETURNING id`,
+		fmt.Sprintf("lesson-cat-generic-%d", stamp), fmt.Sprintf("task:%d", task.ID)).Scan(&genericID); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { cleanupExec(t, d, `DELETE FROM rsi_lessons WHERE id=$1`, genericID) })

@@ -31,6 +31,9 @@ type Lesson struct {
 	Status     string   `json:"status"`
 	Support    int      `json:"support"`
 	Evidence   []string `json:"evidence"`
+	// CrossScope marks a lesson from another engagement, visible only under
+	// ARTEX_RSI_LESSONS_SHARED. Its evidence ids are withheld.
+	CrossScope bool `json:"cross_scope,omitempty"`
 }
 
 const (
@@ -56,9 +59,15 @@ func lessonText(s string, limit int) string {
 	return s
 }
 
-func lessonDedupeKey(kind string, categoryID, companyID int64, cue, action string) string {
+// lessonDedupeKey hashes the lesson identity. scopeKey is empty for a company
+// lesson, which keeps the key format of lessons written before scoping; a
+// no-company lesson from another engagement therefore never merges with this one.
+func lessonDedupeKey(kind string, categoryID, companyID int64, scopeKey, cue, action string) string {
 	raw := fmt.Sprintf("%s|%d|%d|%s|%s", kind, categoryID, companyID,
 		strings.ToLower(cue), strings.ToLower(action))
+	if scopeKey != "" {
+		raw = scopeKey + "|" + raw
+	}
 	sum := sha256.Sum256([]byte(raw))
 	return hex.EncodeToString(sum[:])
 }
@@ -164,6 +173,20 @@ func extractLessonsForTaskQ(ctx context.Context, q sqlExecQuerier, taskID int64)
 	// NULL company_id is not a scope.
 	write := len(companyIDs) <= 1
 	companyID := lessonExtractCompanyID(companyIDs)
+	scopeKey, err := lessonScopeKey(ctx, q, taskID, companyIDs)
+	if err != nil {
+		return 0, err
+	}
+	// Scrub target-specific data before it becomes lesson text: a lesson is
+	// injected into later tasks and must not carry this engagement's hosts,
+	// URLs, credentials, or names.
+	scopeTerms, err := taskLessonScopeTermsQ(ctx, q, taskID)
+	if err != nil {
+		return 0, err
+	}
+	clean := func(s string, limit int) string {
+		return lessonText(ScrubLessonText(lessonText(s, 0), scopeTerms), limit)
+	}
 	// Only a completed retest with a verdict is an outcome. A pending, running,
 	// failed or stopped retest can carry a staged verdict that never finished.
 	// Buffer rows before writing so a single-connection *sql.Tx is never busy.
@@ -210,16 +233,16 @@ func extractLessonsForTaskQ(ctx context.Context, q sqlExecQuerier, taskID int64)
 	for _, fr := range findings {
 		findingID, vulnclass, name, summary, severity, status, retestID, verdict :=
 			fr.findingID, fr.vulnclass, fr.name, fr.summary, fr.severity, fr.status, fr.retestID, fr.verdict
-		cue := lessonText(vulnclass, lessonCueMax)
+		cue := clean(vulnclass, lessonCueMax)
 		if cue == "" {
-			cue = lessonText(name, lessonCueMax)
+			cue = clean(name, lessonCueMax)
 		}
 		if cue == "" {
 			cue = "finding"
 		}
-		label := lessonText(summary, lessonActionMax)
+		label := clean(summary, lessonActionMax)
 		if label == "" {
-			label = lessonText(name, lessonActionMax)
+			label = clean(name, lessonActionMax)
 		}
 		if label == "" {
 			label = "a confirmed issue"
@@ -231,8 +254,8 @@ func extractLessonsForTaskQ(ctx context.Context, q sqlExecQuerier, taskID int64)
 			if cue == "" || action == "" || sourceID == 0 {
 				return nil // evidence gate: no write without cue + action + source
 			}
-			id, err := upsertLessonQ(ctx, q, lessonDedupeKey(kind, categoryID, companyID, cue, action),
-				kind, cue, action, categoryID, companyID)
+			id, err := upsertLessonQ(ctx, q, lessonDedupeKey(kind, categoryID, companyID, scopeKey, cue, action),
+				kind, cue, action, categoryID, companyID, scopeKey)
 			if err != nil {
 				return err
 			}
@@ -308,13 +331,16 @@ func extractLessonsForTaskQ(ctx context.Context, q sqlExecQuerier, taskID int64)
 	return len(touched), nil
 }
 
-func upsertLessonQ(ctx context.Context, q sqlExecQuerier, key, kind, cue, action string, categoryID, companyID int64) (int64, error) {
+func upsertLessonQ(ctx context.Context, q sqlExecQuerier, key, kind, cue, action string, categoryID, companyID int64, scopeKey string) (int64, error) {
 	var id int64
+	// On conflict the stored text equals the text just scrubbed (same key), so
+	// the row is marked scrubbed: a pre-scoping row with clean text is adopted.
 	err := q.QueryRowContext(ctx, `
-		INSERT INTO rsi_lessons(dedupe_key,kind,cue,action,category_id,company_id)
-		VALUES($1,$2,$3,$4,NULLIF($5,0),NULLIF($6,0))
+		INSERT INTO rsi_lessons(dedupe_key,kind,cue,action,category_id,company_id,scope_key,scrubbed)
+		VALUES($1,$2,$3,$4,NULLIF($5,0),NULLIF($6,0),$7,true)
 		ON CONFLICT (dedupe_key) DO UPDATE SET
 			updated_at=now(),
+			scrubbed=true,
 			status=CASE
 				WHEN rsi_lessons.status='retired'
 				 AND NOT EXISTS (
@@ -324,7 +350,7 @@ func upsertLessonQ(ctx context.Context, q sqlExecQuerier, key, kind, cue, action
 				THEN 'candidate'
 				ELSE rsi_lessons.status
 			END
-		RETURNING id`, key, kind, cue, action, categoryID, companyID).Scan(&id)
+		RETURNING id`, key, kind, cue, action, categoryID, companyID, scopeKey).Scan(&id)
 	return id, err
 }
 
@@ -416,19 +442,29 @@ func retireLessonsIfEmptyQ(ctx context.Context, q sqlExecQuerier, ids []int64) e
 	return err
 }
 
-// TaskLessons selects lessons visible to one task. A lesson with no company is
-// visible only to a task that also has no company. A task with one or more
-// companies sees only lessons of those companies. Category NULL still matches
-// any category inside that company filter. Scope matches rank first, then
-// positive before negative before caution, then support.
+// TaskLessons selects the lessons one task may see, from its own engagement
+// only (TaskLessonsShared with sharing off).
 func (d *DB) TaskLessons(ctx context.Context, taskID int64, limit int) ([]Lesson, error) {
-	return d.taskLessons(ctx, taskID, limit, false)
+	return d.taskLessons(ctx, taskID, limit, false, false)
 }
 
 // TaskAdoptedLessons is TaskLessons restricted to lessons an owner adopted
 // through the benchmark gate (ARTEX_RSI_LESSONS=adopted).
-func (d *DB) TaskAdoptedLessons(ctx context.Context, taskID int64, limit int) ([]Lesson, error) {
-	return d.taskLessons(ctx, taskID, limit, true)
+func (d *DB) TaskAdoptedLessons(ctx context.Context, taskID int64, limit int, shared bool) ([]Lesson, error) {
+	return d.taskLessons(ctx, taskID, limit, shared, true)
+}
+
+// TaskLessonsShared selects lessons visible to one task. A lesson belongs to
+// the task's engagement when it has one of the task's companies, or, for a task
+// with no company, when it has no company and the task's scope key (a digest of
+// the declared target, else the task itself). Only those lessons are returned
+// unless shared is true: then lessons from other engagements are added, but only
+// ones written after scrubbing, flagged CrossScope, with their evidence ids
+// withheld. Category NULL still matches any category. Own-engagement matches
+// rank first, then category matches, then positive before negative before
+// caution, then support.
+func (d *DB) TaskLessonsShared(ctx context.Context, taskID int64, limit int, shared bool) ([]Lesson, error) {
+	return d.taskLessons(ctx, taskID, limit, shared, false)
 }
 
 // lessonSelectCols reads one lesson row with its live support and evidence.
@@ -474,8 +510,12 @@ func (d *DB) LessonsByIDs(ctx context.Context, ids []int64) ([]Lesson, error) {
 	return scanLessons(rows)
 }
 
-func (d *DB) taskLessons(ctx context.Context, taskID int64, limit int, adoptedOnly bool) ([]Lesson, error) {
+func (d *DB) taskLessons(ctx context.Context, taskID int64, limit int, shared, adoptedOnly bool) ([]Lesson, error) {
 	categoryID, companyIDs, err := taskLessonScope(ctx, d, taskID)
+	if err != nil {
+		return nil, err
+	}
+	scopeKey, err := lessonScopeKey(ctx, d.DB, taskID, companyIDs)
 	if err != nil {
 		return nil, err
 	}
@@ -486,24 +526,56 @@ func (d *DB) taskLessons(ctx context.Context, taskID int64, limit int, adoptedOn
 	// arrive as SQL NULL, and CARDINALITY(NULL) is NULL.
 	unscoped := len(companyIDs) == 0
 	rows, err := d.QueryContext(ctx, `
-		SELECT `+lessonSelectCols+`
-		FROM rsi_lessons l
-		WHERE l.status <> 'retired'
-		  AND (NOT $5::bool OR l.status = 'adopted')
-		  AND (
-		        ($3::bool AND l.company_id IS NULL)
-		        OR l.company_id = ANY($1::bigint[])
-		      )
-		  AND (l.category_id IS NULL OR l.category_id=$2)
-		ORDER BY (l.company_id IS NOT NULL AND l.company_id = ANY($1::bigint[])) DESC,
-		         (l.category_id IS NOT NULL AND l.category_id=$2) DESC,
-		         CASE l.kind WHEN 'positive' THEN 0 WHEN 'negative' THEN 1 ELSE 2 END,
-		         support DESC, l.id DESC
-		LIMIT $4`, companyIDs, categoryID, unscoped, limit, adoptedOnly)
+		SELECT id, kind, cue, action, category_id, company_id, status, support, evidence, own FROM (
+		  SELECT l.id, l.kind, l.cue, l.action,
+		       COALESCE(l.category_id,0) AS category_id, COALESCE(l.company_id,0) AS company_id, l.status,
+		       (SELECT COUNT(*) FROM rsi_lesson_evidence e
+		        WHERE e.lesson_id=l.id AND e.withdrawn_at IS NULL) AS support,
+		       COALESCE((
+		           SELECT jsonb_agg(e.source_kind || ':' || e.source_id::text ||
+		                  CASE WHEN e.detail <> '' THEN ' (' || e.detail || ')' ELSE '' END
+		                  ORDER BY e.source_kind, e.source_id)
+		           FROM rsi_lesson_evidence e
+		           WHERE e.lesson_id=l.id AND e.withdrawn_at IS NULL
+		       ), '[]'::jsonb) AS evidence,
+		       COALESCE(l.company_id = ANY($1::bigint[])
+		        OR ($3::bool AND l.company_id IS NULL AND l.scope_key <> '' AND l.scope_key = $5), false) AS own,
+		       l.scrubbed, l.category_id AS cat_raw
+		  FROM rsi_lessons l
+		  WHERE l.status <> 'retired'
+		    AND (NOT $7::bool OR l.status = 'adopted')
+		    AND (l.category_id IS NULL OR l.category_id=$2)
+		) x
+		WHERE own OR ($6::bool AND scrubbed)
+		ORDER BY own DESC,
+		         (cat_raw IS NOT NULL AND cat_raw=$2) DESC,
+		         CASE kind WHEN 'positive' THEN 0 WHEN 'negative' THEN 1 ELSE 2 END,
+		         support DESC, id DESC
+		LIMIT $4`, companyIDs, categoryID, unscoped, limit, scopeKey, shared, adoptedOnly)
 	if err != nil {
 		return nil, err
 	}
-	return scanLessons(rows)
+	defer rows.Close()
+	out := []Lesson{}
+	for rows.Next() {
+		var l Lesson
+		var evidence []byte
+		var own bool
+		if err := rows.Scan(&l.ID, &l.Kind, &l.Cue, &l.Action,
+			&l.CategoryID, &l.CompanyID, &l.Status, &l.Support, &evidence, &own); err != nil {
+			return nil, err
+		}
+		if err := json.Unmarshal(evidence, &l.Evidence); err != nil {
+			return nil, err
+		}
+		if !own {
+			l.CrossScope = true
+			l.Evidence = nil
+			l.CompanyID = 0
+		}
+		out = append(out, l)
+	}
+	return out, rows.Err()
 }
 
 // LogLessonUsage records that these lessons were considered for a task in the
@@ -581,8 +653,13 @@ func RenderLessons(lessons []Lesson, maxChars int) (block string, renderedIDs []
 	var b strings.Builder
 	b.WriteString(header)
 	for _, l := range lessons {
-		entry := fmt.Sprintf("- [%s, %d evidence] %s: %s", l.Kind, l.Support,
-			lessonText(l.Cue, lessonCueMax), lessonText(l.Action, lessonActionMax))
+		cue, action, tag := lessonText(l.Cue, lessonCueMax), lessonText(l.Action, lessonActionMax), ""
+		if l.CrossScope {
+			// Another engagement's lesson: scrub again at render time and say so.
+			cue, action = ScrubLessonText(cue, nil), ScrubLessonText(action, nil)
+			tag = ", other engagement"
+		}
+		entry := fmt.Sprintf("- [%s, %d evidence%s] %s: %s", l.Kind, l.Support, tag, cue, action)
 		if len(l.Evidence) > 0 {
 			shown := l.Evidence
 			if len(shown) > 4 {

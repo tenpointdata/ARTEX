@@ -44,6 +44,18 @@ func rsiLessonsMode() string {
 	}
 }
 
+// rsiLessonsShared reads the cross-engagement opt-in. Unset (default), a task
+// sees lessons only from its own company or declared target. With
+// ARTEX_RSI_LESSONS_SHARED=1, scrubbed lessons from other engagements are also
+// selectable, flagged cross_scope and without evidence ids. Read per call.
+func rsiLessonsShared() bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("ARTEX_RSI_LESSONS_SHARED"))) {
+	case "1", "true", "yes", "on":
+		return true
+	}
+	return false
+}
+
 // wireTaskLessons selects the lessons visible to a task and, in inject mode,
 // attaches the rendered block to the planner and worker. The block is
 // code-owned: it is appended after the rendered prompt and cannot be removed
@@ -84,7 +96,7 @@ func (s *Server) taskLessons(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 400, "invalid task id")
 		return
 	}
-	lessons, err := s.m.PG().TaskLessons(r.Context(), id, 50)
+	lessons, err := s.m.PG().TaskLessonsShared(r.Context(), id, 50, rsiLessonsShared())
 	if errors.Is(err, sql.ErrNoRows) {
 		writeErr(w, 404, "task not found")
 		return
@@ -97,6 +109,7 @@ func (s *Server) taskLessons(w http.ResponseWriter, r *http.Request) {
 	block, _ := db.RenderLessons(lessons, 1800)
 	writeJSON(w, 200, map[string]any{
 		"mode":    rsiLessonsMode(),
+		"shared":  rsiLessonsShared(),
 		"lessons": lessons,
 		"block":   block,
 		"count":   len(lessons),
@@ -129,7 +142,7 @@ func (s *Server) extractTaskLessons(w http.ResponseWriter, r *http.Request) {
 func (s *Server) selectTaskLessons(ctx context.Context, mode string, taskID int64) ([]db.Lesson, error) {
 	switch mode {
 	case "adopted":
-		return s.m.PG().TaskAdoptedLessons(ctx, taskID, 8)
+		return s.m.PG().TaskAdoptedLessons(ctx, taskID, 8, rsiLessonsShared())
 	case "bench":
 		ids, err := benchLessonIDs(s.m.PG())
 		if err != nil || len(ids) == 0 {
@@ -137,7 +150,7 @@ func (s *Server) selectTaskLessons(ctx context.Context, mode string, taskID int6
 		}
 		return s.m.PG().LessonsByIDs(ctx, ids)
 	}
-	return s.m.PG().TaskLessons(ctx, taskID, 8)
+	return s.m.PG().TaskLessonsShared(ctx, taskID, 8, rsiLessonsShared())
 }
 
 // benchLessonsKey is the settings row holding the benchmark lesson pin.
