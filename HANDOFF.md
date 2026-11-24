@@ -76,6 +76,37 @@ Gaps carded as `c-aed5fd`: no "none" choice, and the choice is fixed at creation
 username. Browser-tested as admin, reviewer and client_read against a real backend. Open: `c-92bb52`,
 `c-7c4715`, `c-601ec6`.
 
+**2026-11-24** — **E2 integrations** (backend card `c-6def05`, UI card `c-597eb6`). The backend from
+branch `ej/20261124-055326-6bcfa9` was merged into the UI branch `ej/20261124-132955-7aef3f`, so both
+land together. See `docs/integrations.md`.
+- **UI (c-597eb6):** System → **Integrations** (`/system/integrations`) is a trackers table with an inline
+  enable switch, Sync, edit and delete (with a confirm). The add/edit sheet shows masked credential inputs driven by
+  `secret_keys` (the `ConfigField`/`lib/config-form.ts` now shared with Notifications) and an
+  `include_evidence` switch. **Scanner imports** (`/system/integrations/imports`) detects the format
+  from the file and lists past imports. The findings bulk bar has a **Push to tracker** select, which
+  batches requests at the server's 200 cap. The finding detail has a **Tickets** card (ticket links,
+  remote state, import provenance, a single push). Pure helpers live in `web/src/lib/integrations.ts`,
+  tested by `npm run test:integrations` (in verify.sh); the client is `web/src/lib/integrations-api.ts`.
+- Verified 2026-11-24: in real Chromium (Playwright) against the real backend, with a throwaway Postgres and a fake GitHub API on
+  loopback (`ARTEX_NOTIFY_ALLOW_LOCAL=1`). Add tracker, masked edit kept the token, a destination change
+  without the token was refused, nuclei import (3 new findings), push of 3 (created; a re-push updated),
+  the detail Tickets card with provenance, sync pulling a closed issue to `fixed`, and delete all passed.
+  Follow-ups: card `c-2d91eb`.
+- **Findings out:** package `ticketing` has GitHub Issues, Jira and DefectDojo adapters. All of
+  them go through `notify.Do`, which carries the notify SSRF guard and redaction. Tracker configs
+  are sealed at rest and masked on readback, and a destination change requires the credentials
+  again. Routes are under `/api/integrations/trackers` (CRUD, `push`, `sync`). Finding status
+  round-trips in both directions; when both sides changed, the tracker wins. A ticket's status never
+  touches the finding's verification.
+- **Scanner data in:** package `scanimport` parses Nmap XML, Nuclei JSONL, ZAP JSON, Burp XML and
+  SARIF. `POST /api/integrations/imports` writes assets with provenance (`scan_import_assets`) and
+  unverified POE-0 findings (`finding_import_sources`). A re-import never edits or promotes a finding.
+- Migration `0015_integrations.sql` is new and has not been released.
+- Verified on macOS against a local Postgres: `go test` for `db`, `ticketing`, `scanimport`,
+  `notify` and `agent`, the new server tests, and `scripts/verify.sh`. `./server` still has three
+  failures that also fail at base `1abe24f`, because of the local environment: a trust-auth
+  Postgres, no `127.0.0.2` loopback alias, and DNS lookups.
+
 **2026-11-24 (c-d25ff9, E3)** — The `RSI.md` Loop C benchmark gate and Loop B lesson graduation are built,
 flag off (`ARTEX_RSI_LOOP`, default off, read per request). Pure core `rsi/` (search-space allowlist:
 `prompt_body` for goals/planner/worker and `lesson`; immutable and git-reviewed surfaces refused;
@@ -334,7 +365,9 @@ Composite ARTEX board, not as GitHub issues, because the repo is public (decisio
 Card ids in brackets:
 
 - **E1** [`c-8f9cca`] Client-grade reporting & deliverables (scoring, remediation, framework mappings, branded export).
-- **E2** [`c-6def05`] Finding/ticketing integrations out (Jira, GitHub issues, DefectDojo) and more ingest in (Nuclei, Nmap, ZAP/Burp, Semgrep).
+- **E2** [`c-6def05`] Backend done 2026-11-24 (see Current state). UI done on `ej/20261124-132955-7aef3f` (`c-597eb6`, in review; follow-ups `c-2d91eb`). Follow-ups:
+  [`c-da9198`] scheduled sync plus a per-tracker lock; [`c-ea60a0`] move agent `scan_ingest` onto
+  `scanimport`, normalize default ports, and settle two dedup edge cases.
 - **E3** [`c-d25ff9`] — gate built (in review). Follow-ups: hardening `c-0d277f`, UI `c-936308`, first live run `c-772190`, proposer/critic `c-c89f5b`.
 - **E4** [`c-c0bb07`] Methodology-driven coverage: landed 2026-11-24 (see Current state). Follow-ups:
   [`c-ca2bd0`] an operator-chosen methodology per task (landed, in review; gaps `c-aed5fd`); [`c-ed937d`] checklist completion in the report export (after E1).
@@ -429,6 +462,27 @@ Card ids in brackets:
   governance client lives in `web/src/lib/governance-api.ts` (not `api.ts`, already over 600 lines) and
   reuses its `http()`. The UI hides by permission only as a convenience; the server's policy stays the
   enforcement. The Dashboard is hidden for `client_read` because its widgets call operator-wide routes.
+
+- **2026-11-24 E2 UI (c-597eb6):**
+  - The UI branch merges the unmerged E2 backend branch rather than waiting for it, because the UI is
+    useless without the routes. Only HANDOFF.md conflicted.
+  - Tracker field layout lives in the web (`tracker-fields.ts`); only `secret_keys` comes from the
+    server. This is the same split Notifications uses, so the shared masked-field component now serves both.
+  - Push has no confirmation: it is idempotent (an existing ticket is updated, never duplicated).
+    Delete keeps its confirmation.
+  - Integrations and Imports are System sidebar entries (the settings area), each one click away.
+- **2026-11-24 E2:**
+  - Imported findings are scanner claims: `unverified`, POE 0, `worker=import:<tool>`. A known dedup
+    key leaves the existing finding untouched.
+  - Imports register no notification events, so bulk uploads do not flood the channels.
+  - Scanner free text goes only into quoted evidence; summary and name come from typed tokens.
+  - When both sides changed, the ticket sync lets the tracker win, because remediation is tracked
+    there.
+  - A tracker destination change drops its ticket links.
+  - Evidence goes into a ticket only when `include_evidence` is on, and then with credentials
+    redacted.
+  - Migration 0015 was edited in place before any release, because it was never on main.
+
 - **2026-11-24** — E3 (c-d25ff9): "one explicit owner action" is an owner-password step-up on adopt,
   because on single-user ARTEX a bearer token minted from `jwt.key` (what the loop holds) is the same
   identity as the owner. The server recomputes every verdict from raw records rather than accepting the

@@ -50,8 +50,15 @@ func MaskConfig(kind string, cfg map[string]any) map[string]any {
 	if !ok {
 		return map[string]any{}
 	}
+	return MaskConfigKeys(channel.SecretKeys(), cfg)
+}
+
+// MaskConfigKeys is MaskConfig for any consumer that supplies its own list of
+// credential keys (for example ticketing trackers): the listed keys are replaced
+// with masked values, everything else is copied as-is.
+func MaskConfigKeys(secretKeys []string, cfg map[string]any) map[string]any {
 	secrets := map[string]bool{}
-	for _, k := range channel.SecretKeys() {
+	for _, k := range secretKeys {
 		secrets[k] = true
 	}
 	out := make(map[string]any, len(cfg))
@@ -126,9 +133,13 @@ func PrepareConfigUpdate(kind string, stored, incoming map[string]any) (map[stri
 	if !ok {
 		return nil, fmt.Errorf("channel kind %q is not registered", kind)
 	}
-	secrets := channel.SecretKeys()
-	destinations := channel.DestinationKeys()
+	return PrepareConfigUpdateKeys(channel.SecretKeys(), channel.DestinationKeys(), stored, incoming)
+}
 
+// PrepareConfigUpdateKeys is PrepareConfigUpdate for any consumer that supplies
+// its own credential and destination key lists (see PrepareConfigUpdate for the
+// rationale and rules).
+func PrepareConfigUpdateKeys(secrets, destinations []string, stored, incoming map[string]any) (map[string]any, error) {
 	// If a non-string credential value (e.g. webhook's headers is an object) has
 	// a masked literal embedded in it, the caller has stuffed the "keep original"
 	// sentinel inside a structure. MergeConfig only recognizes "a string with the
