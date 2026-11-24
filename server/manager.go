@@ -1647,6 +1647,7 @@ func (m *Manager) SetTaskStatusGuarded(id, status, endReason string) (won bool, 
 	}
 	m.mu.Unlock()
 	m.extractLessons(n)
+	releaseTaskExecIdentity(n) // the task is over: its executor uid goes back
 	return true, nil
 }
 
@@ -1680,6 +1681,7 @@ func (m *Manager) SetTaskStatus(id, status string) error {
 	m.mu.Unlock()
 	if pgdb.IsTerminal(status) {
 		m.extractLessons(n)
+		releaseTaskExecIdentity(n) // the task is over: its executor uid goes back
 	}
 	return nil
 }
@@ -1714,6 +1716,9 @@ func (m *Manager) DeleteTask(id string, opts DeleteTaskOptions) (DeleteTaskResul
 		return result, nil
 	}
 
+	// The task is going: its executor uid goes back, and its processes stop,
+	// before its files are staged.
+	releaseTaskExecIdentity(n)
 	var fileStage *taskFileDeleteStage
 	if opts.DeleteFiles {
 		fileStage, err = stageTaskFiles(m.dir, id, registered.ExplorationID)

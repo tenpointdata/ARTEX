@@ -39,8 +39,9 @@ func serverIsRoot() bool { return os.Geteuid() == 0 }
 
 // applyExecCredential runs c as the executor identity. The server's own children
 // (custom tools) use it directly; the Norma children go through the shims. Call it
-// after c.Env and c.Dir are set: it points HOME and the XDG directories at the home
-// of c.Dir's run directory (execHomeFor).
+// after c.Env and c.Dir are set: the identity is the one of c.Dir (identityIn), and
+// HOME and the XDG directories point at the home of c.Dir's run directory
+// (execHomeFor).
 func applyExecCredential(c *exec.Cmd, p ExecPrivilege) {
 	if !p.Enabled {
 		return
@@ -48,8 +49,9 @@ func applyExecCredential(c *exec.Cmd, p ExecPrivilege) {
 	if c.SysProcAttr == nil {
 		c.SysProcAttr = &syscall.SysProcAttr{}
 	}
-	c.SysProcAttr.Credential = &syscall.Credential{Uid: p.UID, Gid: p.GID, Groups: []uint32{p.GID}}
-	home, err := execHomeFor(c.Dir, p.UID, p.GID, true)
+	id := p.identityIn(execDataDir(), c.Dir)
+	c.SysProcAttr.Credential = &syscall.Credential{Uid: id.UID, Gid: id.GID, Groups: id.Groups}
+	home, err := execHomeFor(c.Dir, id.UID, id.GID, true)
 	if err != nil {
 		log.Printf("[exec] no home for the agent process in %s: %v", c.Dir, err)
 		return
@@ -243,10 +245,17 @@ func PrepareExecPrivilege(p *ExecPrivilege, dataDir, keyDir, configPath string) 
 		return nil
 	}
 	gid := int(p.GID)
-	if err := shareRunDirs(dataDir, gid); err != nil {
-		return fmt.Errorf("share the run directories with the executor group: %w", err)
+	if p.Range.Enabled() {
+		if err := prepareExecRuns(*p, dataDir); err != nil {
+			return err
+		}
+	} else {
+		setExecRuns(nil)
+		if err := shareRunDirs(dataDir, gid); err != nil {
+			return fmt.Errorf("share the run directories with the executor group: %w", err)
+		}
+		agent.SetRunDirMaker(func(base, leaf string) error { return makeRunDir(base, leaf, gid) })
 	}
-	agent.SetRunDirMaker(func(base, leaf string) error { return makeRunDir(base, leaf, gid) })
 	agent.SetSpillDirMaker(
 		func(base, dir string) error { return makeSpillDir(base, dir, gid) },
 		func(dir string) error { return shareSpillFiles(dir, gid) },
@@ -254,7 +263,7 @@ func PrepareExecPrivilege(p *ExecPrivilege, dataDir, keyDir, configPath string) 
 	// The file tools open the paths the agent names inside the server: they do it as
 	// the executor too (agent/filetools_identity.go).
 	if agent.FileToolIdentitySupported() {
-		agent.SetFileToolIdentity(&agent.FileToolIdentity{UID: p.UID, GID: p.GID})
+		agent.SetFileToolIdentity(fileToolIdentity(*p))
 	} else {
 		log.Printf("[exec] the agent's file tools keep the server's identity on this platform: only their path confinement applies")
 	}
@@ -300,6 +309,10 @@ func PrepareExecPrivilege(p *ExecPrivilege, dataDir, keyDir, configPath string) 
 	// Files and directories the server creates from now on are group-writable, so
 	// the executor can write what the server puts in a run directory.
 	syscall.Umask(0o002)
+	if p.Range.Enabled() {
+		log.Printf("[exec] agent processes run as a uid of %s per task and chat session (uid %d gid %d outside a run directory); each run directory under %s belongs to its uid alone", p.Range, p.UID, p.GID, tasks)
+		return nil
+	}
 	log.Printf("[exec] agent processes run as uid %d gid %d; the run directories under %s are shared with that group", p.UID, p.GID, tasks)
 	return nil
 }
@@ -359,16 +372,21 @@ func ownByRoot(path string) error {
 // created in it keeps the executor group.
 const runDirMode = 0o775 | os.ModeSetgid
 
-// setDirOwner makes dir root:gid with mode. dir is opened without following a
+// setDirOwner makes dir root:gid with mode (setDirOwnerTo).
+func setDirOwner(dir string, gid int, mode os.FileMode) error {
+	return setDirOwnerTo(dir, 0, gid, mode)
+}
+
+// setDirOwnerTo makes dir uid:gid with mode. dir is opened without following a
 // symlink and changed through the descriptor, so a planted link is refused and
 // never changes another directory.
-func setDirOwner(dir string, gid int, mode os.FileMode) error {
+func setDirOwnerTo(dir string, uid, gid int, mode os.FileMode) error {
 	f, err := os.OpenFile(dir, os.O_RDONLY|syscall.O_DIRECTORY|syscall.O_NOFOLLOW, 0)
 	if err != nil {
 		return err
 	}
 	defer f.Close()
-	if err := f.Chown(0, gid); err != nil {
+	if err := f.Chown(uid, gid); err != nil {
 		return err
 	}
 	return f.Chmod(mode)
@@ -439,6 +457,11 @@ func shareRestoredSpillDir(p ExecPrivilege, dir string) error {
 // Every directory between base and the leaf is root:root 0755. A parent is set
 // before the next level is touched.
 func makeLeafDir(base, leaf string, gid int, leafMode os.FileMode) error {
+	return makeLeafDirAs(base, leaf, 0, gid, leafMode)
+}
+
+// makeLeafDirAs is makeLeafDir with uid as the owner of the leaf.
+func makeLeafDirAs(base, leaf string, uid, gid int, leafMode os.FileMode) error {
 	rel, err := filepath.Rel(base, leaf)
 	if err != nil || rel == "." || !filepath.IsLocal(rel) {
 		return fmt.Errorf("%s is not below %s", leaf, base)
@@ -447,14 +470,14 @@ func makeLeafDir(base, leaf string, gid int, leafMode os.FileMode) error {
 	dir := base
 	for i, part := range parts {
 		dir = filepath.Join(dir, part)
-		group, mode := 0, os.FileMode(0o755)
+		owner, group, mode := 0, 0, os.FileMode(0o755)
 		if i == len(parts)-1 {
-			group, mode = gid, leafMode
+			owner, group, mode = uid, gid, leafMode
 		}
 		if err := os.Mkdir(dir, mode.Perm()); err != nil && !errors.Is(err, fs.ErrExist) {
 			return err
 		}
-		if err := setDirOwner(dir, group, mode); err != nil {
+		if err := setDirOwnerTo(dir, owner, group, mode); err != nil {
 			return err
 		}
 	}
@@ -542,6 +565,9 @@ func shareRestoredTaskDir(p ExecPrivilege, taskDir string) error {
 	if !p.Enabled {
 		return nil
 	}
+	if e := currentExecRuns(); e != nil {
+		return e.restoredTaskDir(taskDir)
+	}
 	return shareTaskDir(taskDir, int(p.GID))
 }
 
@@ -553,20 +579,39 @@ func shareRestoredTaskDir(p ExecPrivilege, taskDir string) error {
 // use the descriptor: replacing a name after the open cannot redirect them to a
 // root-only key outside the run directory.
 func shareWithExecGroup(root string, gid int) error {
+	return changeTreeOwner(root, entryOwner{uid: -1, gid: gid, share: true, refuseLinks: true})
+}
+
+// entryOwner is what changeTreeOwner gives each entry: the owner uid (-1 keeps it)
+// and group gid, and with share group read/write (traverse and setgid on
+// directories). A regular file with another hard link is skipped, or with
+// refuseLinks fails the walk: changing it would change the file at the other name
+// too, which may be outside the tree.
+type entryOwner struct {
+	uid, gid    int
+	share       bool
+	refuseLinks bool
+}
+
+// changeTreeOwner gives root and everything below it to o. The executor can change
+// entries concurrently, so each entry is opened relative to its already-open
+// parent without following a symlink, and changed through the descriptor. A
+// symlink is changed as a link; its target is left alone.
+func changeTreeOwner(root string, o entryOwner) error {
 	f, err := os.OpenFile(root, os.O_RDONLY|unix.O_NONBLOCK|unix.O_NOFOLLOW, 0)
 	if errors.Is(err, syscall.ELOOP) {
 		// Older task directories can contain symlinks. Like WalkDir, leave the
-		// target alone; only the link itself receives the executor group.
-		return os.Lchown(root, -1, gid)
+		// target alone; only the link itself changes.
+		return os.Lchown(root, o.uid, o.gid)
 	}
 	if err != nil {
 		return err
 	}
 	defer f.Close()
-	return shareOpenedExecEntry(f, gid)
+	return changeOpenedEntry(f, o)
 }
 
-func shareOpenedExecEntry(f *os.File, gid int) error {
+func changeOpenedEntry(f *os.File, o entryOwner) error {
 	info, err := f.Stat()
 	if err != nil {
 		return err
@@ -574,18 +619,24 @@ func shareOpenedExecEntry(f *os.File, gid int) error {
 	if info.Mode().IsRegular() {
 		st, ok := info.Sys().(*syscall.Stat_t)
 		if !ok || st.Nlink > 1 {
-			return fmt.Errorf("refusing to share a file with another hard link")
+			if o.refuseLinks {
+				return fmt.Errorf("refusing to share a file with another hard link")
+			}
+			log.Printf("[exec] %s has another hard link: its owner is left as it is", f.Name())
+			return nil
 		}
 	}
-	if err := f.Chown(-1, gid); err != nil {
+	if err := f.Chown(o.uid, o.gid); err != nil {
 		return err
 	}
-	mode := info.Mode().Perm() | 0o060
-	if info.IsDir() {
-		mode = (info.Mode().Perm() | 0o070) | os.ModeSetgid
-	}
-	if err := f.Chmod(mode); err != nil {
-		return err
+	if o.share {
+		mode := info.Mode().Perm() | 0o060
+		if info.IsDir() {
+			mode = (info.Mode().Perm() | 0o070) | os.ModeSetgid
+		}
+		if err := f.Chmod(mode); err != nil {
+			return err
+		}
 	}
 	if !info.IsDir() {
 		return nil
@@ -598,7 +649,7 @@ func shareOpenedExecEntry(f *os.File, gid int) error {
 		name := entry.Name() // one component, relative to the open directory
 		fd, err := unix.Openat(int(f.Fd()), name, unix.O_RDONLY|unix.O_NONBLOCK|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)
 		if errors.Is(err, syscall.ELOOP) {
-			if err := unix.Fchownat(int(f.Fd()), name, -1, gid, unix.AT_SYMLINK_NOFOLLOW); err != nil {
+			if err := unix.Fchownat(int(f.Fd()), name, o.uid, o.gid, unix.AT_SYMLINK_NOFOLLOW); err != nil {
 				return fmt.Errorf("%s: %w", name, err)
 			}
 			continue
@@ -607,7 +658,7 @@ func shareOpenedExecEntry(f *os.File, gid int) error {
 			return fmt.Errorf("%s: %w", name, err)
 		}
 		child := os.NewFile(uintptr(fd), name)
-		childErr := shareOpenedExecEntry(child, gid)
+		childErr := changeOpenedEntry(child, o)
 		closeErr := child.Close()
 		if childErr != nil {
 			return fmt.Errorf("%s: %w", name, childErr)
@@ -679,45 +730,57 @@ func RunExecShimIfRequested(argv []string) {
 	if len(argv) >= 2 && argv[1] == isolationProbeArg {
 		runIsolationProbeMain()
 	}
+	if len(argv) >= 2 && argv[1] == execReapArg {
+		runReaper(argv[2:])
+	}
 }
 
 func runBashShim(argv []string) {
+	if os.Geteuid() != 0 {
+		// A nested shell of an agent process: it already runs as an executor
+		// identity and has no privilege to drop, or to gain.
+		shimExec(os.Getenv(envExecBash), argv)
+	}
 	uid, gid, err := execIDsFromEnv()
 	if err != nil {
 		shimFail(err)
 	}
-	if err := enterExecutor(uid, gid, true); err != nil {
+	r, err := ParseExecUIDRange(os.Getenv(envExecUIDRange))
+	if err != nil {
+		shimFail(err)
+	}
+	p := ExecPrivilege{Enabled: true, UID: uint32(uid), GID: uint32(gid), Range: r}
+	cwd, _ := os.Getwd()
+	// Norma starts bash in the run directory the server chose (tc.WorkingDir); its
+	// owner is the identity of the run (identityIn).
+	if err := enterExecutor(p.identityIn(execDataDir(), cwd), true); err != nil {
 		shimFail(err)
 	}
 	shimExec(os.Getenv(envExecBash), argv)
 }
 
-// enterExecutor drops to uid and gid. When this call performs the switch (not in a
-// nested shell already running as the executor, whose environment the agent may
-// have set), the environment is first rebuilt from the allowlist (execenv_unix.go)
-// and HOME and the XDG directories move to a home of this process
-// (execHomeFor): the run directory's when runDirHome is set and the working
-// directory is a run directory, a fresh one otherwise.
-func enterExecutor(uid, gid int, runDirHome bool) error {
-	if os.Getuid() != uid || os.Getgid() != gid {
-		if err := sealExecutorEnv(); err != nil {
-			return err
-		}
-		cwd, _ := os.Getwd()
-		home, err := execHomeFor(cwd, uint32(uid), uint32(gid), runDirHome)
-		if err != nil {
-			return err
-		}
-		if home != "" {
-			for _, kv := range homeEnv(home) {
-				k, v, _ := strings.Cut(kv, "=")
-				if err := os.Setenv(k, v); err != nil {
-					return err
-				}
+// enterExecutor drops to id for good. The environment is first rebuilt from the
+// allowlist (execenv_unix.go) and HOME and the XDG directories move to a home of
+// this process (execHomeFor): the run directory's when runDirHome is set and the
+// working directory is a run directory, a fresh one otherwise.
+func enterExecutor(id processIdentity, runDirHome bool) error {
+	if err := sealExecutorEnv(); err != nil {
+		return err
+	}
+	cwd, _ := os.Getwd()
+	home, err := execHomeFor(cwd, id.UID, id.GID, runDirHome)
+	if err != nil {
+		return err
+	}
+	if home != "" {
+		for _, kv := range homeEnv(home) {
+			k, v, _ := strings.Cut(kv, "=")
+			if err := os.Setenv(k, v); err != nil {
+				return err
 			}
 		}
 	}
-	return dropTo(uid, gid)
+	return dropTo(id)
 }
 
 // runDropShim handles: <uid> <gid> -- <command> <args...>.
@@ -739,8 +802,11 @@ func runDropShim(args []string) {
 		}
 		target = resolved
 	}
+	if os.Geteuid() != 0 {
+		shimFail(errors.New("drop shim: the process is not root"))
+	}
 	// An MCP server serves every task: it gets a fresh home, never a run directory's.
-	if err := enterExecutor(uid, gid, false); err != nil {
+	if err := enterExecutor(processIdentity{UID: uint32(uid), GID: uint32(gid), Groups: []uint32{uint32(gid)}}, false); err != nil {
 		shimFail(err)
 	}
 	shimExec(target, args[3:])
@@ -755,17 +821,21 @@ func execIDsFromEnv() (int, int, error) {
 	return uid, gid, nil
 }
 
-// dropTo switches the calling process to uid and gid, for good: the supplementary
-// groups, gid and uid all change, and the result is checked. A process already
-// running as the executor (a nested bash) passes straight through.
-func dropTo(uid, gid int) error {
-	if os.Getuid() == uid && os.Getgid() == gid {
-		return nil
-	}
+// dropTo switches the calling process to id, for good: the supplementary groups,
+// gid and uid all change, and the result is checked.
+func dropTo(id processIdentity) error {
+	uid, gid := int(id.UID), int(id.GID)
 	if os.Geteuid() != 0 {
 		return fmt.Errorf("cannot switch to uid %d: the process is not root", uid)
 	}
-	if err := syscall.Setgroups([]int{gid}); err != nil {
+	groups := make([]int, 0, len(id.Groups))
+	for _, g := range id.Groups {
+		groups = append(groups, int(g))
+	}
+	if len(groups) == 0 {
+		groups = []int{gid}
+	}
+	if err := syscall.Setgroups(groups); err != nil {
 		return fmt.Errorf("setgroups: %w", err)
 	}
 	if err := syscall.Setgid(gid); err != nil {

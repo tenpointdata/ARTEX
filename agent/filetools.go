@@ -76,7 +76,7 @@ func (t *confinedFileTool) Call(_ context.Context, in json.RawMessage, tc *actoo
 	)
 	// Every file system access of the call, from opening the working directory on,
 	// runs as the executor when the privilege drop is active (filetools_identity.go).
-	idErr := RunAsFileToolIdentity(func() {
+	idErr := RunAsFileToolIdentity(dir, func() {
 		w, oerr := openWorkRoot(t.base, dir)
 		if oerr != nil {
 			res = actool.Errorf(fmt.Sprintf("Error: %s cannot run: %v", t.Name(), oerr))
