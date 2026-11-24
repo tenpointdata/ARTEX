@@ -59,6 +59,18 @@ See `docs/ARCHITECTURE.md` for the code-level map. Summary:
 
 ## Current state
 
+**2026-11-24 (c-f4a69d, E6 follow-up)** — The Cost & efficiency view now includes archived tasks.
+Archives record `aggregate_stats.cost_cells` (per profile, worker, model and UTC day: calls, errors,
+tokens, latency, first/last call; `db/llm_cost_archive.go`), and `db.CostBreakdown` folds them in, so an
+archived task appears in every dimension and day window. Archives made earlier have only per-profile
+totals: they count under All by task/profile and are reported as `archived_omitted` elsewhere (the page
+says how many). `GET /api/llm/cost` also returns `tasks` (distinct), used by the totals row instead of
+summing. `npm run test:cost` (cost-metrics helpers) runs in `scripts/verify.sh`; biome is clean on the
+cost files. This branch merges the unmerged E6 branch `ej/20261124-123231-b78990`, so landing it lands
+E6. Verified: `TestCostBreakdownIncludesArchivedTasks` and the archive round-trip against Postgres 16, the
+web test, tsc, i18n, `scripts/verify.sh`. Not checked: the page in a browser (`c-4c8fd6`). Older
+archives are not backfilled (`c-888292`).
+
 **2026-11-24 (c-ca2bd0, E4 follow-up)** — An operator can choose a task's methodologies. Migration
 **0022** adds `tasks.methodologies TEXT[]` (empty `{}` = automatic, as before). The create request
 (`methodologies`, ids matched loosely, stored canonical, unknown id = 400) and the create form
@@ -355,7 +367,7 @@ Card ids in brackets:
   (role-aware controls on existing pages), `c-7c4715` (client_read console), `c-601ec6` (chain paging).
 - **TEST** [`c-3157b4`] `TestGateOffTaskIsUnchanged` fails on main with Postgres (also fails before E5).
 - **E6 follow-ups** (E6 itself landed 2026-11-24, `c-cb0093`): admin/company gate on `/api/llm/cost` once client_read lands [`c-9ca57a`];
-  live browser + collector check [`c-4c8fd6`]; archived tasks in the cost view + cost-metrics web test [`c-f4a69d`].
+  live browser + collector check [`c-4c8fd6`]; archived tasks in the cost view + cost-metrics web test [`c-f4a69d`, done 2026-11-24, in review]. Backfill `cost_cells` for older archives [`c-888292`, low].
 - **E7** [`c-d60149`] Distributed/remote workers (queue-backed intents) for larger engagements; Helm chart.
 - **E8** [`c-5487e8`] Planner/worker evaluation suite (regression targets, prompt-version A/B via the benchmark gate).
 - **E9** [`c-73af97`] Frontend/UX pass (tables over cards, fewer-clicks triage workflow, live engagement dashboard).
@@ -430,6 +442,12 @@ Card ids in brackets:
 
 ## Decisions
 
+- **2026-11-24** — c-f4a69d: archived cost comes from a new additive archive aggregate (`cost_cells`,
+  per profile × worker × model × UTC day) rather than re-reading cold archive files, so the cost view
+  stays one DB read and every dimension and day window works for archives made from now on. Archives
+  made earlier are not backfilled: their per-profile totals are used where they fit (All, by task or
+  profile) and counted as omitted elsewhere, which the page states instead of guessing. The distinct
+  task total is computed by the server, since only it can dedupe a task across groups.
 - **2026-11-24** — c-ca2bd0: the operator's methodology choice is a list column on `tasks`, with an empty
   list meaning automatic, so existing tasks and every other create path (spawn, templates) keep the
   goal-word selection. A non-empty list replaces the automatic set rather than adding to it, which also
