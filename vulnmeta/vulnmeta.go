@@ -126,11 +126,7 @@ func ScoreCVSS4(vector string) (CVSS, error) {
 		return CVSS{}, invalid("cvss vector %q: %v", v, err)
 	}
 	score := math.Round(parsed.Score()*10) / 10
-	rating, err := cvss40.Rating(score)
-	if err != nil {
-		return CVSS{}, invalid("cvss score %v: %v", score, err)
-	}
-	return CVSS{Vector: parsed.Vector(), Score: score, Rating: strings.ToLower(rating)}, nil
+	return CVSS{Vector: parsed.Vector(), Score: score, Rating: Rating(score)}, nil
 }
 
 // Normalize validates c and returns its canonical form: the CVSS score is
@@ -183,4 +179,15 @@ func normalizeEPSS(e EPSS) (*EPSS, error) {
 		return nil, invalid("epss cve %q is not CVE-YYYY-NNNN", e.CVE)
 	}
 	return &e, nil
+}
+
+// Rating is the CVSS v4.0 qualitative rating of a score: none (0.0), low
+// (0.1–3.9), medium (4.0–6.9), high (7.0–8.9) or critical (9.0–10.0). An
+// out-of-range score rates "".
+func Rating(score float64) string {
+	r, err := cvss40.Rating(score)
+	if err != nil {
+		return ""
+	}
+	return strings.ToLower(r)
 }
