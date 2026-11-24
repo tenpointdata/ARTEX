@@ -52,11 +52,9 @@ func TestProxiedRedirectToMetadataRefused(t *testing.T) {
 	}))
 	defer target.Close()
 
-	// A fresh proxy connection per request, as curl -L opens when the
-	// redirect changes host: go-mitmproxy pins a client connection's plain-HTTP
-	// requests to the upstream it dialled first.
+	// Keep-alive on: the redirect is sent on the same proxy connection, and
+	// must still be dialled (and refused) for its own host (unpinHostChange).
 	client := proxyClient(t, tr, proxyURL)
-	client.Transport.(*http.Transport).DisableKeepAlives = true
 	res, err := client.Get(target.URL + "/start")
 	if err == nil {
 		body, _ := io.ReadAll(res.Body)
