@@ -1,6 +1,6 @@
 # HANDOFF.md — ARTEX
 
-**Last updated:** 2026-11-24 14:24 MST, by claude-code: c-ca2bd0 (E4 follow-up, now in review; board card c-aed5fd opened): an operator can choose a task's methodologies. Earlier hand-offs are under Deltas and in `ej handoff log`.
+**Last updated:** 2026-11-24 16:40 MST, by claude-code: c-ea60a0 (E2 follow-up, now in review): one parser per scanner format (agent ingest on `scanimport`), canonical URLs, ZAP param key, per-import finding links (migration 0023). Earlier hand-offs are under Deltas and in `ej handoff log`.
 
 > Single entry point for whoever picks this up next (any agent or human), with no access to the
 > originating conversation. Read this first, then the sections of the code it points at.
@@ -79,6 +79,10 @@ unmerged E2 backend branch (`ej/20261124-055326-6bcfa9`), so merging it lands E2
 - Verified against Postgres 16 (docker): `go test -p 1 ./scanimport ./agent ./db ./server`. Only
   the known macOS SOCKS5 `127.0.0.2` test fails. The web UI does not show `imports` yet (`c-2d91eb`).
 
+**2026-11-24 — SSE 401 after console login (`c-13e86c`, fixed; pre-E5).** Streams are same-origin only
+(`web/src/lib/sse.ts`), dev gzip off, `openSSE` writes `: open`. Test `server/activity_stream_auth_pg_test.go`;
+browser-checked on the E5 stack.
+
 **2026-11-24 (c-ca2bd0, E4 follow-up)** — An operator can choose a task's methodologies. Migration
 **0022** adds `tasks.methodologies TEXT[]` (empty `{}` = automatic, as before). The create request
 (`methodologies`, ids matched loosely, stored canonical, unknown id = 400) and the create form
@@ -89,6 +93,19 @@ carried through archive/restore and echoed on the task DTO. This branch merges t
 the archive round-trip, `TestCreateTaskMethodologies` (server), the full `go test -p 1 ./...` (only the
 known macOS 127.0.0.2 SOCKS5 test fails), web `tsc` and i18n. Not checked: the form in a browser.
 Gaps carded as `c-aed5fd`: no "none" choice, and the choice is fixed at creation.
+
+**2026-11-24 — client_read console (`c-7c4715`, in review)** on `ej/20261124-144554-67afc9`. New
+`GET /api/me/companies` and `GET /api/me/tasks?company=` (`server/client_console.go`, binders
+`bindBound`/`bindCompany`), both `client_read`. Web: `ClientCompanyGate` (`web/src/app/(main)/_components/`)
+loads the bound companies and holds pages until one is active; the sidebar switcher in bound mode offers
+only those; new **Reports** page `/function/reports` (client landing; hidden for `read` holders via the
+nav item's new `hideWith`) lists the company's engagements in a table with the selected one's outcome
+and Markdown report. Verified: `TestClientReadBoundToCompanyPG` (now also a client bound to two
+companies reading each one's tasks, findings, report, stats and outcome with no refusal), the RBAC route
+tests, web `tsc`, governance unit tests, i18n and `scripts/verify.sh` (only the two known env failures).
+Browser-checked in headless Chromium against a real backend + Postgres 17: a client bound to two
+companies lands on Reports, sees only Reports + Findings and a switcher with just its two companies,
+switches between them and reads each one's findings and report; all 51 `/api` responses were 200.
 
 **2026-11-24 — E5 web UI (`c-869050`, in review)** on `ej/20261124-132958-94f4bf` (carries E5 + client_read).
 `/system/users`, task **Authorization** tab, Approval Records **Chain** tab with Verify; sidebar filtered by
@@ -133,32 +150,13 @@ with `ARTEX_RSI_LESSONS=off`. Verified on Docker Desktop arm64: `up --build` bri
 isolation self-test passes, egress filter installed, UI 200, `ARTEX_RSI_LESSONS=off` in the container.
 No benchmark run was made against it.
 
-**2026-11-24 — E5 engagement governance (card `c-669406`)** is on branch `ej/20261124-055929-bd2253`. It
-is tested against Postgres 17 on macOS; see `docs/GOVERNANCE.md`.
-- **Roles.** `admin`, `operator`, `reviewer` and `client_read` work over the existing JWT. The users
-  are in `artex_users` and managed at `/api/users`. The policy table is `server/rbac_policy.go`,
-  enforced in `requireAuth`. `ARTEX` stays the break-glass admin.
-- **Authorization artifact.** Each task can have a versioned, immutable artifact covering scope, time
-  window and technique classes (`/api/tasks/{id}/authorization`). It is enforced only inside the
-  existing target gate (`intercept/authorization.go`, called from `CheckTargets`/`run`,
-  `CheckUngated`/`ungated`, and the dial and redirect paths). A spawned child task inherits it.
-- **Audit chain.** `audit_chain` is hash-chained and written by row triggers on `intercept_pending`,
-  `artex_users` and `engagement_authorizations`. Logins and refusals by role are appended too.
-  `GET /api/intercept/history/chain` lists it and `/chain/verify` checks it.
-- **Migration numbering.** Migration **0016** holds the schema, because 0015 is taken by the E2
-  integrations branch. If E2 has not merged when this branch lands, renumber whichever merges second.
-  The loader fails closed on a pending version older than one already applied.
-- **Tests.** With `ARTEX_PG_DSN`, all of `go test ./...` passes except three tests:
-  - `TestGateOffTaskIsUnchanged`, which also fails on base `1abe24f` (card `c-3157b4`);
-  - `TestConnectWithoutPasswordRealPG`, because the local Postgres uses trust auth;
-  - the SOCKS5 UDP test, because macOS cannot bind 127.0.0.2.
-- **Head-lock contention fixed (card `c-ba9f64`).** Migration **0018** recreates the three audit row
-  triggers as `DEFERRABLE INITIALLY DEFERRED` constraint triggers, so `audit_chain_head` is locked
-  only at commit. A task archive no longer stalls gate decisions or logins, and the
-  write-then-lock deadlock is gone. 0018 rather than 0017 because the E1 branch
-  (`ej/20261124-083744-02fa3c`) takes 0017. Tests: `db/audit_chain_concurrency_test.go` (both
-  concurrency tests fail without 0018). This branch merged the E5 branch in, so it carries E5 too.
-- **Web UI:** see the c-869050 entry above.
+**2026-11-24 — E5 engagement governance (card `c-669406`)** is on `main` (#31); see `docs/GOVERNANCE.md`.
+Roles `admin`/`operator`/`reviewer`/`client_read` over the JWT (`artex_users`, `/api/users`, policy in
+`server/rbac_policy.go`, enforced in `requireAuth`; `ARTEX` is the break-glass admin). The per-task
+authorization artifact is enforced only inside the target gate (`intercept/authorization.go`). `audit_chain`
+is hash-chained by deferred row triggers (migrations 0016, 0018); `/api/intercept/history/chain[/verify]`.
+With `ARTEX_PG_DSN`, `go test ./...` fails only `TestGateOffTaskIsUnchanged` (`c-3157b4`),
+`TestConnectWithoutPasswordRealPG` (trust auth) and the macOS SOCKS5 UDP test.
 
 **2026-11-24 — client_read bound to companies (card `c-5b5421`, in review)** is on branch
 `ej/20261124-110647-182fa9`. That branch merged the E5 branch (PR #16) in, so it carries E5 too.
@@ -215,64 +213,7 @@ Verified 2026-11-23 (card `c-dadc14`, done):
 - The stock compose cannot start on Docker Desktop for Mac: bind mounts ignore permissions, so the
   isolation self-test fails closed (also on main; `c-775dc2`). Use named volumes there.
 
-Operator-facing changes:
-- Native (non-Linux-root) starts now refuse unless `ARTEX_ALLOW_UNSANDBOXED=1` is set; `dev.sh` sets it.
-- A non-loopback `-addr` without TLS is refused. Use `-tls-cert`/`-tls-key` (or
-  `ARTEX_TLS_CERT`/`ARTEX_TLS_KEY`), or set `ARTEX_ALLOW_INSECURE_BIND=1`; the Dockerfile sets that env.
-- The session is now an HttpOnly, SameSite=Strict cookie (`__Host-` prefixed over TLS), so users log in
-  again once.
-- The capture proxy verifies upstream TLS; `ARTEX_CAPTURE_INSECURE_UPSTREAM=1` is the opt-out for
-  self-signed targets. A non-loopback `-proxy` needs `ARTEX_PROXY_ALLOW_NONLOOPBACK=1`.
-- Docker: the artex container has NET_ADMIN, and `egress.sh` denies the executor uid access to metadata,
-  the host gateway and the API port (`ARTEX_EGRESS_ALLOW`/`_DENY`/`_FILTER`). GHCR compose needs
-  `ARTEX_IMAGE_TAG`.
-- Cloud-metadata and link-local addresses are always denied for platform dials, redirects and WebFetch.
-  Since 2026-11-23 (branch `ej/20261123-152404-f61d73`, card `c-485de0`) this includes the capture
-  proxy's own upstream dials: go-mitmproxy's upstream is a loopback gate (`traffic/upstream_gate.go`)
-  that dials with `Interceptor.DialSOCKS5`.
-- **2026-11-24** (card `c-5a6f96`, commit `75184c3`): task agents' proxy URLs now carry a task scope token,
-  so capture-proxy upstream dials (and SOCKS5 with the token as password) also apply that task's
-  block rules and, with its gate on, its pins/approvals; an ended task's token is refused.
-  **2026-11-24** (card `c-eb32cc`, commit `ac7c35e`, branch `ej/20261124-075745-5a4987`, which also
-  carries the not-yet-merged `c-5a6f96` branch): chat/conversation agents and `use_recording_proxy`
-  HTTP tools now get their run's scoped URL (`Manager.ScopedProxyAddr`, `server/proxy_scope.go`);
-  conversations have their own token, forgotten on delete; an unloaded task's call gets a refused
-  URL. The transparent listener is global-only by decision. **2026-11-24** (card `c-15b39d`, branch
-  `ej/20261124-110649-dbd854`, stacked on PR #13's branch): stdio MCP servers, the Playwright browser
-  included, are spawned per run with their capture-proxy `--proxy-server`/proxy env rewritten to a
-  per-run loopback **scope relay** (`traffic/scope_relay.go`, `Manager.scopeMCPProxy`), so browser
-  dials carry the run's scope; listing tools from the UI (no run) still uses the global rules. **2026-11-24**
-  (card `c-a1c0fc`, branch `ej/20261124-114610-cae888`, which carries c-15b39d): a relay serves at most 256
-  connections at once; a prepareMCP closer is released at once when its MCP fails to start; tests cover
-  the hook (PG), two concurrent scopes, the keep-alive host change, wss, an in-flight request across the
-  relay's close (tombstone), the cap, and a real headless Chrome (opt-in `ARTEX_TEST_CHROME`). This is on
-  main (landed with #22). Re-verified 2026-11-24 12:30: the PG hook test ran against a throwaway Postgres
-  (not skipped) and passed, the Chrome test passed, relay tests pass with -race. A full live task is `c-517c2d`. Operators' own clients keep the global rules. go-mitmproxy's keep-alive host pinning is worked around
-  (`unpinHostChange`; upstream report `c-9b48b7`). The global-egress-proxy bypass is accepted and
-  documented (`docs/OPS.md` §6). `scripts/verify.sh` passes.
-  Block rules apply even with the gate off. Fuzzy allow rules match on name and address boundaries.
-- Main-agent writes carry origin `mainagent` and are framed as agent-authored. Norma compaction
-  summaries are framed as untrusted data.
-- Per-run executor HOME; MCP servers run as uid 10002 (`ARTEX_EXEC_MCP_UID`). The workspace file
-  manager uses `os.Root`.
-- **2026-11-24 — per-task executor uids (card `c-13f293`, opt-in).** `-exec-uid-range LO-HI` (e.g.
-  `20000-29999`, passed to `start.sh`/the container command) gives each task and chat session its own
-  uid while it is live. Its run dirs are `<uid>:<uid>` 2770. Processes take the identity of the run dir
-  they start in: the bash shim, custom tools and file tools all read it from the dir's owner. The uid is
-  released (dirs closed, processes reaped, files back to root) on a terminal status, a task delete or a
-  conversation delete. `egress.sh` filters the range. Code: `server/execuid.go`,
-  `server/execuid_unix.go`. Single-uid mode is still the default.
-  Verified: Linux-root tests (`server/execuid_root_linux_test.go`, where task A gets EACCES on
-  `tasks/B/i1` and `.artex-home`), the full server and agent suites as root in `golang:1.26.11-bookworm`,
-  and egress rules with iptables in a NET_ADMIN container.
-  Spill dirs follow the key too (card `c-dd160a`, `server/execuid_spill_unix.go`). A live key's
-  `<data>/spill/{tasks,sessions}/<id>` is `root:<uid>` 0750 with files `root:<uid>` 0640, so the
-  shared exec gid no longer reads another task's spills. It is regrouped on acquire, closed to
-  `root:root` 0700 at the start of release, and closed at start-up when the key holds no uid. Verified
-  by `TestExecUIDRangeSpillIsolationAsRoot`, where task A's shell and file tool get EACCES on B's spill,
-  plus the full server suite as root in Docker.
-  Root tests in Docker: build the test binary into a 0755 dir (`go test -c -o /t/server.test`). The
-  default 0700 go-build dir makes the isolation self-tests fail on `main` too.
+Operator-facing changes from that audit (unsandboxed-start refusal, TLS on non-loopback binds, and more): `docs/handoff/2026-11-23-security-audit-operator-changes.md`.
 
 **2026-11-24: full Docker image verified (card `c-a6891b`).** The complete image (bbot, chromium,
 Playwright) built from `1abe24f` with the committed Dockerfile on Docker Desktop arm64 in 34 min. The
@@ -304,8 +245,8 @@ body, through the versioned prompt API, and the starting bodies are restored aft
 1. *(unclaimed)* — **SEC: per-task uid follow-ups** (S each): `c-12df03` (single-uid start-up fails on a
    socket; MCP uid not egress-filtered), `c-e70e5c` (release ended tasks at start-up; per-key lock). The "Done when" is on each card.
 2. *(unclaimed)* — **E5 UI: hide role-lacking actions on existing pages** (M), card `c-92bb52`. Done = as
-   reviewer and operator, no visible control answers 403. Then `c-7c4715` (client_read console: my-companies
-   endpoint and switcher, M) and `c-601ec6` (chain newest-first paging, S).
+   reviewer and operator, no visible control answers 403. Then `c-601ec6` (chain newest-first paging, S).
+   (`c-7c4715`, the client_read console, is built and in review on `ej/20261124-144554-67afc9`.)
 3. *(unclaimed)* — **SEC: gorilla/websocket bump, GO-2026-6278** (XS), card `c-c10f2c`; needs network.
    Done = govulncheck clean.
 4. *(unclaimed)* — **SEC: upstream-gate residuals** (M), card `c-5a6f96`: task-scoped rules on proxy
@@ -379,7 +320,7 @@ Card ids in brackets:
   [`c-ca2bd0`] an operator-chosen methodology per task (landed, in review; gaps `c-aed5fd`); [`c-ed937d`] checklist completion in the report export (after E1).
 - **E5** [`c-669406`] Engagement governance. The backend is done on `ej/20261124-055929-bd2253`. Follow-ups:
   `c-5b5421` (client binding), `c-869050` (UI, in review), `c-f4115c` (lifecycle gaps), `c-92bb52`
-  (role-aware controls on existing pages), `c-7c4715` (client_read console), `c-601ec6` (chain paging).
+  (role-aware controls on existing pages), `c-7c4715` (client_read console, in review), `c-601ec6` (chain paging).
 - **TEST** [`c-3157b4`] `TestGateOffTaskIsUnchanged` fails on main with Postgres (also fails before E5).
 - **E6** [`c-cb0093`] Cost/observability dashboard + OpenTelemetry export, building on existing context telemetry.
 - **E7** [`c-d60149`] Distributed/remote workers (queue-backed intents) for larger engagements; Helm chart.
@@ -410,6 +351,12 @@ Card ids in brackets:
 - **E10** [`c-72dd9d`] Code-security testing lane (SAST/dependency ingest) feeding the same dual-graph + evidence model.
 
 ## Known issues and gotchas
+
+- **`next dev` writes `web/AGENTS.md`** (Next 16 agent rules) on start. Delete it before committing; it
+  is not this repo's file.
+- **SSE in dev goes through the Next rewrite** (`/api/*` → `AUTOPENTEST_API`, default :8787). Keep
+  `compress: false` in the dev branch of `web/next.config.mjs` and the `: open` comment in `openSSE`, or
+  streams buffer or stay unopened in the browser.
 
 - **Migration 0020 (RSI) vs other branches' 0015–0019:** the runner refuses a pending migration older
   than the newest applied one, so merge 0015–0019 (E2, E5, E1, c-ba9f64, c-5b5421) before this branch
@@ -467,6 +414,11 @@ Card ids in brackets:
     `over_cap` now counts dropped items, and `events` counts the records read.
   - **The integrations route needs `read`, not a client binder.** Tracker URLs and uploaded file
     names are operator-internal.
+- **2026-11-24** — c-13e86c: SSE streams are same-origin only, with no cross-origin override. The cookie is
+  the only credential a script-free EventSource can present, and the backend's CORS answers `*`, which a
+  credentialed request may not use. Credentialed CORS for dev origins was rejected: cookies are not
+  port-isolated, so it would let a page on another port of the same host (a lab target) read the streams.
+
 - **2026-11-24** — c-ca2bd0: the operator's methodology choice is a list column on `tasks`, with an empty
   list meaning automatic, so existing tasks and every other create path (spawn, templates) keep the
   goal-word selection. A non-empty list replaces the automatic set rather than adding to it, which also
@@ -474,6 +426,12 @@ Card ids in brackets:
   without notice. A stored id whose checklist has since been removed is skipped. The migration is
   numbered 0022 because 0015–0021 are taken on open branches, and the migrate test refuses an
   out-of-order version, so 0022 must land after them.
+- **2026-11-24** — c-7c4715: the client's pickers are new `/api/me/*` routes rather than opening
+  `GET /api/companies` / `GET /api/tasks` to `client_read`: those return operator data (scope rules,
+  goal text, tokens, task-wide finding counts that span other clients), and a narrow DTO keeps that out
+  by construction. The client task list uses the operator-made company scope rows only (same rule as
+  `TaskCompaniesIn`). The Reports page, not a client Dashboard, is the client landing: it covers report
+  and outcome per bound task with routes already open to clients.
 - **2026-11-24** — c-869050: the E5 UI branch merges the E5 + client_read branch rather than waiting
   for PR #16, so the UI is built and browser-tested against the real API; merging it lands E5 too. The
   governance client lives in `web/src/lib/governance-api.ts` (not `api.ts`, already over 600 lines) and
@@ -617,11 +575,12 @@ Card ids in brackets:
 ## Deltas
 
 <!-- composite:deltas · newest first; Composite rewrites this block on every merge (ej handoff merge / merge_handoff) -->
+- **2026-11-24 14:52 MST** · claude-code · `ej/20261124-142817-7e3c57` `b89fab2`→`dc77cdc` (6 commits) · `h-6ea377` — c-13e86c fixed: the activity stream 401 after a console login predates E5. Since the cookie move, getToken() is null, but sseUrl sent non-production builds cross-origin to :8787, where the EventSource carried no credential. Now web/src/lib/sse.ts keeps every stream same-origin (NEXT_PUBLIC_SSE_BASE removed), next.config turns dev gzip off (it buffered proxied SSE), and server openSSE writes ': open' when a stream opens (the dev rewrite held the headers until the first body byte, the 20 s ping). PG test server/activity_stream_auth_pg_test.go covers legacy ARTEX and a console user with the cookie only, and no session → 401. Also web/src/lib/sse.test.mjs. Browser-checked on the E5 stack (61d777 + this change, next dev + PG): both logins connect, no Reconnecting. HANDOFF: the stale E5 entry is condensed (it is on main as #31), and the 2026-11-23 audit operator list moved to docs/handoff/ so Current state fits its limit. **Next:** Land with or after the E5 stack branches (c-f4115c, c-01377e). The patch applied cleanly on ej/20261124-140004-61d777, where the test passes. **Decided:** SSE is same-origin only. Credentialed CORS for dev origins was rejected because cookies are not port-isolated, so a lab target on another port of the same host could read the streams.
 - **2026-11-24 14:24 MST** · claude-code · `ej/20261124-141028-5cc420` `5c56fe9`→`d42cd76` (1 commit) · `h-8a2866` — c-ca2bd0 (E4 follow-up, now in review; board card c-aed5fd opened): an operator can choose a task's methodologies. Migration 0022 adds tasks.methodologies TEXT[] (empty = automatic, unchanged). The create request and create form (methodology-picker.tsx, a table fed by the new GET /api/methodologies) set it. Ids are matched loosely and stored canonical, and an unknown id returns 400. db.TaskMethodologies uses the choice when set, so the coverage API and the planner block show only the chosen checklists. The choice is carried through archive/restore and returned on the task DTO. This branch merges the unmerged E4 branch ej/20261124-123222-d3dc8a. Verified on Postgres 16: TestTaskMethodologiesOperatorChoice, the archive round-trip, TestCreateTaskMethodologies, the full go test ./... (only the known macOS 127.0.0.2 SOCKS5 test fails), web tsc and i18n. The form was not checked in a browser. **Next:** Land the E4 branch (ej/20261124-123222-d3dc8a) and this branch together. Migration 0022 must land after the 0015–0021 branches. c-aed5fd: a "none" choice and editing the choice after creation. Check the create form's picker in a browser. **Decided:** An empty list means automatic, so other create paths and existing tasks keep the goal-word selection. A non-empty list replaces the automatic set rather than adding to it, which also covers excluding a checklist. An unknown id is refused at creation, so a typo never silently falls back to automatic. Stored ids whose checklist was later removed are skipped. The migration is numbered 0022 because 0015–0021 are taken on open branches.
 - **2026-11-24 13:51 MST** · claude-code · `ej/20261124-132955-7aef3f` `4dd0330`→`68d14af` (3 commits) · `h-ed4135` — c-597eb6 (now in review; follow-up card c-2d91eb opened): built the E2 web UI, and merged the unmerged E2 backend branch ej/20261124-055326-6bcfa9 so both land together. System → Integrations has a trackers table with an inline enable switch, Sync, edit and delete (with a confirm). Its sheet shows masked credential inputs driven by secret_keys plus an include_evidence switch; the ConfigField/lib/config-form.ts behind them is now shared with Notifications. Scanner imports detects the format from the file and lists past imports. The findings bulk bar has a Push to tracker select, batched at 200. The finding detail has a Tickets card with ticket links, remote state, import provenance and a single push. Types are in lib/types.ts, the client is in lib/integrations-api.ts, and the pure helpers are in lib/integrations.ts with 9 node tests (npm run test:integrations, in verify.sh). 89 i18n keys were added in tr and zh-CN. Verified: tsc, i18n check, and scripts/verify.sh after merging main (migrate_test now lists 0015 and 0020). A Playwright run in real Chromium against the real backend, with a fake GitHub on loopback, passed: add, masked edit, the destination-change refusal, nuclei import, push of 3 (a re-push updated), the detail panel, sync pulling a closed issue to fixed, and delete. **Next:** c-2d91eb: an import_id filter on the findings list so each import links to its findings; commit the browser e2e scenario as a script; pagination for the imports list. The E2 backend follow-ups c-da9198 and c-ea60a0 are unchanged. **Decided:** Merged the unmerged E2 backend branch into the UI branch, because the UI is useless without the routes. Tracker field layout lives in the web and only secret_keys comes from the server, the same split as Notifications, so the masked-field component is shared. Push has no confirmation because it is idempotent; delete keeps one. Integrations and Scanner imports are System sidebar entries. A GitHub tracker is the default type. Duplicate React keys on the finding detail page (retest and traffic panels) were fixed in passing.
 - **2026-11-24 13:50 MST** · claude-code · `ej/20261124-133353-5aceb1` `bc44469`→`9830ac9` (2 commits) · `h-2d8bcf` — c-f4115c (now in review): closed the six E5 artifact lifecycle gaps on a branch that merges the E5 + client_read branch (ej/20261124-110647-182fa9, PR #16). Archives carry engagement_authorizations and restore re-creates missing versions; an artifact forces the target gate on (PATCH gate-off → 409); the scheduler pauses tasks whose artifact expired or was revoked, and resume is refused until a new version; console users change their own password through /api/auth/change-password (version compare-and-swap, sessions end); SSE re-checks and the gate's artifact read go through 2 s caches on a new generic memo/ package, invalidated by every db write. PG tests for each, mutation-checked; verify.sh (with web steps) passes. Board cards opened: c-5018f6, c-01377e. **Next:** Land PR #16 (E5) and c-5b5421's branch first, then this branch. c-01377e: UI for the gate requirement and authorization_ended pauses (after c-869050). c-5018f6: wrong current password returns 401, which the web client treats as logout. Not checked: a live task paused by the scheduler at not_after (the sweep is tested directly). **Decided:** An artifact forces the target gate (refuse turning it off) instead of recommending it. Expiry/revocation pauses unconditionally and blocks resume; a not-yet-started window does not pause. Password self-service extends the existing /api/auth/change-password rather than adding /api/users/me/password (UI already calls it; already rate-limited). Archive keeps artifact rows with the stub and carries them in the package; restore uses SET CONSTRAINTS IMMEDIATE on the one artifact audit trigger so re-created rows get actor archive-restore without relabelling restored intercept rows. One generic memo cache (TTL + race-safe invalidation), 2 s; a request's first auth check stays uncached.
-- **2026-11-24 13:46 MST** · claude-code · `ej/20261124-132958-94f4bf` `60e20d8`→`7f9af4f` (4 commits) · `h-7f6f23` — c-869050 (now in review): web UI for E5. /system/users admin table (inline role/enabled, set password, delete, client_read company bindings); task detail Authorization tab (status badge, version history table, admin-only new-version form and revoke); Approval Records Chain tab (filters, paging, entry sheet, Verify showing head_seq/head_hash, broken_at, rows_mismatched). Session role/permissions drive a permission-filtered sidebar via useCan; a 403 shows a message and never logs out; the login form takes any username. Branch merges ej/20261124-110647-182fa9 (E5 PR #16 + client_read), so it carries E5. Verified in headless Chromium against a real backend + Postgres 17 as admin, reviewer (forced 403 stays signed in; tampered chain shows Broken at seq 6) and client_read (lands on Findings, no refused calls). verify.sh --web-only (now with governance unit tests and the i18n check), build:static, and the db migration test after merging main pass. **Next:** c-92bb52: gate mutating controls on existing pages by role (reviewer currently sees Interception Rules edit controls). c-7c4715: client_read console (my-companies endpoint + switcher, client dashboard). c-601ec6: chain newest-first paging and deep link to the approval row. Land PR #16 / the c-5b5421 branch or this branch (it carries both). **Decided:** Built on the unmerged E5 + client_read branch rather than waiting, so the UI was tested against the real API. Governance client lives in web/src/lib/governance-api.ts (api.ts is already over 600 lines) reusing http(). UI hiding is a convenience; the server policy stays the enforcement. Dashboard and company switcher are hidden for client_read because they call operator-wide routes. Audit kind quick-picks are identifiers, not translated. **Issues:** opened #c-601ec6, #c-7c4715, #c-92bb52.
 - _Older hand-offs, a line each; `ej handoff log` has them whole:_
+- **2026-11-24 13:46 MST** · claude-code · `h-7f6f23` — c-869050 (now in review): web UI for E5. **Next:** c-92bb52: gate mutating controls on existing pages by role (reviewer currently sees Interception Rules edit controls). **Issues:** opened #c-601ec6, #c-7c4715, #c-92bb52.
 - **2026-11-24 13:36 MST** · claude-code · `h-59bfe6` — c-9b48b7: confirmed go-mitmproxy keep-alive host pinning is still unfixed through v1.9.5 (= upstream main 07e0ca5), and no upstream report exists. **Next:** Ian: approve filing (human lane).
 - **2026-11-24 13:26 MST** · claude-code · `h-4efcbc` — c-965b0e done and c-775dc2 landed: merged the unmerged branch ej/20261123-192351-fab3f4 (named volumes, exit 78, start.sh idle hold e1d7a27) and added an image HEALTHCHECK that is unhealthy while start.sh holds on an isolation refusal (root-only marker /run/a… **Next:** Run docker-compose.bind.yml on a real Linux host (human lane).
 - **2026-11-24 13:25 MST** · me · `h-7df71f` — c-7e0087 (now in review): each ARTEX server's agent egress floor has its own chain, ARTEX_AGENT_FLOOR_<exec uid>, with jumps tagged artex-floor-<exec uid>. **Next:** Land c-b73542 (ej/20261124-113533-f16c00), then c-02e554 (ej/20261124-122709-d136a7), then this branch.
@@ -640,7 +599,6 @@ Card ids in brackets:
 - **2026-11-24 06:17 MST** · claude-code · `ej/20261124-060053-f49eb3` `a18400e`→`ea8f17d` (1 commit) · `h-537f2b` — c-8d54d5 done: the capture proxy verifies upstream TLS per host. go-mitmproxy v1.9.2 is vendored and patched in third_party/go-mitmproxy (go.mod replace), adding Options.UpstreamInsecure(host) and UpstreamRootCAs through tls.Config.VerifyConnection. ARTEX skips verification only for hosts named by an enabled allow rule of an active task that no block rule hits, and only when both the SNI and the dialled host qualify. Registries, code hosts and OS mirrors are always verified. The policy is cached for 5 s and fails closed. An independent security review was run and its medium finding is fixed. verify.sh passes; the Postgres test was skipped locally (no PG). Card c-8d54d5 moved to review. **Next:** Run `ARTEX_PG_DSN=… go test ./db -run ActiveTaskScopeRulesPG`. Run a Docker smoke test: a self-signed in-scope target through the proxy, and pip/git through it staying verified. Residual: the shared client refuses IP https targets (fails closed), and IP-target MITM certificates lack an IP SAN (pre-existing). **Decided:** Vendored and patched go-mitmproxy rather than a double-MITM transport (keeps ALPN/h2 and TLS state). Any active task's allow rules count, because the proxy cannot attribute a request to a task. No DNS lookup, so CIDR rules cover IP-addressed targets only. Both the SNI and the dialled host must be in scope. Registries are always verified.
 - **2026-11-24 05:18 MST** · claude-code · `ej/20261124-045249-222f7a` `1abe24f`→`114c0c8` (2 commits) · `h-5a3839` — c-5a6f96 is done; follow-up cards c-eb32cc and c-9b48b7 are open. Task agents' capture-proxy URLs now carry a task scope token. Proxy upstream dials, and SOCKS5 with the token as its password, now apply the task's block rules and, when its gate is on, its pins and approvals. A token whose task has ended is refused. go-mitmproxy's keep-alive host pinning is worked around with its separate client (not inside TLS tunnels). The global-egress-proxy bypass is accepted and documented in OPS.md §6. There are tests for each fixed item. An independent review found no fail-open; two of its findings are fixed. verify.sh passes; -race is clean on traffic, egress and agent. **Next:** c-eb32cc: scope the chat and conversation agents, the custom HTTP tools and the transparent listener. It also carries two low review items: the HTTP/2 pool is shared across scopes, and a token minted after forgetTask is never freed. c-9b48b7: report the pinning bug to go-mitmproxy, after confirming with Ian. Server-level wiring (TaskProxyAddr) has no Postgres-backed test. **Decided:** Scope travels as a per-task token in the proxy URL userinfo. It only adds rules: no token falls back to the global floor, and an unknown token fails closed. Proxy dials never wait for approval. The global egress proxy is accepted rather than routed through the gate, since a name-only check is all the gate could do there; operators must not run that proxy where it can reach metadata. Pinning is fixed by UseSeparateClient rather than by closing client connections.
 - **2026-11-23 21:08 MST** · claude-code · `ej/20261123-192351-fab3f4` `5c5ac24`→`cb6d41c` (1 commit) · `h-43cc9e` — c-775dc2: docker-compose.yml and docker-compose.ghcr.yml now keep /app/data, /app/keys and /app/skills in named volumes, so the stock `docker compose up` starts on Docker Desktop with the isolation self-test passing. Added docker-compose.bind.yml, a Linux-only override for host directories. A refused isolation start now exits 78 (server.ExitIsolationRefused), and start.sh prints the remedy instead of relaunching. update.sh copies an old ./keys, ./data and ./skills into the new volumes once. scripts/backup.sh archives /app/data (and, with the new --with-keys, /app/keys) from inside the container. README, OPS and SECURITY are updated. Verified on Docker Desktop for Mac arm64: "backend listening", health 200, and uid 10001 cannot write keys or skills; the bind override exits 78 with the remedy. Opened card c-965b0e; closes card c-775dc2. **Next:** c-965b0e: Docker's `restart: unless-stopped` still restarts the container after an exit 78. Decide on the restart policy or an idle hold. Run the Linux bind-mount path on a real Linux host. Run the full image build (`docker compose build`) once; the Dockerfile is unchanged. **Decided:** Named volumes are the default for all three directories, so the stock file never needs weakened isolation. Skills became a volume, seeded from the image, because the UI writes skills; refresh them with `docker compose cp skills/. artex:/app/skills/`. The isolation refusal uses EX_CONFIG 78 so start.sh can tell it from a crash.
-- _Older hand-offs, a line each; `ej handoff log` has them whole:_
 - **2026-11-23 21:07 MST** · claude-code · `h-ee4b2b` — c-a0af33: logout now revokes the session server-side. **Next:** Re-run `ARTEX_PG_DSN=… go test ./server` once Docker is healthy. **Issues:** opened #c-8dea4d.
 - **2026-11-23 16:51 MST** · claude-code · `h-61510f` — Verified the security fixes (now on main via PR #1, plus main's c-485de0 upstream gate) on Linux as root with Postgres, in Docker with the egress iptables filter, and in a browser over the HttpOnly cookie. **Next:** c-a0af33: server-side logout revocation (token epoch).
 - **2026-11-23 15:14 MST** · claude-code · `h-04e098` — Fixed the High and Medium findings (#1–#16) from the 2026-11-23 ARTEX security audit on the local branch ej/20261123-145205-6a3af6. **Next:** c-485de0: route the MITM proxy's upstream dials through the metadata/block check. **Issues:** opened #c-485de0, #c-8d54d5, #c-bd9a6d, #c-c10f2c, #c-cc25b6, #c-dadc14.

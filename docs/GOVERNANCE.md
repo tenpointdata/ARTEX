@@ -55,6 +55,12 @@ every change is appended to the audit chain as `row.artex_user_companies`. Bindi
 - Every route the policy opens to `client_read` must have a binder in `server/client_scope.go`; a route
   without one is refused, and `TestClientBindersCoverClientRoutes` fails until it has one.
 - A task scoped to two clients is fully visible to both, including its report and lineage graph.
+- **The console's pickers.** `GET /api/me/companies` lists the bound companies (id, name, logo, asset
+  count; no scope rules) and `GET /api/me/tasks?company=` the tasks an operator scoped to one bound
+  company (id, name, status, times; no goal text, tokens or task-wide finding counts, which span every
+  company the task is scoped to). For other roles they list every company, and the tasks of any
+  `?company=` (required). The web console uses them for the client's company switcher and its Reports
+  page (`/function/reports`, the client landing), and holds every page until a bound company is active.
 
 ## Authorization artifact
 

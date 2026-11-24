@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"net/http/httptest"
 	"strconv"
 	"strings"
@@ -174,6 +175,16 @@ func TestClientReadBoundToCompanyPG(t *testing.T) {
 	want(200, fmt.Sprintf("/api/tasks/%d/coverage", fx.taskA))
 	want(200, fmt.Sprintf("/api/exploration/findings/%d/lineage", fx.findA))
 	want(200, fmt.Sprintf("/api/exploration/findings?task=%d", fx.taskA))
+	want(404, fmt.Sprintf("/api/me/tasks?company=%d", fx.companyB))
+	var mine []db.CompanySummary
+	if w := call(h, tok, "GET", "/api/me/companies", ""); w.Code != 200 || decodeInto(w, &mine) != nil || len(mine) != 1 || mine[0].ID != fx.companyA {
+		t.Errorf("my companies bound to A: %d %s", w.Code, w.Body)
+	}
+	var tasks []ClientTaskDTO
+	if w := call(h, tok, "GET", "/api/me/tasks", ""); w.Code != 200 || decodeInto(w, &tasks) != nil ||
+		len(tasks) != 1 || tasks[0].ID != strconv.FormatInt(fx.taskA, 10) || strings.Contains(w.Body.String(), `"goal"`) {
+		t.Errorf("my tasks bound to A (task B's agent row must not count): %d %s", w.Code, w.Body)
+	}
 
 	var st struct{ Total int }
 	if w := call(h, tok, "GET", "/api/exploration/findings/stats", ""); w.Code != 200 || decodeInto(w, &st) != nil || st.Total != 1 {
@@ -201,6 +212,8 @@ func TestClientReadBoundToCompanyPG(t *testing.T) {
 		t.Fatalf("rebind: %d %s", w.Code, w.Body)
 	}
 	want(400, "/api/exploration/findings?page=1&limit=50")
+	want(400, "/api/me/tasks")
+	clientConsoleBothCompanies(t, fx, h, tok)
 	want(200, fmt.Sprintf("/api/exploration/findings/%d", fx.findB))
 	want(200, fmt.Sprintf("/api/report?task=%d", fx.taskB))
 	// Withdrawn: nothing again.
@@ -221,4 +234,38 @@ func latestAuditSeq(t *testing.T, s *Server) int64 {
 
 func decodeInto(w *httptest.ResponseRecorder, v any) error {
 	return json.Unmarshal(w.Body.Bytes(), v)
+}
+
+// clientConsoleBothCompanies: a client bound to A and B lists both companies
+// and reads each one's tasks, findings and report with no refusal.
+func clientConsoleBothCompanies(t *testing.T, fx clientFixture, h http.Handler, tok string) {
+	t.Helper()
+	var mine []db.CompanySummary
+	if w := call(h, tok, "GET", "/api/me/companies", ""); w.Code != 200 || decodeInto(w, &mine) != nil || len(mine) != 2 {
+		t.Fatalf("my companies bound to A and B: %d %s", w.Code, w.Body)
+	}
+	for _, c := range []struct {
+		company, task int64
+		name, other   string
+	}{{fx.companyA, fx.taskA, fx.nameA, fx.nameB}, {fx.companyB, fx.taskB, fx.nameB, fx.nameA}} {
+		var tasks []ClientTaskDTO
+		w := call(h, tok, "GET", fmt.Sprintf("/api/me/tasks?company=%d", c.company), "")
+		if w.Code != 200 || decodeInto(w, &tasks) != nil || len(tasks) != 1 || tasks[0].ID != strconv.FormatInt(c.task, 10) {
+			t.Errorf("tasks of %d: %d %s", c.company, w.Code, w.Body)
+		}
+		w = call(h, tok, "GET", fmt.Sprintf("/api/exploration/findings?page=1&limit=200&company=%d", c.company), "")
+		if body := w.Body.String(); w.Code != 200 || !strings.Contains(body, c.name) || strings.Contains(body, c.other) {
+			t.Errorf("findings of %d: %d %.300s", c.company, w.Code, body)
+		}
+		for _, url := range []string{
+			fmt.Sprintf("/api/report?task=%d", c.task),
+			fmt.Sprintf("/api/stats?task=%d", c.task),
+			fmt.Sprintf("/api/tasks/%d/outcome", c.task),
+			fmt.Sprintf("/api/exploration/findings/stats?company=%d", c.company),
+		} {
+			if w := call(h, tok, "GET", url, ""); w.Code != 200 {
+				t.Errorf("GET %s: %d %.200s", url, w.Code, w.Body)
+			}
+		}
+	}
 }

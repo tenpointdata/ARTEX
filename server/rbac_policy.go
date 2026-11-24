@@ -130,6 +130,9 @@ var rbacPolicy = []policyRule{
 	{http.MethodGet, "/api/stats", false, permClientRead},
 	{http.MethodGet, "/api/tasks/{id}/outcome", false, permClientRead},
 	{http.MethodGet, "/api/tasks/{id}/coverage", false, permClientRead},
+	// The console's pickers: the companies and tasks the caller may see.
+	{http.MethodGet, "/api/me/companies", false, permClientRead},
+	{http.MethodGet, "/api/me/tasks", false, permClientRead},
 }
 
 // defaultPermission applies when no rule matches: reads need read, anything
