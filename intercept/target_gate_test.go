@@ -25,6 +25,13 @@ type fakeStore struct {
 	fail   map[string]error // by method name
 	reads  int
 	logged []db.TargetDecision
+	auth   *db.EngagementAuthorization
+}
+
+func (s *fakeStore) Authorization(db.TargetScopeRef) (*db.EngagementAuthorization, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.auth, s.fail["Authorization"]
 }
 
 func (s *fakeStore) read(method string) error {
