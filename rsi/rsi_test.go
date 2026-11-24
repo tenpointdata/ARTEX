@@ -182,14 +182,14 @@ func expectFail(t *testing.T, v Verdict, substr string) {
 
 func TestGateRefusals(t *testing.T) {
 	cases := map[string]func(base, cand *ArmResult, b *Binding){
-		"not the proposed body": func(_, c *ArmResult, _ *Binding) { c.Stamp.PromptSHA["planner"] = "other" },
+		"not the proposed body":           func(_, c *ArmResult, _ *Binding) { c.Stamp.PromptSHA["planner"] = "other" },
 		"one proposal changes one module": func(_, c *ArmResult, _ *Binding) { c.Stamp.PromptSHA["worker"] = "w1" },
-		"stamp seed differs": func(_, c *ArmResult, _ *Binding) { c.Stamp.Raw["seed"] = 9.0 },
-		"stamp judge_model is missing": func(b, _ *ArmResult, _ *Binding) { delete(b.Stamp.Raw, "judge_model") },
-		"adoption needs":               func(_, c *ArmResult, _ *Binding) { c.Stamp.Split = "dev" },
-		"RSI.md rule 1":                func(_, _ *ArmResult, b *Binding) { b.ProposedFrom = []string{"B"} },
-		"the baseline must not evolve": func(b, _ *ArmResult, _ *Binding) { b.Stamp.LessonIDs = []int64{4} },
-		"appears in more than one run": func(_, c *ArmResult, _ *Binding) { c.Records[1].Payload.Task.ID = c.Records[0].Payload.Task.ID },
+		"stamp seed differs":              func(_, c *ArmResult, _ *Binding) { c.Stamp.Raw["seed"] = 9.0 },
+		"stamp judge_model is missing":    func(b, _ *ArmResult, _ *Binding) { delete(b.Stamp.Raw, "judge_model") },
+		"adoption needs":                  func(_, c *ArmResult, _ *Binding) { c.Stamp.Split = "dev" },
+		"RSI.md rule 1":                   func(_, _ *ArmResult, b *Binding) { b.ProposedFrom = []string{"B"} },
+		"the baseline must not evolve":    func(b, _ *ArmResult, _ *Binding) { b.Stamp.LessonIDs = []int64{4} },
+		"appears in more than one run":    func(_, c *ArmResult, _ *Binding) { c.Records[1].Payload.Task.ID = c.Records[0].Payload.Task.ID },
 		"pruner needs": func(_, c *ArmResult, _ *Binding) {
 			c.Records[0] = run("A", 0) // gain only on B
 		},
