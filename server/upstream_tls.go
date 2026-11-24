@@ -30,6 +30,7 @@ type upstreamTLSScope struct {
 	now func() time.Time
 
 	mu      sync.Mutex
+	loading bool
 	loaded  time.Time
 	ok      bool
 	global  []pgdb.AssetInterceptRule
@@ -41,23 +42,37 @@ func newUpstreamTLSScope(src upstreamTLSScopeSource) *upstreamTLSScope {
 	return &upstreamTLSScope{src: src, now: time.Now}
 }
 
-// trusts is a traffic.UpstreamTrustFunc.
+// trusts is a traffic.UpstreamTrustFunc. A stale snapshot is refreshed by
+// one caller, outside the lock; the others decide on the snapshot they find,
+// so a slow database never holds up a handshake (before the first read
+// succeeds, that snapshot verifies every host).
 func (p *upstreamTLSScope) trusts(host string) bool {
 	p.mu.Lock()
-	defer p.mu.Unlock()
-	if now := p.now(); now.Sub(p.loaded) >= upstreamTLSScopeTTL {
-		p.reload(now)
+	now := p.now()
+	if !p.loading && now.Sub(p.loaded) >= upstreamTLSScopeTTL {
+		p.loading = true
+		p.mu.Unlock()
+		global, tasks, err := p.read()
+		p.mu.Lock()
+		p.store(now, global, tasks, err)
 	}
-	return p.ok && pgdb.HostInTaskAllowScope(host, p.global, p.tasks)
+	ok, global, tasks := p.ok, p.global, p.tasks
+	p.mu.Unlock()
+	return ok && pgdb.HostInTaskAllowScope(host, global, tasks)
 }
 
-func (p *upstreamTLSScope) reload(now time.Time) {
-	p.loaded = now
+func (p *upstreamTLSScope) read() ([]pgdb.AssetInterceptRule, []pgdb.TaskScopeRules, error) {
 	global, err := p.src.ListAssetInterceptRules()
-	var tasks []pgdb.TaskScopeRules
-	if err == nil {
-		tasks, err = p.src.ActiveTaskScopeRules()
+	if err != nil {
+		return nil, nil, err
 	}
+	tasks, err := p.src.ActiveTaskScopeRules()
+	return global, tasks, err
+}
+
+// store records a read; p.mu is held.
+func (p *upstreamTLSScope) store(now time.Time, global []pgdb.AssetInterceptRule, tasks []pgdb.TaskScopeRules, err error) {
+	p.loading, p.loaded = false, now
 	if err != nil {
 		p.ok, p.global, p.tasks = false, nil, nil
 		if now.Sub(p.errLast) >= time.Minute {

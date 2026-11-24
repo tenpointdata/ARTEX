@@ -225,7 +225,7 @@ func (a *attacker) serverTlsHandshake(ctx context.Context, connCtx *ConnContext)
 	clientHello := connCtx.ClientConn.clientHello
 	serverConn := connCtx.ServerConn
 
-	serverTlsConfig := proxy.upstreamTLSConfig(upstreamHost(clientHello.ServerName, serverConn.Address))
+	serverTlsConfig := proxy.upstreamTLSConfig(clientHello.ServerName, addressHost(serverConn.Address))
 	serverTlsConfig.ServerName = clientHello.ServerName
 	serverTlsConfig.NextProtos = clientHello.SupportedProtos
 	// CurvePreferences:   clientHello.SupportedCurves, // todo: 如果打开会出错

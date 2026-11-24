@@ -62,6 +62,8 @@ func (t *Traffic) SetUpstreamTrust(f UpstreamTrustFunc) {
 }
 
 // upstreamInsecure is go-mitmproxy's per-host hook (Options.UpstreamInsecure).
+// The patched library asks it for both the SNI and the dialled host, and
+// exempts a connection only when both are exempt.
 func (t *Traffic) upstreamInsecure(host string) bool {
 	if host == "" || ProtectedUpstreamHost(host) {
 		return false

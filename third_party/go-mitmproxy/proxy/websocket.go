@@ -270,7 +270,7 @@ func (h *webSocketHandler) handleWSS(res http.ResponseWriter, req *http.Request)
 		NetDial: func(network, addr string) (net.Conn, error) {
 			return serverConn.Conn, nil
 		},
-		TLSClientConfig: h.proxy.upstreamTLSConfig(""),
+		TLSClientConfig: h.proxy.upstreamTLSConfig(addressHost(serverConn.Address)),
 	}
 
 	upstreamHeader := cloneHeaderWithoutWSHandshake(req.Header)

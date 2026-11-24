@@ -69,8 +69,12 @@ Linux-root tests, the Docker egress iptables rules, the Postgres-backed tests an
   `ARTEX_TLS_CERT`/`ARTEX_TLS_KEY`), or set `ARTEX_ALLOW_INSECURE_BIND=1`; the Dockerfile sets that env.
 - The session is now an HttpOnly, SameSite=Strict cookie (`__Host-` prefixed over TLS), so users log in
   again once.
-- The capture proxy verifies upstream TLS; `ARTEX_CAPTURE_INSECURE_UPSTREAM=1` is the opt-out for
-  self-signed targets. A non-loopback `-proxy` needs `ARTEX_PROXY_ALLOW_NONLOOPBACK=1`.
+- The capture proxy verifies upstream TLS per host (since 2026-11-24, card `c-8d54d5`). It skips
+  verification only for hosts an enabled allow rule of an active task names (no block rule hit), so
+  self-signed in-scope targets work with no env var. Registries, code hosts and OS mirrors
+  (`traffic/upstream_trust.go`) are always verified. This needs the patched go-mitmproxy vendored in
+  `third_party/go-mitmproxy` (see its `ARTEX_PATCH.md`). `ARTEX_CAPTURE_INSECURE_UPSTREAM=1` still
+  exempts every other host. A non-loopback `-proxy` needs `ARTEX_PROXY_ALLOW_NONLOOPBACK=1`.
 - Docker: the artex container has NET_ADMIN, and `egress.sh` denies the executor uid access to metadata,
   the host gateway and the API port (`ARTEX_EGRESS_ALLOW`/`_DENY`/`_FILTER`). GHCR compose needs
   `ARTEX_IMAGE_TAG`.
@@ -139,7 +143,6 @@ Card ids in brackets:
 - **E9** [`c-73af97`] Frontend/UX pass (tables over cards, fewer-clicks triage workflow, live engagement dashboard).
 - **SEC** [`c-5a6f96`] Capture-proxy upstream gate residuals (task-scoped rules, go-mitmproxy host pinning, egress-proxy bypass).
 - **SEC** [`c-dadc14`] Verify the security branch on Linux root, in Docker and against Postgres, plus the web typecheck.
-- **SEC** [`c-8d54d5`] Capture proxy: insecure upstream only for in-scope targets.
 - **SEC** [`c-c10f2c`] gorilla/websocket bump (GO-2026-6278).
 - **SEC** [`c-bd9a6d`] Residual gaps from the High/Medium fixes.
 - **SEC** [`c-cc25b6`] Low-severity audit items.
@@ -147,6 +150,13 @@ Card ids in brackets:
 
 ## Known issues and gotchas
 
+- go-mitmproxy is a vendored, patched copy (`third_party/go-mitmproxy`, `replace` in `go.mod`) that
+  adds a per-host upstream TLS hook. To upgrade it, re-copy the packages and re-apply the patch listed
+  in `third_party/go-mitmproxy/ARTEX_PATCH.md`. The Dockerfile copies `third_party/` before
+  `go mod download`. The library's shared client (used when a rewrite rule changes the host or scheme)
+  refuses IP-addressed https targets, because crypto/tls gives it no name to check (fails closed).
+  Trust also needs both the SNI and the dialled host in scope. go-mitmproxy mints its certificate for an IP target without an IP SAN, so a client
+  that verifies the proxy's certificate fails on `https://<ip>/` (pre-existing; not fixed here).
 - go-mitmproxy v1.9.2 has no upstream dial hook. Every capture-proxy upstream dial goes through its
   upstream-proxy URL, which is our loopback gate (random credential, `traffic/upstream_gate.go`). Do not
   set `SetUpstreamProxy` back to returning nil: nil means a bare `net.Dialer` as root, with no checks (`c-485de0`).
@@ -176,6 +186,13 @@ Card ids in brackets:
   legitimately name 169.254.169.254; it is enforced at the dial level instead. Block rules keep substring
   matching, since matching more is the safe direction; only allow rules became strict. Security
   follow-ups are private board cards, not GitHub issues, because the repo is public.
+- **2026-11-24** — Per-host upstream TLS trust (`c-8d54d5`). We patched a vendored go-mitmproxy
+  instead of building a custom upstream transport: the TLS handshake happens inside the library, and a
+  double-MITM transport would lose its ALPN/h2 and TLS state. The proxy cannot tell which task a
+  request belongs to, so the allow rules of any active task (created/running/paused) count. Hosts are
+  matched as written (no DNS lookup), so a CIDR rule covers IP-addressed targets only. The policy is
+  cached for 5 s and verifies every host when the rules cannot be read. Registries are always verified
+  because their certificates are public, so verifying them never breaks a capture.
 - **2026-11-23** — The capture proxy keeps verifying upstream TLS by default. Engagements against
   self-signed targets set `ARTEX_CAPTURE_INSECURE_UPSTREAM=1` for that run only, until per-target trust
   (card `c-8d54d5`) exists. Reason: the goproxy setting is global, so turning it on also leaves package

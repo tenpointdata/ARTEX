@@ -10,8 +10,11 @@ global `Options.SslInsecure`.
 - `proxy/upstream_tls.go` (new): `Options.UpstreamInsecure func(host string) bool` decides per
   upstream host; `Options.UpstreamRootCAs` sets the roots (nil = system). Verification runs in
   `tls.Config.VerifyConnection` and matches crypto/tls's default (chain, server-auth usage, name).
-  An IP target without SNI is checked against the dialled IP (upstream failed such handshakes when
-  verifying).
+  In `serverTlsHandshake` a connection is exempt only when both the client's SNI and the dialled
+  host are exempt, and an IP target without SNI is checked against the dialled IP. The wss dialer
+  checks the dialled host. The shared client (used after a rewrite changes the host or scheme) only
+  sees `ConnectionState.ServerName`, which is empty for an IP, so it refuses IP targets
+  (fails closed).
 - `proxy/proxy.go`: the two options. `proxy/attacker.go` (shared client, `serverTlsHandshake`) and
   `proxy/websocket.go` (wss dialer): use `upstreamTLSConfig`. `SslInsecure` still governs an https
   upstream proxy (`helper.GetProxyConn`) and is the fallback when `UpstreamInsecure` is nil.

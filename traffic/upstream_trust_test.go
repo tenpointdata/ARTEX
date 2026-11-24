@@ -37,12 +37,21 @@ func TestUpstreamTrustPerHost(t *testing.T) {
 	}
 	tr.SetUpstreamTrust(func(host string) bool { return host == "127.0.0.1" })
 	if code, err := get(); err == nil && code == http.StatusOK {
-		t.Fatal("a policy naming another host must not exempt this one")
+		t.Fatal("a dialled address in scope must not exempt an out-of-scope SNI")
 	}
 	var asked []string
-	tr.SetUpstreamTrust(func(host string) bool { asked = append(asked, host); return host == "example.com" })
+	tr.SetUpstreamTrust(func(host string) bool {
+		asked = append(asked, host)
+		return host == "example.com" || host == "127.0.0.1"
+	})
 	if code, err := get(); err != nil || code != http.StatusOK {
 		t.Fatalf("in-scope self-signed target: code %d, err %v (asked %v)", code, err, asked)
+	}
+	// SNI in scope, dialled address not: no trust (both must be exempt).
+	c.CloseIdleConnections()
+	tr.SetUpstreamTrust(func(host string) bool { return host == "example.com" })
+	if code, err := get(); err == nil && code == http.StatusOK {
+		t.Fatal("an in-scope SNI must not exempt an out-of-scope dialled address")
 	}
 	tr.SetUpstreamTrust(nil)
 	c.CloseIdleConnections()
