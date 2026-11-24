@@ -118,9 +118,20 @@ reach them through a **node RPC** on the control API,
   the `record`/`bind` fail with an error the agent sees (the finding is not
   recorded without its proof), and makes `assess` return `not_assessed`, never
   a verdict.
-- **Transport.** Plain HTTP inside the cluster by default. Set
-  `ARTEX_CONTROL_API=https://…` when the path between nodes is untrusted: the
-  signature authenticates requests, but replies are not signed.
+- **Signed replies.** Every reply carries an HMAC under the same key, bound to
+  the request's nonce and the status. The worker drops a reply that is unsigned
+  or signed for another request, so nothing on the path can inject a
+  `verified` assessment or a fake binding.
+- **Agent processes and the key.** `ARTEX_SECRET_KEY` is scrubbed from the
+  environment, and the server re-executes with a sealed environment
+  (`server/envseal.go`), so `/proc/<pid>/environ` does not show it. Agent
+  processes run as per-task uids, which cannot read the server's key file.
+  Anyone holding the key can already decrypt every stored secret, so the RPC
+  does not re-run the agent-side checks on the control node.
+- **Transport.** Plain HTTP inside the cluster by default. Payloads include
+  captured target traffic (sessions, credentials) in clear text, so set
+  `ARTEX_CONTROL_API=https://…` (TLS in front of the control API) when the
+  network between the nodes is shared or untrusted.
 
 ## Deploying
 

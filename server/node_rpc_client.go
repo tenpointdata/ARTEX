@@ -3,6 +3,7 @@ package server
 import (
 	"bytes"
 	"context"
+	"crypto/hmac"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -84,6 +85,10 @@ func (c *controlRPC) call(ctx context.Context, op string, in, out any) error {
 	}
 	if len(raw) > nodeRPCMaxReply {
 		return fmt.Errorf("control node %s reply too large", op)
+	}
+	want := nodeRPCReplySignature(key, req.Header.Get(hdrNodeNonce), resp.StatusCode, raw)
+	if !hmac.Equal([]byte(want), []byte(resp.Header.Get(hdrReplySig))) {
+		return fmt.Errorf("control node %s: reply not signed by this deployment (HTTP %d)", op, resp.StatusCode)
 	}
 	if resp.StatusCode != http.StatusOK {
 		var e nodeRPCError

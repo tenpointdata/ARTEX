@@ -45,6 +45,7 @@ import (
 // agent processes never do (env_scrub.go), unlike the scope token, which rides
 // in the agents' proxy URL. A request is refused when its signature is wrong,
 // its timestamp is more than nodeRPCSkew away, or its nonce was seen before.
+// Replies are signed too (nodeRPCReplySignature), bound to the request nonce.
 // The routes exist on the control node only (role=control).
 
 const (
@@ -57,6 +58,7 @@ const (
 	hdrNodeTime  = "X-Artex-Time"
 	hdrNodeNonce = "X-Artex-Nonce"
 	hdrNodeSig   = "X-Artex-Signature"
+	hdrReplySig  = "X-Artex-Reply-Signature"
 )
 
 // The request and reply bodies of each op. Shared by both ends.
@@ -114,6 +116,28 @@ func nodeRPCSignature(key []byte, method, path, nodeID, ts, nonce string, body [
 		m.Write([]byte{'\n'})
 	}
 	return hex.EncodeToString(m.Sum(nil))
+}
+
+// nodeRPCReplySignature authenticates a reply: it is bound to the request's
+// nonce, so a reply cannot be forged on the path between the nodes or
+// replayed onto another request (an injected "verified" assessment, say).
+func nodeRPCReplySignature(key []byte, nonce string, status int, body []byte) string {
+	sum := sha256.Sum256(body)
+	m := hmac.New(sha256.New, key)
+	m.Write([]byte("reply\n" + nonce + "\n" + strconv.Itoa(status) + "\n" + hex.EncodeToString(sum[:])))
+	return hex.EncodeToString(m.Sum(nil))
+}
+
+// writeSignedReply writes v as the signed reply to the request with nonce.
+func writeSignedReply(w http.ResponseWriter, key []byte, nonce string, code int, v any) {
+	body, err := json.Marshal(v)
+	if err != nil {
+		code, body = http.StatusInternalServerError, []byte(`{"error":"encode reply"}`)
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set(hdrReplySig, nodeRPCReplySignature(key, nonce, code, body))
+	w.WriteHeader(code)
+	_, _ = w.Write(body)
 }
 
 // signNodeRPC sets the authentication headers of req for body.
@@ -195,8 +219,9 @@ func (s *Server) handleNodeRPC(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusUnauthorized, "node authentication failed")
 		return
 	}
+	key, nonce := s.nodeRPC.key(), r.Header.Get(hdrNodeNonce)
 	if s.m.traffic == nil {
-		writeErr(w, http.StatusServiceUnavailable, "the control node has no traffic recording store")
+		writeSignedReply(w, key, nonce, http.StatusServiceUnavailable, nodeRPCError{Error: "the control node has no traffic recording store"})
 		return
 	}
 	out, code, err := s.serveNodeRPC(r.Context(), r.PathValue("op"), body)
@@ -204,17 +229,17 @@ func (s *Server) handleNodeRPC(w http.ResponseWriter, r *http.Request) {
 		if code >= 500 {
 			log.Printf("[node-rpc] %s from node %s: %v", r.PathValue("op"), node, err)
 		}
-		writeJSON(w, code, nodeRPCError{Error: err.Error()})
+		writeSignedReply(w, key, nonce, code, nodeRPCError{Error: err.Error()})
 		return
 	}
-	writeJSON(w, http.StatusOK, out)
+	writeSignedReply(w, key, nonce, http.StatusOK, out)
 }
 
 func (s *Server) serveNodeRPC(ctx context.Context, op string, body []byte) (any, int, error) {
 	dec := func(v any) error {
-		d := json.NewDecoder(bytes.NewReader(body))
-		d.DisallowUnknownFields()
-		return d.Decode(v)
+		// Unknown fields are ignored, so a worker one release ahead of the
+		// control node (a rolling upgrade) is not refused its findings.
+		return json.NewDecoder(bytes.NewReader(body)).Decode(v)
 	}
 	switch op {
 	case "tool":

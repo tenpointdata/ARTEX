@@ -324,3 +324,18 @@ func readAllClose(f *os.File) (string, error) {
 	raw, err := io.ReadAll(f)
 	return string(raw), err
 }
+
+// A reply that is not signed under the deployment key, such as a forged
+// "verified" on the path between the nodes, is never accepted.
+func TestWorkerRefusesUnsignedReply(t *testing.T) {
+	fake := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set(hdrReplySig, strings.Repeat("0", 64))
+		_, _ = w.Write([]byte(`{"status":"verified","note":""}`))
+	}))
+	defer fake.Close()
+	key := []byte("0123456789abcdef0123456789abcdef")
+	s := &Server{m: &Manager{controlRPC: newControlRPC(fake.URL, "node-x", func() []byte { return key })}}
+	if st, note := s.assessFindingVerification(context.Background(), 1, 3, []string{"some quote long enough"}); st != db.VerificationNotAssessed {
+		t.Fatalf("forged reply gave %s (%s), want not_assessed", st, note)
+	}
+}
