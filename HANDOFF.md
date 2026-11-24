@@ -75,6 +75,11 @@ Linux-root tests, the Docker egress iptables rules, the Postgres-backed tests an
   (`traffic/upstream_trust.go`) are always verified. This needs the patched go-mitmproxy vendored in
   `third_party/go-mitmproxy` (see its `ARTEX_PATCH.md`). `ARTEX_CAPTURE_INSECURE_UPSTREAM=1` still
   exempts every other host. A non-loopback `-proxy` needs `ARTEX_PROXY_ALLOW_NONLOOPBACK=1`.
+  Verified 2026-11-24 against a real Postgres 17: `TestActiveTaskScopeRulesPG` and the full-path
+  `TestUpstreamTLSScopeEndToEndPG` (task allow rule in PG → trust policy → proxy → self-signed target)
+  pass; live `pip download` and `git ls-remote` through the proxy pass with verification forced on
+  (`ARTEX_LIVE_NET=1 go test ./traffic -run Live`). The Docker image build was not checked (daemon not
+  running). With PG present, three pre-existing `./server` PG tests fail on macOS (card `c-7816d0`).
 - Docker: the artex container has NET_ADMIN, and `egress.sh` denies the executor uid access to metadata,
   the host gateway and the API port (`ARTEX_EGRESS_ALLOW`/`_DENY`/`_FILTER`). GHCR compose needs
   `ARTEX_IMAGE_TAG`.
@@ -99,7 +104,10 @@ Linux-root tests, the Docker egress iptables rules, the Postgres-backed tests an
    CVSS/EPSS-scored, remediation-bearing, standards-mapped deliverables (OWASP ASVS/WSTG, MITRE
    ATT&CK). Done = a report export with per-finding CVSS vector + remediation + framework tags,
    covered by tests. Card `c-8f9cca`.
-4. *(unclaimed)* — **E4 Methodology-driven coverage** (M), card `c-c0bb07`. Extend the coverage ledger to score
+4. *(unclaimed)* — **Tests: PG-backed server failures on macOS** (S), card `c-7816d0`:
+   `TestGateOffTaskIsUnchanged` does 3 lookups with the gate off (also on main; may be real), plus two
+   environment-only failures. Done = verify.sh passes with a local PG.
+5. *(unclaimed)* — **E4 Methodology-driven coverage** (M), card `c-c0bb07`. Extend the coverage ledger to score
    coverage against a codified methodology checklist, not only asset touch. Done = planner can
    read a methodology and the coverage graph shows checklist completion.
 
@@ -143,6 +151,7 @@ Card ids in brackets:
 - **E9** [`c-73af97`] Frontend/UX pass (tables over cards, fewer-clicks triage workflow, live engagement dashboard).
 - **SEC** [`c-5a6f96`] Capture-proxy upstream gate residuals (task-scoped rules, go-mitmproxy host pinning, egress-proxy bypass).
 - **SEC** [`c-dadc14`] Verify the security branch on Linux root, in Docker and against Postgres, plus the web typecheck.
+- **TEST** [`c-7816d0`] Three PG-backed `./server` tests fail on macOS with a local Postgres (one also on main, may be a real gate-off lookup leak).
 - **SEC** [`c-c10f2c`] gorilla/websocket bump (GO-2026-6278).
 - **SEC** [`c-bd9a6d`] Residual gaps from the High/Medium fixes.
 - **SEC** [`c-cc25b6`] Low-severity audit items.
