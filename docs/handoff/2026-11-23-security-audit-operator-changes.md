@@ -59,3 +59,27 @@ Moved out of `HANDOFF.md` Current state on 2026-11-24 to keep that section withi
   plus the full server suite as root in Docker.
   Root tests in Docker: build the test binary into a 0755 dir (`go test -c -o /t/server.test`). The
   default 0700 go-build dir makes the isolation self-tests fail on `main` too.
+
+## Fix summary (moved from HANDOFF.md Current state, 2026-11-24)
+
+**2026-11-23** — Fixes for the High and Medium findings from the 2026-11-23 security audit are on
+`main` (PR #1, branch `ej/20261123-145205-6a3af6`); the Linux/Docker verification fixes come from
+`ej/20261123-152406-fccff3`. It covers audit findings #1–#16 except as listed under Open work.
+Verified 2026-11-23 (card `c-dadc14`, done):
+- `go vet ./...` + `go test ./...` **as root on Linux** (golang:1.26.11-bookworm, arm64) with
+  `ARTEX_PG_DSN` set: all packages ok, including the `*AsRoot` executor/isolation tests,
+  `TestExecHomePerRunDirAsRoot` and the MCP uid-10002 split. Two test fixes were needed (commit
+  `fc8c3f9`): the isolation probe could not exec the `go test` binary from its 0700 build dir (also
+  broken on main), and `TestGateOffTaskIsUnchanged` still expected zero lookups with the gate off.
+- Docker egress: through the real `docker-compose.yml` (NET_ADMIN) on a slim image of the same
+  runtime base, `[artex] egress: installed` is logged, `-m owner`/`-m addrtype` load on bookworm's
+  nf_tables iptables 1.8.9, and the executor is refused for 169.254.169.254, 100.100.100.200, the
+  gateway, host.docker.internal (root reaches the host service) and :8787 on every local address,
+  while a LAN router, another container and the internet stay reachable. The full image gives the
+  same results (2026-11-24, `c-a6891b`, below).
+- Web: `npm ci` and `npx tsc --noEmit` clean. `npm run lint` fails with 84 errors, all already on main
+  and none in the changed files (`c-834a5a`). Headless Chromium: setup, login, Sign out over the
+  HttpOnly SameSite=Strict cookie work and `document.cookie` is empty, **but a token copied before
+  logout stays valid for 7 days** (`c-a0af33`).
+- The stock compose cannot start on Docker Desktop for Mac: bind mounts ignore permissions, so the
+  isolation self-test fails closed (also on main; `c-775dc2`). Use named volumes there.

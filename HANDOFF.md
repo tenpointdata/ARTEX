@@ -59,37 +59,18 @@ See `docs/ARCHITECTURE.md` for the code-level map. Summary:
 
 ## Current state
 
-**2026-11-24 — E7 follow-up: worker transcripts resume across nodes (`c-29ff19`, in review)** on
-`ej/20261124-155356-7b374f`, which merges the unmerged E7 branch `ej/20261124-150525-1a95b3` (land them
-together, E7 first). On a distributed node a worker run leases its session from PostgreSQL before resuming
-(`transcriptsync/` generic fenced mirror, `db/session_transcripts.go`, migration **0025**, cascades with the
-exploration); the local JSONL stays the SDK's write path, lines push every 2 s and at run end, and a
-takeover fences the old holder. Archive gathers stored transcripts first; restore seeds them. Test
-`TestIntentResumesOnAnotherNodeFromSharedTranscript` (node A claims and runs a tool, its claim is revoked,
-node B's first request carries A's history) plus `transcriptsync` and `db` fencing tests, on Postgres 16.
-Not shared: planner/main/chat sessions (control-node only), sidechains, spills and run dirs (see
-`docs/DISTRIBUTED.md` "Transcripts"/"Limits").
+**2026-11-24 — worker transcripts resume across nodes (`c-29ff19`, in review)** on `ej/20261124-155356-7b374f`
+(merges the E7 branch; land after E7 and after the 0023/0024 branches). A distributed node's worker run leases
+its session from PostgreSQL (`transcriptsync/`, `db/session_transcripts.go`, migration **0025**) before
+resuming. Test `TestIntentResumesOnAnotherNodeFromSharedTranscript`. Design and limits:
+`docs/DISTRIBUTED.md` "Transcripts".
 
-**2026-11-24 — E7 distributed workers + Helm (`c-d60149`, in review)** on `ej/20261124-150525-1a95b3`; design
-and limits in `docs/DISTRIBUTED.md`. `-role all|control|worker` (`server/node.go`): worker nodes are the same
-binary and `server.New` wiring (guard, intercept rules, LLM reviewer, target gate, budgets, isolation,
-egress filter), run only intent worker loops (`server/worker_node.go`), and serve only `GET /healthz`. They
-claim through the existing fenced lease. Control state moved to Postgres (migration **0023**: `worker_nodes`,
-`work_signals`, `tasks.dispatch_closed`, `proxy_scope_tokens`): pause, queued, terminal, deadline, the
-settle/delete fence and target gate are read per claim or call (fail closed); budgets are published by the
-control node and spend is synced every 2 s; intercept rules follow a DB revision and ask approvals poll
-their row; kill/pause/cancel/steer go through `work_signals`; the noise governor is split across live nodes.
-Worker traffic goes through the control node's recording proxy with DB-resolved per-task tokens (token-less
-remote clients refused; CA cert published). `GET /api/settings/nodes` lists nodes. Helm chart
-`deploy/helm/artex` (control + worker Deployment with hard host anti-affinity) and
-`docker-compose.distributed.yml`. Verified against Postgres 17: two worker nodes ran one task's intents, each
-blocked by a rule added on the control node after they started and seeing the control's gate switch
-(`TestTwoWorkerNodesShareOneTaskWithIdenticalGating`); kill/pause/no-budget/no-control
-(`TestWorkerNodeFollowsControlState`); proxy path recorded on the control node, forged and deleted tokens
-refused (`TestWorkerNodeUsesControlRecordingProxy`); `helm lint`/`template` clean. An opus adversarial
-review found 12 issues; H1–M9, L10, L11 fixed (`c0210dd5`). **Not verified:** a real install on two hosts
-(`c-8cfbfe`). **Gaps:** worker findings cannot bind captured traffic (`c-3b781a`), transcripts are per host
-(`c-29ff19`, fixed on `ej/20261124-155356-7b374f`), smaller items `c-18f7a8`.
+**2026-11-24 — E7 distributed workers + Helm (`c-d60149`, in review)** on `ej/20261124-150525-1a95b3`.
+`-role all|control|worker`; worker nodes run the same wiring, claim through the fenced lease and read all
+control state from Postgres (migration **0023**), failing closed; traffic goes through the control node's
+recording proxy. Helm chart `deploy/helm/artex`, `docker-compose.distributed.yml`; design, tests and limits in
+`docs/DISTRIBUTED.md`. Not verified: a real two-host install (`c-8cfbfe`). Gaps: `c-3b781a` (in review),
+`c-18f7a8`.
 
 **2026-11-24 — SSE 401 after console login (`c-13e86c`, fixed; pre-E5).** Streams are same-origin only
 (`web/src/lib/sse.ts`), dev gzip off, `openSSE` writes `: open`. Test `server/activity_stream_auth_pg_test.go`;
@@ -210,27 +191,8 @@ With `ARTEX_PG_DSN`, `go test ./...` fails only `TestGateOffTaskIsUnchanged` (`c
 - **Migration order:** 0016 (E5), 0018, 0019 (this branch), with E1 holding 0017. The loader refuses a
   pending version older than an applied one, so renumber E1 above 0019 if it lands later.
 
-**2026-11-23** — Fixes for the High and Medium findings from the 2026-11-23 security audit are on
-`main` (PR #1, branch `ej/20261123-145205-6a3af6`); the Linux/Docker verification fixes come from
-`ej/20261123-152406-fccff3`. It covers audit findings #1–#16 except as listed under Open work.
-Verified 2026-11-23 (card `c-dadc14`, done):
-- `go vet ./...` + `go test ./...` **as root on Linux** (golang:1.26.11-bookworm, arm64) with
-  `ARTEX_PG_DSN` set: all packages ok, including the `*AsRoot` executor/isolation tests,
-  `TestExecHomePerRunDirAsRoot` and the MCP uid-10002 split. Two test fixes were needed (commit
-  `fc8c3f9`): the isolation probe could not exec the `go test` binary from its 0700 build dir (also
-  broken on main), and `TestGateOffTaskIsUnchanged` still expected zero lookups with the gate off.
-- Docker egress: through the real `docker-compose.yml` (NET_ADMIN) on a slim image of the same
-  runtime base, `[artex] egress: installed` is logged, `-m owner`/`-m addrtype` load on bookworm's
-  nf_tables iptables 1.8.9, and the executor is refused for 169.254.169.254, 100.100.100.200, the
-  gateway, host.docker.internal (root reaches the host service) and :8787 on every local address,
-  while a LAN router, another container and the internet stay reachable. The full image gives the
-  same results (2026-11-24, `c-a6891b`, below).
-- Web: `npm ci` and `npx tsc --noEmit` clean. `npm run lint` fails with 84 errors, all already on main
-  and none in the changed files (`c-834a5a`). Headless Chromium: setup, login, Sign out over the
-  HttpOnly SameSite=Strict cookie work and `document.cookie` is empty, **but a token copied before
-  logout stays valid for 7 days** (`c-a0af33`).
-- The stock compose cannot start on Docker Desktop for Mac: bind mounts ignore permissions, so the
-  isolation self-test fails closed (also on main; `c-775dc2`). Use named volumes there.
+**2026-11-23 — security audit High/Medium fixes** landed; summary moved to
+`docs/handoff/2026-11-23-security-audit-operator-changes.md` ("Fix summary").
 
 Operator-facing changes from that audit (unsandboxed-start refusal, TLS on non-loopback binds, and more): `docs/handoff/2026-11-23-security-audit-operator-changes.md`.
 
@@ -543,102 +505,7 @@ Card ids in brackets:
   the old `network_mode: host` (no port clashes, works on Docker Desktop). Host-published corpora are
   reached as `host.docker.internal`; the egress filter still denies that to agents until the operator
   sets `ARTEX_EGRESS_ALLOW` in `bench/.env` — documented, not defaulted, since it opens host services.
-- **2026-11-23** — c-dadc14: the security branch's always-on metadata check resolves each name the
-  platform dials (gate on or off); `TestGateOffTaskIsUnchanged` now asserts one lookup per platform
-  connection instead of none, since this is the intended behaviour, not a regression. The isolation
-  probe binary became a test hook (`isolationProbeBinary`) rather than being changed in production.
-  Logout revocation and the Docker Desktop bind-mount problem were filed as cards, not fixed here: both
-  predate the branch and need a design choice.
-- **2026-11-24** — DVGA ground truth bumped to v2 after reading the 2.2.0 source (card `c-085c80`). Every entry
-  now has a `source` field naming its resolver, helper, middleware or template (the judge prompt ignores it;
-  it only changes the content hash). Changes: GT-009 is *signature not verified* (`helpers.get_identity`,
-  `verify_signature: False`), not alg=none in particular. GT-011 is now the GraphiQL `env` cookie bypass,
-  because the deny-list, operation-name and introspection middlewares only run in Expert mode (moved to
-  notes). Added GT-012, stack traces on `/graphiql` (`format_custom_error`). The notes now say that
-  difficulty is server-wide DB state, switched by `X-DVGA-MODE` or `/difficulty/<level>`, not chosen per request.
-
-- **2026-11-23** — Stood ARTEX up locally and registered it as a Composite project rather than
-  forking/renaming; it stays an AGPL-3.0 fork under `tenpointdata`. Backend verified building; web
-  install and Docker run deferred (not needed to produce the setup + plan deliverable).
-- **2026-11-23** — Expansion plan produced as a Composite Office doc (link recorded by
-  `merge_handoff` / in the Composite project). All proposed work is guardrail-preserving; no item
-  touches the `RSI.md` immutable surfaces, and Loop-C work (E3) is gated behind that contract.
-- **2026-11-23** — E1–E10 tracked on the private Composite ARTEX board instead of GitHub issues,
-  because `tenpointdata/ARTEX` is public and the roadmap should not be published yet.
-
-- **2026-11-23** — Security fixes fail closed with explicit env opt-outs (`ARTEX_ALLOW_UNSANDBOXED`,
-  `ARTEX_ALLOW_INSECURE_BIND`, `ARTEX_CAPTURE_INSECURE_UPSTREAM`, `ARTEX_PROXY_ALLOW_NONLOOPBACK`) rather
-  than silent degradation. The metadata deny is not applied to Bash command text, because SSRF payloads
-  legitimately name 169.254.169.254; it is enforced at the dial level instead. Block rules keep substring
-  matching, since matching more is the safe direction; only allow rules became strict. Security
-  follow-ups are private board cards, not GitHub issues, because the repo is public.
-- **2026-11-23** — The capture proxy keeps verifying upstream TLS by default. Engagements against
-  self-signed targets set `ARTEX_CAPTURE_INSECURE_UPSTREAM=1` for that run only, until per-target trust
-  (card `c-8d54d5`) exists. Reason: the goproxy setting is global, so turning it on also leaves package
-  downloads through the proxy open to tampering.
-
-- **2026-11-24** — Per-task uids derive a process's identity from the **owner of its working run
-  directory**, not from a channel between the server and the shim. Norma always starts bash in the
-  server-chosen `tc.WorkingDir`, and only root sets that owner. A task's gid is the same number as its
-  uid, and the exec gid stays a supplementary group (script dirs; spill dirs are grouped to the task
-  uid instead, `c-dd160a`). As a result MCP servers no
-  longer write into run dirs when the range is on. Release kills the uid's processes and gives its files
-  back to root, so a uid returned to the pool owns nothing. The mode stays opt-in until it has run in a
-  real deployment.
-
-- **2026-11-24** — Capture-proxy task scope (`c-5a6f96`): carried as a per-task token in the proxy URL
-  userinfo, because a proxy client can only identify itself through its credential and every tool
-  already reads `HTTP_PROXY`. The token only *adds* a task's rules, so it is not treated as a secret
-  and a missing token falls back to the global rules (the floor), while an unknown token fails closed.
-  Proxy dials never wait for approval (an unpinned host opens a request and is refused). The
-  global-egress-proxy path is **accepted**, not routed through the gate: the operator's proxy resolves
-  and reaches the target, so the gate could only make a name-only check. OPS.md tells operators not to
-  run that proxy where it can reach metadata. Keep-alive host pinning is fixed locally with
-  go-mitmproxy's separate client rather than closing the client connection, so clients see no resets.
-
-- **2026-11-24** — Remaining proxy clients (`c-eb32cc`): shared clients (the per-profile chat agent,
-  the http custom tool) resolve the scoped URL per call from the run's `intercept.TargetScope` on the
-  context, rather than being rebuilt per run. A task scope whose task is not loaded gets a URL with
-  an unregistered token (refused), never the global-only URL, and `TaskProxyAddr` no longer mints
-  tokens for unloaded tasks. The transparent TCP listener stays global-only: it has no credential,
-  and per-run uid/cgroup mapping is operator netfilter setup; documented in `docs/OPS.md` §6.
-
-- **2026-11-24** — Browser MCP scope (`c-15b39d`): the card assumed one shared browser process; in
-  fact `wireAgentAugment` spawns every stdio MCP per run (worker run, planner round, main-agent and
-  chat turn) on a context that already carries the run's `TargetScope`. So the fix rewrites the spawn,
-  not the process model: any stdio MCP's `--proxy-server` or `HTTP(S)_PROXY`/`ALL_PROXY` naming the
-  recording proxy is replaced by a per-run loopback relay. A relay, not the userinfo, because
-  Chromium drops it from `--proxy-server` and only answers a 407 the proxy never sends. A relay
-  that cannot start skips the server for the run (fail closed) rather than spawning on the plain
-  URL. UI tool discovery (no run) keeps the stored URL, global rules: it lists tools and browses
-  nothing. This branch merges PR #13's branch (`ej/20261124-075745-5a4987`), which this work needs.
-- **2026-11-24** — E8: the A/B suite runs one task at a time on a dedicated instance and refuses a busy one,
-  because the server reads the active prompt live and a swap would reach a concurrent task. `--seed` fixes the
-  schedule, not the LLM, because ARTEX has no sampling-seed control; replicates control variance instead
-  (`c-d73308`). Gate rates are counted over ground-truth entries, not over detected findings, so arms with
-  different detection counts stay comparable. A failed run is counted but left out of the denominators. A judge
-  failure aborts the suite. Arms may vary only the editable goals/planner/worker body; the `RSI.md` immutable
-  surfaces stay outside the prompt API by construction.
-
-- **2026-11-24** — E5: the engagement is the task. The artifact is enforced only by the existing target
-  gate, so there is one enforcement path, and refusals are decided intercept rows. Names are never
-  resolved for the scope match, so a name must be listed by name; this fails closed. The technique
-  classifier is a declared check driven by a data table, not a sandbox; unclassified calls are not
-  limited. The audit chain is fed by DB row triggers (atomic with every writer, present and future),
-  and the hashed payload is stored as text so the bytes are hashed exactly. Users' roles are read from
-  the DB on every request, not from the token, so revocation is immediate.
-
-- **2026-11-24** — Audit head-lock contention (`c-ba9f64`): fixed with deferred constraint triggers
-  (migration 0018) rather than reordering the archive's deletes (which fixes one caller only) or an
-  unchained staging table plus a sequencer (which leaves a window where committed writes are not yet
-  chained, and adds a worker). Entries stay atomic with their writes; the head becomes the last lock a
-  transaction takes. Accepted costs: chain order is commit order, and the actor is `artex.actor` at commit.
-
-- **2026-11-24** — Client binding (`c-5b5421`): enforced in one middleware step with a declarative
-  per-route binder table that fails closed, rather than in scattered handler checks, so a new client
-  route cannot leak by omission. Findings reuse the #425 company filter. Task ownership counts only
-  operator-made company scope rows, because agent output is untrusted. A multi-company task is fully
-  visible to each bound client (accepted). Bindings apply to `client_read` only.
+- Older decisions (2026-11-23 and the settled 2026-11-24 infrastructure ones) are in `docs/decisions.md`.
 
 ## Deltas
 
