@@ -156,11 +156,13 @@ export function GlobalSettingsCard({ meta, onSaved }: { meta: NotificationMeta; 
             })}
           </p>
         </div>
-        <div className="sm:col-span-2">
-          <Button onClick={saveGlobal} disabled={globalSaving}>
-            {t("Save global settings")}
-          </Button>
-        </div>
+        {canAdmin && (
+          <div className="sm:col-span-2">
+            <Button onClick={saveGlobal} disabled={globalSaving}>
+              {t("Save global settings")}
+            </Button>
+          </div>
+        )}
       </CardContent>
     </Card>
   );
