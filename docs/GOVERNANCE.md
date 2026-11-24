@@ -2,7 +2,8 @@
 
 Three mechanisms keep each engagement within what the client signed: console **roles**, a per-task
 **authorization artifact** that the target gate enforces, and a **hash-chained audit log** over the
-intercept history. All of the schema is in `db/migrations/0016_engagement_governance.sql`.
+intercept history. The schema is in `db/migrations/0016_engagement_governance.sql`, with the audit-at-commit
+triggers in 0018 and client bindings in 0019.
 
 ## Roles (RBAC)
 
@@ -11,7 +12,7 @@ intercept history. All of the schema is in `db/migrations/0016_engagement_govern
 | `admin` | everything, including users, authorization artifacts and guardrail configuration (intercept rules, asset rules, target-gate exemptions, judge, tool config, settings) |
 | `operator` | run engagements: create, start and steer tasks, chat, tools, traffic; decide approvals |
 | `reviewer` | read everything except secrets, raw LLM records and logs; decide approvals; triage findings |
-| `client_read` | read the report, the findings, the stats and a task's outcome and coverage. Nothing else. **The role is global for now:** a `client_read` user sees every client's findings, so give it only to someone entitled to all of them (per-client binding is a follow-up) |
+| `client_read` | read the report, the findings (with their captured evidence), the stats and a task's outcome and coverage, **of the companies the user is bound to**. Nothing else. See [Client binding](#client-binding) |
 
 - The bootstrap login `ARTEX` (set on `/setup`) is always `admin` and serves as the break-glass account.
   Admins add other users with `POST /api/users`.
@@ -27,6 +28,33 @@ intercept history. All of the schema is in `db/migrations/0016_engagement_govern
   because the audit trail uses them for automatic actors.
 - A user's session token carries the user's version, and any password, role or disabled change bumps
   that version. Old sessions stop working on their next request.
+
+### Client binding
+
+A `client_read` user sees only the companies (clients) it is bound to. An admin sets the bindings with
+`PUT /api/users/{id}/companies {"company_ids":[…]}` (an empty list withdraws them all) and reads them
+with `GET /api/users/{id}/companies`. They are stored in `artex_user_companies` (migration 0019), and
+every change is appended to the audit chain as `row.artex_user_companies`. Bindings apply to
+`client_read` only; the other roles stay global.
+
+- A client account with no binding is refused (403) everywhere.
+- **Findings** routes (list, groups, asset tree, stats, export) are narrowed to one bound company by the
+  same rule as the sidebar's company filter: a finding belongs to the company that owns one of its
+  live assets, or, when it has none, to the companies its task is scoped to. `?company=` picks the
+  company, and may be left out when the user has only one. A company that is not bound answers 404.
+- A **finding** by id (detail, lineage, retests, captured traffic) answers 404 unless it belongs to a
+  bound company. An export of selected ids answers 404 if any of them does not.
+- **Task** routes (`/api/report`, `/api/stats`, `/api/exploration/findings?task=`,
+  `/api/tasks/{id}/outcome|coverage`) need an explicit task id (`?task=active` is refused), and the
+  task must be scoped to a bound company; otherwise 404. A client's report counts only its own
+  companies' assets, and its stats leave out the global traffic and asset totals.
+- A task belongs to a company only through a company scope row an operator made (at task creation or
+  by hand). Rows an agent added with `add_task_scope` do not count, so agent output cannot widen what
+  a client sees.
+- Each refusal is appended to the audit chain as `rbac.client_scope_denied`.
+- Every route the policy opens to `client_read` must have a binder in `server/client_scope.go`; a route
+  without one is refused, and `TestClientBindersCoverClientRoutes` fails until it has one.
+- A task scoped to two clients is fully visible to both, including its report and lineage graph.
 
 ## Authorization artifact
 

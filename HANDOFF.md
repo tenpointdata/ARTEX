@@ -86,6 +86,22 @@ is tested against Postgres 17 on macOS; see `docs/GOVERNANCE.md`.
   concurrency tests fail without 0018). This branch merged the E5 branch in, so it carries E5 too.
 - **Not done.** There is no web UI for E5 yet (card `c-869050`). The login page still assumes `ARTEX`.
 
+**2026-11-24 — client_read bound to companies (card `c-5b5421`, in review)** is on branch
+`ej/20261124-110647-182fa9`. That branch merged the E5 branch (PR #16) in, so it carries E5 too.
+- A `client_read` user sees only the companies in `artex_user_companies` (migration **0019**, audited at
+  commit). Admins set them with `GET/PUT /api/users/{id}/companies`. An unbound client gets 403.
+- `server/client_scope.go`: every route open to `client_read` has a binder that runs after the role
+  check. Findings routes go through the #425 company filter with `StrictCompany`, which ignores
+  agent-added `task_scope` rows. Tasks and ids outside the binding answer 404. A route without a binder
+  is refused, and `TestClientBindersCoverClientRoutes` enforces that. The test found
+  `findings/{id}/traffic` and its body route open to clients without a binder, so both are now bound.
+- A client's report counts only its own companies' assets, and its `/api/stats` drops the global
+  traffic and asset totals. `findings/retests/active` now needs `read`.
+- Tests: `server/client_scope_pg_test.go`, checked by mutation. `go test ./db ./server` with PG passes
+  except `TestConnectWithoutPasswordRealPG` (trust auth) and the SOCKS5 UDP test (macOS). verify.sh passes.
+- **Migration order:** 0016 (E5), 0018, 0019 (this branch), with E1 holding 0017. The loader refuses a
+  pending version older than an applied one, so renumber E1 above 0019 if it lands later.
+
 **2026-11-23** — Fixes for the High and Medium findings from the 2026-11-23 security audit are on
 `main` (PR #1, branch `ej/20261123-145205-6a3af6`); the Linux/Docker verification fixes come from
 `ej/20261123-152406-fccff3`. It covers audit findings #1–#16 except as listed under Open work.
@@ -147,9 +163,7 @@ Operator-facing changes:
 0. *(unclaimed)* — **SEC: per-task uid follow-ups** (S each): `c-12df03` (single-uid start-up fails on a
    socket; MCP uid not egress-filtered), `c-dd160a` (spill dirs readable across tasks), `c-e70e5c`
    (release ended tasks at start-up; per-key lock). The "Done when" is on each card.
-1. *(claimed: ej/20261124-110647-182fa9)* — **E5: bind client_read to a client** (M), card `c-5b5421`. Done = PG test: bound user
-   sees only its company.
-2. *(unclaimed)* — **E5: web UI for users / authorization / chain** (M), card `c-869050`.
+1. *(unclaimed)* — **E5: web UI for users / authorization / chain / client bindings** (M), card `c-869050`.
 3. *(unclaimed)* — **SEC: gorilla/websocket bump, GO-2026-6278** (XS), card `c-c10f2c`; needs network (PR #17 open).
    Done = govulncheck clean.
 4. *(unclaimed)* — **SEC: upstream-gate residuals** (M), card `c-5a6f96`: task-scoped rules on proxy
@@ -292,6 +306,12 @@ Card ids in brackets:
   unchained staging table plus a sequencer (which leaves a window where committed writes are not yet
   chained, and adds a worker). Entries stay atomic with their writes; the head becomes the last lock a
   transaction takes. Accepted costs: chain order is commit order, and the actor is `artex.actor` at commit.
+
+- **2026-11-24** — Client binding (`c-5b5421`): enforced in one middleware step with a declarative
+  per-route binder table that fails closed, rather than in scattered handler checks, so a new client
+  route cannot leak by omission. Findings reuse the #425 company filter. Task ownership counts only
+  operator-made company scope rows, because agent output is untrusted. A multi-company task is fully
+  visible to each bound client (accepted). Bindings apply to `client_read` only.
 
 ## Deltas
 
