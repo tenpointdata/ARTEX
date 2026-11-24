@@ -28,13 +28,15 @@ export const auth = {
     }
   },
 
-  // Ask the server to clear the session cookie.
+  // Ask the server to clear the session cookie and revoke the session token. The
+  // server advances its session epoch, so a copy of the token stops working too.
   async logout(): Promise<void> {
     if (process.env.NEXT_PUBLIC_MOCK === "1") return;
     try {
       await fetch("/api/auth/logout", { method: "POST", credentials: "same-origin" });
     } catch {
-      // The caller still navigates to /login; the server rejects the stale cookie anyway.
+      // Network failure: the caller still navigates to /login, but the server never
+      // saw the request, so the cookie and token stay valid until they expire.
     }
   },
 

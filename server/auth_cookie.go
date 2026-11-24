@@ -1,6 +1,8 @@
 package server
 
 import (
+	"errors"
+	"log"
 	"net/http"
 	"net/netip"
 	"strings"
@@ -65,8 +67,15 @@ func sessionCookieValue(r *http.Request) string {
 	return ""
 }
 
-// POST /api/auth/logout clears the session cookie (both names, whichever the
-// browser holds). Bearer clients have nothing to clear.
+// POST /api/auth/logout ends the session. The browser is told to drop the
+// session cookie (both names, whichever it holds), and when the request carries
+// a valid session the server revokes it: the session epoch (the counter behind
+// the token's pwd claim, also bumped by a password change) moves on, so every
+// token issued before now is rejected, copies included. The console has one
+// account, so this signs out every browser and bearer client ("log out
+// everywhere"). A cookie session can revoke only from the console's own origin,
+// so a foreign page cannot sign the operator out. A request without a valid
+// session only clears cookies.
 func (s *Server) authLogout(w http.ResponseWriter, r *http.Request) {
 	for _, name := range []string{sessionCookieSecure, sessionCookiePlain} {
 		http.SetCookie(w, &http.Cookie{
@@ -74,8 +83,35 @@ func (s *Server) authLogout(w http.ResponseWriter, r *http.Request) {
 			HttpOnly: true, Secure: name == sessionCookieSecure, SameSite: http.SameSiteStrictMode,
 		})
 	}
-	writeJSON(w, 200, map[string]any{"ok": true})
+	tok := extractToken(r)
+	if tok == "" || !s.sessionOK(tok) || (cookieAuthenticated(r) && !sameOrigin(r)) {
+		writeJSON(w, 200, map[string]any{"ok": true, "revoked": false})
+		return
+	}
+	if err := s.revokeSessions(); err != nil {
+		log.Printf("[auth] logout could not revoke the session: %v", err)
+		writeErr(w, 503, "Signed out in this browser, but the session could not be revoked: "+errDataSourceUnavailable)
+		return
+	}
+	writeJSON(w, 200, map[string]any{"ok": true, "revoked": true})
 }
+
+// revokeSessions advances the session epoch so every token issued so far is
+// rejected. The epoch lives in PostgreSQL so it survives a restart; without a
+// database there is nothing to record it in.
+func (s *Server) revokeSessions() error {
+	if s.m == nil || s.m.pg == nil {
+		return errNoSessionStore
+	}
+	n, err := s.m.pg.IncrementCounter(s.passwordVersionKey())
+	if err != nil {
+		return err
+	}
+	s.applyPasswordVersion(n)
+	return nil
+}
+
+var errNoSessionStore = errors.New("no database to record the revocation")
 
 // GET /api/auth/session says whether the request carries a valid session. It
 // answers 200 either way so the UI can ask without triggering its 401 redirect.

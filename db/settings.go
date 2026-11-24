@@ -87,15 +87,7 @@ INSERT INTO settings(key, value) VALUES ($1, $2)
 ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()`, hashKey, sealed); err != nil {
 		return 0, err
 	}
-	var raw string
-	if err := tx.QueryRow(`
-INSERT INTO settings(key, value) VALUES ($1, '1')
-ON CONFLICT (key) DO UPDATE
-SET value = (settings.value::bigint + 1)::text, updated_at = now()
-RETURNING value`, versionKey).Scan(&raw); err != nil {
-		return 0, err
-	}
-	n, err := strconv.ParseInt(raw, 10, 64)
+	n, err := incrementCounter(tx, versionKey)
 	if err != nil {
 		return 0, err
 	}
@@ -105,8 +97,32 @@ RETURNING value`, versionKey).Scan(&raw); err != nil {
 	return n, nil
 }
 
-// InsertPassword writes the hash only when that key is absent, and sets the
-// version to 1 in the same transaction. inserted is false when the hash
+// IncrementCounter adds one to the integer setting at key (absent counts as
+// zero) and returns the new value. A value that is not an integer fails and
+// is left unchanged.
+func (d *DB) IncrementCounter(key string) (int64, error) {
+	return incrementCounter(d, key)
+}
+
+// rowQuerier is what incrementCounter needs: *sql.DB or *sql.Tx.
+type rowQuerier interface {
+	QueryRow(query string, args ...any) *sql.Row
+}
+
+func incrementCounter(q rowQuerier, key string) (int64, error) {
+	var raw string
+	if err := q.QueryRow(`
+INSERT INTO settings(key, value) VALUES ($1, '1')
+ON CONFLICT (key) DO UPDATE
+SET value = (settings.value::bigint + 1)::text, updated_at = now()
+RETURNING value`, key).Scan(&raw); err != nil {
+		return 0, err
+	}
+	return strconv.ParseInt(raw, 10, 64)
+}
+
+// InsertPassword writes the hash only when that key is absent, and advances the
+// version (1 when absent) in the same transaction. inserted is false when the hash
 // already exists; the version row is then left as it was.
 func (d *DB) InsertPassword(hashKey, hash, versionKey string) (version int64, inserted bool, err error) {
 	tx, err := d.Begin()
@@ -131,15 +147,26 @@ ON CONFLICT (key) DO NOTHING`, hashKey, sealed)
 	if n == 0 {
 		return 0, false, nil
 	}
-	if _, err := tx.Exec(`
+	// The version moves on from any earlier value rather than restarting at 1,
+	// so a token from before the hash was removed cannot become valid again.
+	// A value that is not a counter is replaced by 1, so setup can still recover.
+	var raw string
+	if err := tx.QueryRow(`
 INSERT INTO settings(key, value) VALUES ($1, '1')
-ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()`, versionKey); err != nil {
+ON CONFLICT (key) DO UPDATE
+SET value = CASE WHEN settings.value ~ '^[0-9]{1,18}$' THEN (settings.value::bigint + 1)::text ELSE '1' END,
+    updated_at = now()
+RETURNING value`, versionKey).Scan(&raw); err != nil {
+		return 0, false, err
+	}
+	version, err = strconv.ParseInt(raw, 10, 64)
+	if err != nil {
 		return 0, false, err
 	}
 	if err := tx.Commit(); err != nil {
 		return 0, false, err
 	}
-	return 1, true, nil
+	return version, true, nil
 }
 
 // GetBool returns the boolean setting, or def when unset/unparseable.

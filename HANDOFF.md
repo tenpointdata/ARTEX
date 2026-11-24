@@ -83,6 +83,12 @@ Linux-root tests, the Docker egress iptables rules, the Postgres-backed tests an
   summaries are framed as untrusted data.
 - Per-run executor HOME; MCP servers run as uid 10002 (`ARTEX_EXEC_MCP_UID`). The workspace file
   manager uses `os.Root`.
+- Sign out revokes the session on the server (card `c-a0af33`, 2026-11-23). `POST /api/auth/logout`
+  with a valid session advances the session epoch (`auth.password_version`, the token's `pwd` claim,
+  also advanced by a password change), so every earlier token returns 401, copies included. This logs
+  out **every** browser and bearer client, since there is one account. A cookie session revokes only
+  from the console's own origin. Re-running setup after the hash is removed advances the epoch instead
+  of resetting it to 1. Tests: `server/auth_logout_test.go` (need `ARTEX_PG_DSN`).
 
 ## Triage (next handful)
 
@@ -156,10 +162,19 @@ Card ids in brackets:
   "immutable surfaces" must never enter an automated search space.
 - **Migrations fix forward** — a published `db/migrations/*.sql` is never edited.
 - **Embedded UI** requires `-tags embedui`; a plain `go build` omits the web assets.
+- On macOS, `go test ./server` with Postgres fails `TestGateOffTaskIsUnchanged` ("3 lookups, want
+  none") and `TestManagerSOCKS5UDPOptInAndAssetBlockRuleDropsDatagram` (no 127.0.0.2 on macOS). Both
+  fail on `1abe24f` too; card `c-8dea4d`.
 - **Secrets** are AES-256-GCM sealed with per-column AAD; losing the key (`keys/secret.key` or
   `ARTEX_SECRET_KEY`) loses stored secrets.
 
 ## Decisions
+
+- **2026-11-23** — Logout revocation uses the existing per-account epoch (`auth.password_version`), not
+  a jti denylist: one account, no per-request DB lookup, no new table or migration, and it gives "log out
+  everywhere". Cost: signing out also ends other browsers' sessions and any bearer token. Revisit
+  with jti/per-session revocation if multi-user (E5 RBAC) lands. jwtTTL stays 7 days; sliding renewal
+  with a shorter TTL is left for later (card `c-cc25b6` lists it with the other Low items).
 
 - **2026-11-23** — Stood ARTEX up locally and registered it as a Composite project rather than
   forking/renaming; it stays an AGPL-3.0 fork under `tenpointdata`. Backend verified building; web
