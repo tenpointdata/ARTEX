@@ -157,6 +157,20 @@ login, HttpOnly + SameSite=Strict cookie, token hidden from scripts, Sign out �
 the pre-logout cookie still gets 200 because revocation (`c-a0af33`) is not on main yet. Not re-run on
 the newer main (`-exec-uid-range`, #18).
 
+**2026-11-24: live scope-relay harness (card `c-517c2d`, still open).** c-15b39d and c-a1c0fc are on
+main (squash-merged as PR #22). `scripts/live-scope-check/run.sh` overlays `docker-compose.bench.yml` as
+compose project `artex-verify` (UI on 127.0.0.1:18797, own Postgres and volumes) and adds two nginx
+targets on that network: `in-scope.verify.test`, whose page embeds and links the other host, and
+`excluded.verify.test`. Over the API it initialises the admin, turns capture on, enables the seeded
+`browser` MCP and makes it visible to the worker. It then creates a task with `target_gate:true` and a
+task block rule for the excluded host, allows gate requests only for the in-scope host, and asserts
+three things: in-scope exchanges are recorded, the excluded host has none, and a proxy refusal log line
+or a denied gate row exists. Verified on an image built from `ee33ec1` (Docker Desktop arm64): the setup
+phase passes, the MCP args carry `--proxy-server http://127.0.0.1:8788`, and both targets answer 200
+to the executor uid (so a refusal can only come from the gate). **Not run:** the task phase, because no
+LLM key was available. The task-phase API calls (task create, pending decide, traffic host filter,
+`/api/intercept/task/{id}`) were taken from the code and not exercised.
+
 ## Triage (next handful)
 
 **Agents' lane**
@@ -185,8 +199,10 @@ the newer main (`-exec-uid-range`, #18).
   File GitHub issues only if the repo goes private or you want them public.
 - Decide engagement-governance direction (E5): how formal the rules-of-engagement/authorization
   artifact should be for your use.
-- **SEC: live Playwright scope-relay check** (S), card `c-517c2d`: a real task with capture on and the
-  seeded Playwright MCP. Done = the browser's dials show the task scope and an out-of-scope host is refused.
+- **SEC: live Playwright scope-relay check** (XS now), card `c-517c2d`: put an LLM key in `bench/.env`
+  and run `scripts/live-scope-check/run.sh` (it builds nothing: `docker build -t artex:verify .` first).
+  Done = the script prints `RESULT PASS`: in-scope exchanges recorded, `excluded.verify.test` refused
+  with no exchange. Needs only the key: the targets are local nginx containers the script starts.
 
 **Blocked**
 - Nothing blocked.
@@ -229,7 +245,7 @@ Card ids in brackets:
 - **E8** [`c-5487e8`] Planner/worker evaluation suite (regression targets, prompt-version A/B via the benchmark gate).
 - **E9** [`c-73af97`] Frontend/UX pass (tables over cards, fewer-clicks triage workflow, live engagement dashboard).
 - **SEC** [`c-5d033e`] An ended scope leaves already-open upstream connections usable (dial-time check).
-- **SEC** [`c-517c2d`] Live Playwright task check of the scope relay (human/bench: needs an LLM key and an authorized target).
+- **SEC** [`c-517c2d`] Live Playwright task check of the scope relay: harness ready (`scripts/live-scope-check/run.sh`); needs only an LLM key.
 - **SEC** [`c-3b9252`] Capture-proxy upstream connection reuse across scopes (rules checked only at dial time).
 - **SEC** [`c-9b48b7`] Report go-mitmproxy keep-alive host pinning upstream; drop `unpinHostChange` once fixed.
 - **SEC** [`c-dadc14`] Verify the security branch on Linux root, in Docker and against Postgres, plus the web typecheck.
@@ -278,6 +294,10 @@ Card ids in brackets:
 
 ## Decisions
 
+- **2026-11-24** — c-517c2d: the live check uses targets we start ourselves (nginx on the verify
+  project's network) instead of a public or third-party bench target, so authorization is never in
+  question and the result needs only an LLM key. The excluded host is embedded as an `<img>`, so the
+  browser dials it on load even when the model doesn't follow the link.
 - **2026-11-24** — c-75c593: the bench subject instance builds from the production `Dockerfile` instead
   of a separate `Dockerfile.bench`, so the benchmark measures the shipped image and there is one image
   definition. Postgres is a sibling service (not baked in), data/keys are named volumes (Docker Desktop
