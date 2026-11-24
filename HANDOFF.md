@@ -59,6 +59,10 @@ See `docs/ARCHITECTURE.md` for the code-level map. Summary:
 
 ## Current state
 
+**2026-11-24** — `gorilla/websocket` is at `v1.5.4-0.20240701034025-d67f41855da4` (GO-2026-6278 fixed,
+card `c-c10f2c`). `govulncheck ./...` is clean with the pinned go1.26.11 toolchain; `go test ./...` and
+`scripts/verify.sh` pass.
+
 **2026-11-23** — Fixes for the High and Medium findings from the 2026-11-23 security audit are on the
 local branch `ej/20261123-145205-6a3af6` (not pushed). It covers audit findings #1–#16 except as listed
 under Open work. `go build ./...`, `go vet ./...` and `go test ./...` pass on macOS. Not yet run: the
@@ -87,15 +91,13 @@ Linux-root tests, the Docker egress iptables rules, the Postgres-backed tests an
 ## Triage (next handful)
 
 **Agents' lane**
-1. *(unclaimed)* — **SEC: gorilla/websocket bump, GO-2026-6278** (XS), card `c-c10f2c`; needs network.
-   Done = govulncheck clean.
-2. *(unclaimed)* — **SEC: upstream-gate residuals** (M), card `c-5a6f96`: task-scoped rules on proxy
+1. *(unclaimed)* — **SEC: upstream-gate residuals** (M), card `c-5a6f96`: task-scoped rules on proxy
    dials, go-mitmproxy keep-alive host pinning, and the global-egress-proxy bypass. Done = a test or a decision for each.
-3. *(unclaimed)* — **E1 Client-grade reporting & deliverables** (M). Turn `report/` into
+2. *(unclaimed)* — **E1 Client-grade reporting & deliverables** (M). Turn `report/` into
    CVSS/EPSS-scored, remediation-bearing, standards-mapped deliverables (OWASP ASVS/WSTG, MITRE
    ATT&CK). Done = a report export with per-finding CVSS vector + remediation + framework tags,
    covered by tests. Card `c-8f9cca`.
-4. *(unclaimed)* — **E4 Methodology-driven coverage** (M), card `c-c0bb07`. Extend the coverage ledger to score
+3. *(unclaimed)* — **E4 Methodology-driven coverage** (M), card `c-c0bb07`. Extend the coverage ledger to score
    coverage against a codified methodology checklist, not only asset touch. Done = planner can
    read a methodology and the coverage graph shows checklist completion.
 
@@ -140,7 +142,6 @@ Card ids in brackets:
 - **SEC** [`c-5a6f96`] Capture-proxy upstream gate residuals (task-scoped rules, go-mitmproxy host pinning, egress-proxy bypass).
 - **SEC** [`c-dadc14`] Verify the security branch on Linux root, in Docker and against Postgres, plus the web typecheck.
 - **SEC** [`c-8d54d5`] Capture proxy: insecure upstream only for in-scope targets.
-- **SEC** [`c-c10f2c`] gorilla/websocket bump (GO-2026-6278).
 - **SEC** [`c-bd9a6d`] Residual gaps from the High/Medium fixes.
 - **SEC** [`c-cc25b6`] Low-severity audit items.
 - **E10** [`c-72dd9d`] Code-security testing lane (SAST/dependency ingest) feeding the same dual-graph + evidence model.
@@ -154,6 +155,10 @@ Card ids in brackets:
 - **Guardrails are invariants.** Scope/target gate, interception gate, budgets, noise governor,
   untrusted-output boundary, audit trail — never weaken/bypass/route around them. `RSI.md`
   "immutable surfaces" must never enter an automated search space.
+- **govulncheck depends on the toolchain.** Run it with the pinned toolchain
+  (`GOTOOLCHAIN=go1.26.11 go run golang.org/x/vuln/cmd/govulncheck@latest ./...`). A newer local Go
+  that is behind on patches (e.g. go1.27.1) reports standard-library vulns that do not affect the
+  shipped build (Dockerfile and CI pin 1.26.11).
 - **Migrations fix forward** — a published `db/migrations/*.sql` is never edited.
 - **Embedded UI** requires `-tags embedui`; a plain `go build` omits the web assets.
 - **Secrets** are AES-256-GCM sealed with per-column AAD; losing the key (`keys/secret.key` or
