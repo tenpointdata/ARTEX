@@ -62,13 +62,16 @@ func (r *scopeRegistry) token(key string, fn ScopeFunc) (string, error) {
 	return tok, nil
 }
 
-func (r *scopeRegistry) forget(key string) {
+// forget drops key's token and returns it ("" when key had none).
+func (r *scopeRegistry) forget(key string) string {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if tok, ok := r.byKey[key]; ok {
+	tok, ok := r.byKey[key]
+	if ok {
 		delete(r.byKey, key)
 		delete(r.byToken, tok)
 	}
+	return tok
 }
 
 func (r *scopeRegistry) lookup(tok string) (ScopeFunc, bool) {
@@ -90,8 +93,18 @@ func (t *Traffic) ScopedProxyURL(key string, fn ScopeFunc) string {
 	return egress.ScopedProxyURL(t.ProxyAddr(), tok)
 }
 
-// ForgetScope drops key's token. A client still using it is refused from then.
-func (t *Traffic) ForgetScope(key string) { t.scopes.forget(key) }
+// ForgetScope drops key's token and closes every proxy client connection bound
+// to it. The scope is checked when the proxy dials upstream, so dropping the
+// token alone refuses only new dials: a keep-alive connection whose upstream
+// is already open (go-mitmproxy pins a connection's plain-HTTP requests to its
+// first dial; a tunnel is one dial) would keep reaching that host unchecked.
+// Closing the client connection closes its upstream with it. A client that
+// reconnects with the token is refused at the gate.
+func (t *Traffic) ForgetScope(key string) {
+	if tok := t.scopes.forget(key); tok != "" && t.sink != nil {
+		t.sink.closeScope(tok)
+	}
+}
 
 // EndedScopeURL returns the recording proxy's URL carrying a fresh token that
 // names no scope, so every upstream dial of a client that uses it is refused.
@@ -140,10 +153,35 @@ func (s *sink) unbindScope(c *mproxy.ClientConn) {
 }
 
 // ClientConnected drops a binding a previous connection from the same address
-// may have left.
+// may have left, and records the connection so closeScope can reach it.
 func (s *sink) ClientConnected(c *mproxy.ClientConn) {
 	if key := clientKey(c); key != "" {
 		s.scoped.Delete(key)
+		s.clients.Store(key, c)
+	}
+}
+
+// closeScope closes the client connections bound to tok, by their credential
+// (scoped) or by the scope relay that opened them (relayed). Closing one runs
+// ClientDisconnected, which drops its entries; sync.Map allows that mid-Range.
+func (s *sink) closeScope(tok string) {
+	var addrs []string
+	s.scoped.Range(func(k, v any) bool {
+		if v.(scopeBinding).token == tok {
+			addrs = append(addrs, k.(string))
+		}
+		return true
+	})
+	s.relayed.Range(func(k, v any) bool {
+		if v.(string) == tok {
+			addrs = append(addrs, k.(string))
+		}
+		return true
+	})
+	for _, a := range addrs {
+		if v, ok := s.clients.Load(a); ok {
+			_ = v.(*mproxy.ClientConn).Conn.Close()
+		}
 	}
 }
 
