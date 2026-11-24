@@ -59,6 +59,12 @@ See `docs/ARCHITECTURE.md` for the code-level map. Summary:
 
 ## Current state
 
+**2026-11-24** — `TestGateOffTaskIsUnchanged` (card `c-3157b4`) failed with Postgres because it
+expected no resolver lookups with the gate off. It now expects WebFetch's lookups of the target's own
+name, no lookups for commands, and no target rows. It passes against Postgres 17. While fixing it we
+found that the gate-off custom http tool dials through `http.DefaultTransport`, not `dialUngated`:
+card `c-f89815`.
+
 **2026-11-23** — Fixes for the High and Medium findings from the 2026-11-23 security audit are on the
 local branch `ej/20261123-145205-6a3af6` (not pushed). It covers audit findings #1–#16 except as listed
 under Open work. `go build ./...`, `go vet ./...` and `go test ./...` pass on macOS. Not yet run: the
@@ -87,6 +93,8 @@ Linux-root tests, the Docker egress iptables rules, the Postgres-backed tests an
 ## Triage (next handful)
 
 **Agents' lane**
+0. *(unclaimed)* — **SEC: gate-off http tool dial TOCTOU** (S), card `c-f89815`. Done = the direct
+   http tool transport uses `PinnedDialer` when the gate is off, plus a rebinding-to-metadata test.
 1. *(unclaimed)* — **SEC: gorilla/websocket bump, GO-2026-6278** (XS), card `c-c10f2c`; needs network.
    Done = govulncheck clean.
 2. *(unclaimed)* — **SEC: upstream-gate residuals** (M), card `c-5a6f96`: task-scoped rules on proxy
@@ -180,6 +188,18 @@ Card ids in brackets:
   self-signed targets set `ARTEX_CAPTURE_INSECURE_UPSTREAM=1` for that run only, until per-target trust
   (card `c-8d54d5`) exists. Reason: the goproxy setting is global, so turning it on also leaves package
   downloads through the proxy open to tampering.
+
+- **2026-11-24** — `TestGateOffTaskIsUnchanged`: we changed the test, not the code. The gate-off path
+  resolves names on purpose: the always-on metadata deny and block rules from d9964fc need the addresses.
+  Stopping resolution would weaken a guardrail.
+- **Postgres tests locally:** `initdb` a throwaway cluster and start it with `LC_ALL=C` (without that,
+  the macOS postmaster exits with "became multithreaded"). Then set
+  `ARTEX_PG_DSN=postgres://postgres@127.0.0.1:<port>/postgres?sslmode=disable`. Do not point tests at the
+  compose database. On such a cluster two tests fail because of the environment, not the code (seen on
+  1abe24f too): `TestConnectWithoutPasswordRealPG` needs password auth (use `initdb -A scram-sha-256`
+  with a password), and `TestManagerSOCKS5UDPOptInAndAssetBlockRuleDropsDatagram` needs a 127.0.0.2
+  alias (macOS: `sudo ifconfig lo0 alias 127.0.0.2`). `scripts/verify.sh` line 103 uses `mapfile`,
+  which macOS's bash 3.2 lacks; run it with Homebrew bash.
 
 ## Deltas
 

@@ -290,6 +290,7 @@ type countingResolver struct {
 	mu      sync.Mutex
 	answers map[string][]string
 	n       int
+	hosts   []string
 }
 
 func (r *countingResolver) Name() string { return "counting" }
@@ -298,6 +299,7 @@ func (r *countingResolver) LookupIPs(_ context.Context, host string) ([]netip.Ad
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.n++
+	r.hosts = append(r.hosts, host)
 	var out []netip.Addr
 	for _, ip := range r.answers[host] {
 		out = append(out, netip.MustParseAddr(ip))
@@ -312,6 +314,13 @@ func (r *countingResolver) lookups() int {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return r.n
+}
+
+// names returns the host names looked up so far, in order.
+func (r *countingResolver) names() []string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return slices.Clone(r.hosts)
 }
 
 // scriptedCall is one tool call of a toolScript.
@@ -615,8 +624,12 @@ func TestBypass_CustomScriptToolTargetNotGated(t *testing.T) {
 }
 
 // A task with the gate off (the default) runs as before: a worker's WebFetch
-// and the custom tools reach their targets, and the gate writes no row and
-// resolves no name.
+// and the custom tools reach their targets, and the gate writes no row. The
+// always-on egress checks still resolve the names of the connections the
+// platform opens (WebFetch, the custom http tool) to apply the asset block
+// rules and the metadata deny to the addresses; a command is not resolved.
+// (Until 2026-11-24 this test wanted no lookups at all, which predates those
+// always-on checks; resolving is the intended behaviour, not a regression.)
 func TestGateOffTaskIsUnchanged(t *testing.T) {
 	g := newGateServer(t)
 	task := g.newTask(t, db.TaskCreateOptions{})
@@ -637,6 +650,7 @@ func TestGateOffTaskIsUnchanged(t *testing.T) {
 	case <-time.After(60 * time.Second):
 		t.Fatal("the worker run did not end")
 	}
+	afterFetch := res.lookups()
 
 	httpTool := g.s.buildCustomTool(&db.Tool{Key: "probe_http", Kind: "http",
 		Schema: json.RawMessage(`{"type":"object","properties":{"port":{"type":"string"}}}`),
@@ -644,6 +658,7 @@ func TestGateOffTaskIsUnchanged(t *testing.T) {
 	if out, isErr := callTool(t, httpTool, gatedCtx(task, intercept.DefaultTargetWaitBound), fmt.Sprintf(`{"port":%q}`, port), nil); isErr || !strings.Contains(out, "probe-reached") {
 		t.Fatalf("custom http tool: error=%v out=%q", isErr, out)
 	}
+	afterHTTP := res.lookups()
 	cmdTool := g.s.buildCustomTool(&db.Tool{Key: "probe_cmd", Kind: "command",
 		Exec: execJSON(t, map[string]any{"command": ": http://localhost:" + port + "/ && echo ran-gate-off"})})
 	if out, isErr := callTool(t, cmdTool, gatedCtx(task, intercept.DefaultTargetWaitBound), `{}`, &actool.ToolContext{WorkingDir: t.TempDir()}); isErr || !strings.Contains(out, "ran-gate-off") {
@@ -656,7 +671,18 @@ func TestGateOffTaskIsUnchanged(t *testing.T) {
 	if n := targetRowCount(t, g.m.pg, task.ID); n != 0 {
 		t.Fatalf("%d target rows, want none", n)
 	}
-	if n := res.lookups(); n != 0 {
-		t.Fatalf("%d lookups, want none", n)
+	// WebFetch's connections are resolved (hook check, then a fresh lookup at
+	// each dial). The http tool's rendered-URL check reads the cached answer
+	// WebFetch left, so it adds no lookup here.
+	if afterFetch == 0 {
+		t.Fatal("WebFetch resolved no name; the always-on metadata deny did not see its connections")
+	}
+	if n := res.lookups() - afterHTTP; n != 0 {
+		t.Fatalf("the command tool made %d lookups, want none (commands are not resolved with the gate off)", n)
+	}
+	for _, h := range res.names() {
+		if h != "localhost" {
+			t.Fatalf("looked up %q; want only the target's own name (lookups %v)", h, res.names())
+		}
 	}
 }
