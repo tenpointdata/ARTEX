@@ -1,0 +1,69 @@
+{
+  "suite": "heldout",
+  "version": "v1",
+  "split": "held-out",
+  "notes": [
+    "Targets are pinned images (image mode, judge-graded gates) and DrostBench challenges (flag oracle, plus judge gates when a judge is configured).",
+    "The held-out and dev splits are disjoint: candidate edits are proposed from dev (or live tasks), and adopted only on held-out evidence (RSI.md Loop C rule 1).",
+    "Changing a target, an image tag or a ground-truth file is a suite version bump; ground-truth files are also content-hashed into every result.",
+    "DrostBench ids: every tenth challenge (005, 015, ... 095)."
+  ],
+  "targets": [
+    {
+      "id": "juice-shop",
+      "type": "image",
+      "ground_truth": "juice-shop",
+      "image": "bkimminich/juice-shop:v20.4.0",
+      "port": 13100,
+      "container_port": 3000
+    },
+    {
+      "id": "dvga",
+      "type": "image",
+      "ground_truth": "dvga",
+      "image": "dolevf/dvga:2.2.0",
+      "port": 13101,
+      "container_port": 5013
+    },
+    {
+      "id": "DBEN-v1-005",
+      "type": "drost"
+    },
+    {
+      "id": "DBEN-v1-015",
+      "type": "drost"
+    },
+    {
+      "id": "DBEN-v1-025",
+      "type": "drost"
+    },
+    {
+      "id": "DBEN-v1-035",
+      "type": "drost"
+    },
+    {
+      "id": "DBEN-v1-045",
+      "type": "drost"
+    },
+    {
+      "id": "DBEN-v1-055",
+      "type": "drost"
+    },
+    {
+      "id": "DBEN-v1-065",
+      "type": "drost"
+    },
+    {
+      "id": "DBEN-v1-075",
+      "type": "drost"
+    },
+    {
+      "id": "DBEN-v1-085",
+      "type": "drost"
+    },
+    {
+      "id": "DBEN-v1-095",
+      "type": "drost"
+    }
+  ]
+}

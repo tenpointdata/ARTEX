@@ -15,6 +15,11 @@ benchmark harness (Apache-2.0).
 |---|---|
 | `run_bench.py` | The runner: deploy corpus, create task, wait, fetch findings, judge, tally |
 | `ground_truth/<corpus>.json` | Version-stamped ground truth (component + class + mechanism, deliberately coarse) |
+| `eval_suite.py` | Planner/worker evaluation suite: baseline vs candidate prompt arms over a suite, per-gate comparison |
+| `suite_stats.py` | Pure aggregation: per-gate rates with denominators, Wilson/Newcombe intervals, paired table |
+| `arms.py`, `arms/*.json` | Prompt-version arms and the server-side prompt switch (apply, read back, restore) |
+| `suites/*.json` | Target sets: `heldout-v1` (adoption evidence) and `dev-v1` (proposing and debugging), disjoint |
+| `ground_truth/dvga.json` | Damn Vulnerable GraphQL Application 2.2.0 ground truth (v2, 12 entries hand-verified against the 2.2.0 source, each citing its resolver/helper; DoS classes excluded) |
 | `benchmark-results/` | Output (gitignored): one directory per run with `report.md` + `results.json` |
 
 ## Subject instance
@@ -152,6 +157,76 @@ DROST_REPO=/path/to/drost-benchmarks python3 run_bench.py \
 
 `--deploy-only` brings a challenge up and prints its URL and flag without
 creating a task, to validate an install.
+
+## Evaluation suite (baseline vs candidate prompt arms)
+
+`eval_suite.py` turns single runs into a controlled A/B over a held-out suite,
+to meet the measurement half of the `RSI.md` Loop C contract: a baseline arm and
+a candidate arm with the same model, seed, budget and judge, compared per gate
+with denominators. It adopts nothing: the output is evidence for an owner
+decision, and the suite puts the starting prompts back when it ends.
+
+```bash
+cd scripts/benchmark
+# export the body you want to change, edit it, and name it in an arm file
+curl -s -H "Authorization: Bearer $ARTEX_TOKEN" localhost:8787/api/agents/planner \
+  | python3 -c 'import json,sys; print(json.load(sys.stdin)["prompt"], end="")' > arms/planner-v2.tmpl
+cat > arms/planner-v2.json <<'JSON'
+{"name": "planner-v2", "proposed_from": ["DBEN-v1-001"],
+ "prompts": {"planner": {"source": "file", "path": "planner-v2.tmpl"}}}
+JSON
+
+ARTEX_TOKEN=... JUDGE_BASE_URL=... JUDGE_MODEL=... JUDGE_API_KEY=... DROST_REPO=/path/to/drost-benchmarks \
+python3 eval_suite.py run --suite suites/heldout-v1.json \
+    --baseline arms/baseline.json --candidate arms/planner-v2.json \
+    --subject-model deepseek-chat --llm-profiles 3,2 --target-host 172.17.0.1 \
+    --replicates 3 --seed 7 --task-timeout 3600
+
+# re-render or compare two saved arm results (refuses mismatched invariants)
+python3 eval_suite.py compare <dir>/baseline.json <dir>/candidate.json
+```
+
+What it holds fixed and checks:
+
+- **Arms vary only the editable prompt body** of `goals`, `planner` and `worker`
+  (`source`: `current` = the body active when the suite started, `builtin` =
+  the in-code default, `file` = a template). Swaps go through the server's own
+  versioned prompt API (`PUT /api/agents/{key}/prompt`), so the code-owned
+  tails, gates, scope checks, injection defenses and tool allowlists cannot be
+  in an arm. Each swap is read back and its sha256 is stamped; a body that
+  changes mid-suite aborts it.
+- **Held-out discipline.** Adoption evidence comes from a `held-out` suite only
+  (`--allow-dev-split` for exploration), and an arm whose `proposed_from` names
+  a suite target is refused.
+- **Same model, seed, budget, judge.** One stamp covers both arms: method
+  version, subject model and llm chain, judge model, per-task timeout, seed,
+  replicates, suite version and content-hashed ground-truth versions.
+  `compare` refuses two results whose stamps differ (`--allow-mismatch` marks
+  the report NOT COMPARABLE).
+- **The seed fixes the schedule**: target order per replicate and arm order per
+  pair, so neither arm always runs first against a freshly started target. It
+  does not seed the LLM: ARTEX has no sampling-seed control, so replicates are
+  the variance control.
+- **Sequential, dedicated instance.** The server reads the active prompt live,
+  so the suite refuses to start while any task is running or queued
+  (`--allow-busy` overrides knowingly) and never runs two tasks at once. Run it
+  on a bench instance with the RSI lesson library `off` (`ARTEX_RSI_LESSONS`),
+  or a lesson learned in one arm leaks into the other.
+- **Per-gate results with denominators.** Gates: `detected`, `component`,
+  `class`, `keywords`, `proof` (over ground-truth entries of judged runs, with
+  the "over detected" view alongside) and `flag_captured` (over drost runs).
+  Each carries passes/n and a Wilson 95% interval; the delta carries a Newcombe
+  interval; a paired table counts gained and lost observations on the same
+  target, replicate and entry. Failed runs are counted and excluded from the
+  denominators, never scored as misses. Cost (tokens, tool calls, wall time
+  from `GET /api/tasks/{id}/outcome`) is reported per arm, so a gain bought
+  with a bigger spend is visible.
+- **A judge failure stops the suite**: an untrusted grader invalidates every
+  judged result.
+
+Output: `benchmark-results/suite-<suite>/<run-id>/` with `baseline.json` and
+`candidate.json` (stamp + per-run records, written after every run), the
+per-run directories under `runs/`, `comparison.json` and `report.md`.
 
 ## What this does not measure
 

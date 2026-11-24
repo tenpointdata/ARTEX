@@ -1,0 +1,29 @@
+{
+  "suite": "dev",
+  "version": "v1",
+  "split": "dev",
+  "notes": [
+    "Targets are pinned images (image mode, judge-graded gates) and DrostBench challenges (flag oracle, plus judge gates when a judge is configured).",
+    "The held-out and dev splits are disjoint: candidate edits are proposed from dev (or live tasks), and adopted only on held-out evidence (RSI.md Loop C rule 1).",
+    "Changing a target, an image tag or a ground-truth file is a suite version bump; ground-truth files are also content-hashed into every result.",
+    "Dev targets are for proposing and debugging candidate edits; results here are never adoption evidence."
+  ],
+  "targets": [
+    {
+      "id": "DBEN-v1-001",
+      "type": "drost"
+    },
+    {
+      "id": "DBEN-v1-002",
+      "type": "drost"
+    },
+    {
+      "id": "DBEN-v1-003",
+      "type": "drost"
+    },
+    {
+      "id": "DBEN-v1-004",
+      "type": "drost"
+    }
+  ]
+}

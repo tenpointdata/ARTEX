@@ -157,6 +157,18 @@ login, HttpOnly + SameSite=Strict cookie, token hidden from scripts, Sign out �
 the pre-logout cookie still gets 200 because revocation (`c-a0af33`) is not on main yet. Not re-run on
 the newer main (`-exec-uid-range`, #18).
 
+**2026-11-24: E8 evaluation suite** (card `c-5487e8`) is in `scripts/benchmark`. `eval_suite.py run` runs a
+baseline and a candidate prompt arm over a held-out suite. Both arms share one stamp: model chain, schedule
+seed, per-task budget, judge, and content-hashed ground truth. Runs go one at a time and the arms alternate in
+an order drawn from the seed. The output is per-gate passes/n for `detected`, `component`, `class`, `keywords`,
+`proof` and `flag_captured`, with Wilson and Newcombe intervals, a paired gained/lost table and cost per arm.
+`compare` refuses two results whose stamps differ. Arms change only the editable `goals`/`planner`/`worker`
+body, through the versioned prompt API, and the starting bodies are restored afterwards. Suites:
+`suites/heldout-v1.json` (Juice Shop v20.4.0, DVGA 2.2.0, DrostBench 005…095) and a disjoint
+`suites/dev-v1.json`. New ground truth: `ground_truth/dvga.json` (v2, hand-verified 2026-11-24 against DVGA tag 2.2.0 commit `a961308`; card `c-085c80` done, see Decisions). `run_bench.py` now exposes
+`build_parser`/`prepare`/`run` and stamps `/api/tasks/{id}/outcome`. Unit-tested (15 new tests,
+`scripts/verify.sh` passes); never yet run live (card `c-f1518c`).
+
 ## Triage (next handful)
 
 **Agents' lane**
@@ -180,7 +192,11 @@ the newer main (`-exec-uid-range`, #18).
    coverage against a codified methodology checklist, not only asset touch. Done = planner can
    read a methodology and the coverage graph shows checklist completion.
 
+- *(unclaimed)* — **Bench image reproducible from a clean clone** (S), card `c-75c593`.
+
 **Human lane**
+- **E8 first live held-out run** (card `c-f1518c`): needs a bench instance, an LLM, a judge key and a
+  drost-benchmarks checkout. Done = a `report.md` with per-gate passes/n for baseline vs builtin.
 - Revisit tracking: E1–E10 are on the private Composite board (decided 2026-11-23, repo is public).
   File GitHub issues only if the repo goes private or you want them public.
 - Decide engagement-governance direction (E5): how formal the rules-of-engagement/authorization
@@ -242,6 +258,8 @@ Card ids in brackets:
 - **SEC** [`c-12df03`] Single-uid start-up fails on a socket in a run dir; MCP uid is not egress-filtered.
 - **SEC** [`c-e70e5c`] Per-task uids: release ended tasks at start-up; per-key lock.
 - **SEC** [`c-cc25b6`] Low-severity audit items.
+- **E8 follow-ups** [`c-f1518c`] first live run, [`c-75c593`] bench
+  image from a clean clone, [`c-d73308`] optional provider sampling seed per LLM profile.
 - **E10** [`c-72dd9d`] Code-security testing lane (SAST/dependency ingest) feeding the same dual-graph + evidence model.
 
 ## Known issues and gotchas
@@ -291,6 +309,14 @@ Card ids in brackets:
   probe binary became a test hook (`isolationProbeBinary`) rather than being changed in production.
   Logout revocation and the Docker Desktop bind-mount problem were filed as cards, not fixed here: both
   predate the branch and need a design choice.
+- **2026-11-24** — DVGA ground truth bumped to v2 after reading the 2.2.0 source (card `c-085c80`). Every entry
+  now has a `source` field naming its resolver, helper, middleware or template (the judge prompt ignores it;
+  it only changes the content hash). Changes: GT-009 is *signature not verified* (`helpers.get_identity`,
+  `verify_signature: False`), not alg=none in particular. GT-011 is now the GraphiQL `env` cookie bypass,
+  because the deny-list, operation-name and introspection middlewares only run in Expert mode (moved to
+  notes). Added GT-012, stack traces on `/graphiql` (`format_custom_error`). The notes now say that
+  difficulty is server-wide DB state, switched by `X-DVGA-MODE` or `/difficulty/<level>`, not chosen per request.
+
 - **2026-11-23** — Stood ARTEX up locally and registered it as a Composite project rather than
   forking/renaming; it stays an AGPL-3.0 fork under `tenpointdata`. Backend verified building; web
   install and Docker run deferred (not needed to produce the setup + plan deliverable).
@@ -346,6 +372,13 @@ Card ids in brackets:
   that cannot start skips the server for the run (fail closed) rather than spawning on the plain
   URL. UI tool discovery (no run) keeps the stored URL, global rules: it lists tools and browses
   nothing. This branch merges PR #13's branch (`ej/20261124-075745-5a4987`), which this work needs.
+- **2026-11-24** — E8: the A/B suite runs one task at a time on a dedicated instance and refuses a busy one,
+  because the server reads the active prompt live and a swap would reach a concurrent task. `--seed` fixes the
+  schedule, not the LLM, because ARTEX has no sampling-seed control; replicates control variance instead
+  (`c-d73308`). Gate rates are counted over ground-truth entries, not over detected findings, so arms with
+  different detection counts stay comparable. A failed run is counted but left out of the denominators. A judge
+  failure aborts the suite. Arms may vary only the editable goals/planner/worker body; the `RSI.md` immutable
+  surfaces stay outside the prompt API by construction.
 
 ## Deltas
 
