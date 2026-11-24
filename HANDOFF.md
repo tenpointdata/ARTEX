@@ -1,6 +1,6 @@
 # HANDOFF.md — ARTEX
 
-**Last updated:** 2026-11-24 11:57 MST, by claude-code: c-a1c0fc (now in review; board cards opened: c-5d033e, c-517c2d): scope-relay tests and limits, on a branch that merges c-15b39d's unmerged branch (ej/20261124-110649-dbd854). Earlier hand-offs are under Deltas and in `ej handoff log`.
+**Last updated:** 2026-11-24 12:45 MST, by claude-code: c-5d033e done: ForgetScope closes the scope's proxy client connections (credential and relay), so a pinned keep-alive upstream cannot outlive the scope. Earlier hand-offs are under Deltas and in `ej handoff log`.
 
 > Single entry point for whoever picks this up next (any agent or human), with no access to the
 > originating conversation. Read this first, then the sections of the code it points at.
@@ -137,8 +137,9 @@ Operator-facing changes:
   (card `c-a1c0fc`, branch `ej/20261124-114610-cae888`, which carries c-15b39d): a relay serves at most 256
   connections at once; a prepareMCP closer is released at once when its MCP fails to start; tests cover
   the hook (PG), two concurrent scopes, the keep-alive host change, wss, an in-flight request across the
-  relay's close (tombstone), the cap, and a real headless Chrome (opt-in `ARTEX_TEST_CHROME`). A full
-  live task is `c-517c2d`. Operators' own clients keep the global rules. go-mitmproxy's keep-alive host pinning is worked around
+  relay's close (tombstone), the cap, and a real headless Chrome (opt-in `ARTEX_TEST_CHROME`). This is on
+  main (landed with #22). Re-verified 2026-11-24 12:30: the PG hook test ran against a throwaway Postgres
+  (not skipped) and passed, the Chrome test passed, relay tests pass with -race. A full live task is `c-517c2d`. Operators' own clients keep the global rules. go-mitmproxy's keep-alive host pinning is worked around
   (`unpinHostChange`; upstream report `c-9b48b7`). The global-egress-proxy bypass is accepted and
   documented (`docs/OPS.md` §6). `scripts/verify.sh` passes.
   Block rules apply even with the gate off. Fuzzy allow rules match on name and address boundaries.
@@ -198,8 +199,6 @@ body, through the versioned prompt API, and the starting bodies are restored aft
    Done = govulncheck clean.
 3. *(unclaimed)* — **SEC: upstream-gate residuals** (M), card `c-5a6f96`: task-scoped rules on proxy
    dials, go-mitmproxy keep-alive host pinning, and the global-egress-proxy bypass. Done = a test or a decision for each.
-   Then **SEC: ended scope keeps open upstreams** (S), card `c-5d033e`. Done = ForgetScope closes the
-   scope's client connections, by a test, or a recorded acceptance.
 4. *(unclaimed)* — **SEC: logout revocation** (S), card `c-a0af33`. Done = a token replayed after
    logout or a password change gets 401, by a test.
 5. *(unclaimed)* — **SEC: Docker Desktop named volumes** (S), card `c-775dc2`. Done = `docker compose up`
@@ -268,7 +267,6 @@ Card ids in brackets:
 - **E7** [`c-d60149`] Distributed/remote workers (queue-backed intents) for larger engagements; Helm chart.
 - **E8** [`c-5487e8`] Planner/worker evaluation suite (regression targets, prompt-version A/B via the benchmark gate).
 - **E9** [`c-73af97`] Frontend/UX pass (tables over cards, fewer-clicks triage workflow, live engagement dashboard).
-- **SEC** [`c-5d033e`] An ended scope leaves already-open upstream connections usable (dial-time check).
 - **SEC** [`c-517c2d`] Live Playwright task check of the scope relay (human/bench: needs an LLM key and an authorized target).
 - **SEC** [`c-3b9252`] Capture-proxy upstream connection reuse across scopes (rules checked only at dial time).
 - **SEC** [`c-9b48b7`] Report go-mitmproxy keep-alive host pinning upstream; drop `unpinHostChange` once fixed.
@@ -304,9 +302,11 @@ Card ids in brackets:
   key go-mitmproxy hands `upstreamFor` (`traffic/scope.go`). A client that cannot send a credential
   (Chromium's `--proxy-server`) gets a scope relay instead (`traffic/scope_relay.go`): the binding is
   the relay's outbound address, stored before any byte is forwarded, and it wins over a credential.
-- The scope is checked when the proxy dials upstream, not per request: after `ForgetScope`, an upstream
-  a keep-alive connection already holds stays usable until that connection closes (relays close theirs
-  at run end; credential clients that outlive a run do not: `c-5d033e`).
+- The scope is checked when the proxy dials upstream, not per request. So `ForgetScope` also closes
+  every proxy client connection bound to the token, by credential (`sink.scoped`) or by relay
+  (`sink.relayed`), through `sink.clients` (`traffic/scope.go` `closeScope`). That closes the
+  connection's open upstream too. A path that forgets a token without `ForgetScope` would bring back the
+  pinned-upstream reuse. Test: `traffic/scope_forget_test.go`.
 - `server` tests on macOS: `TestManagerSOCKS5UDPOptInAndAssetBlockRuleDropsDatagram` fails because
   127.0.0.2 is not configured on the host (`bind: can't assign requested address`). That's environmental.
 
