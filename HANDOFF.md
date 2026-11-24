@@ -1,6 +1,6 @@
 # HANDOFF.md — ARTEX
 
-**Last updated:** 2026-11-24 11:57 MST, by claude-code: c-a1c0fc (now in review; board cards opened: c-5d033e, c-517c2d): scope-relay tests and limits, on a branch that merges c-15b39d's unmerged branch (ej/20261124-110649-dbd854). Earlier hand-offs are under Deltas and in `ej handoff log`.
+**Last updated:** 2026-11-24 12:45 MST, by claude-code: c-5d033e done: ForgetScope closes the scope's proxy client connections (credential and relay), so a pinned keep-alive upstream cannot outlive the scope. Earlier hand-offs are under Deltas and in `ej handoff log`.
 
 > Single entry point for whoever picks this up next (any agent or human), with no access to the
 > originating conversation. Read this first, then the sections of the code it points at.
