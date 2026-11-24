@@ -80,9 +80,13 @@ Linux-root tests, the Docker egress iptables rules, the Postgres-backed tests an
   that dials with `Interceptor.DialSOCKS5`.
 - **2026-11-24** (card `c-5a6f96`, commit `75184c3`): task agents' proxy URLs now carry a task scope token,
   so capture-proxy upstream dials (and SOCKS5 with the token as password) also apply that task's
-  block rules and, with its gate on, its pins/approvals; an ended task's token is refused. Clients
-  without a token (operators, chat/conversation agents, custom HTTP tools, the transparent listener)
-  keep the global rules only (`c-eb32cc`). go-mitmproxy's keep-alive host pinning is worked around
+  block rules and, with its gate on, its pins/approvals; an ended task's token is refused.
+  **2026-11-24** (card `c-eb32cc`, commit `ac7c35e`, branch `ej/20261124-075745-5a4987`, which also
+  carries the not-yet-merged `c-5a6f96` branch): chat/conversation agents and `use_recording_proxy`
+  HTTP tools now get their run's scoped URL (`Manager.ScopedProxyAddr`, `server/proxy_scope.go`);
+  conversations have their own token, forgotten on delete; an unloaded task's call gets a refused
+  URL. The transparent listener is global-only by decision; the Playwright browser MCP is still
+  unscoped (`c-15b39d`). Operators' own clients keep the global rules. go-mitmproxy's keep-alive host pinning is worked around
   (`unpinHostChange`; upstream report `c-9b48b7`). The global-egress-proxy bypass is accepted and
   documented (`docs/OPS.md` §6). `scripts/verify.sh` passes.
   Block rules apply even with the gate off. Fuzzy allow rules match on name and address boundaries.
@@ -96,8 +100,9 @@ Linux-root tests, the Docker egress iptables rules, the Postgres-backed tests an
 **Agents' lane**
 1. *(unclaimed)* — **SEC: gorilla/websocket bump, GO-2026-6278** (XS), card `c-c10f2c`; needs network.
    Done = govulncheck clean.
-2. *(unclaimed)* — **SEC: scope the remaining proxy clients** (S), card `c-eb32cc`: chat/conversation
-   agents, custom HTTP tools, transparent listener. Done = scoped with a test, or a decision each.
+2. *(unclaimed)* — **SEC: upstream connection reuse across proxy scopes** (S), card `c-3b9252`.
+   Done = test that two scopes never share an upstream connection, or a recorded decision.
+   Then **SEC: scope the Playwright browser MCP** (M), card `c-15b39d`.
 3. *(unclaimed)* — **E1 Client-grade reporting & deliverables** (M). Turn `report/` into
    CVSS/EPSS-scored, remediation-bearing, standards-mapped deliverables (OWASP ASVS/WSTG, MITRE
    ATT&CK). Done = a report export with per-finding CVSS vector + remediation + framework tags,
@@ -144,7 +149,8 @@ Card ids in brackets:
 - **E7** [`c-d60149`] Distributed/remote workers (queue-backed intents) for larger engagements; Helm chart.
 - **E8** [`c-5487e8`] Planner/worker evaluation suite (regression targets, prompt-version A/B via the benchmark gate).
 - **E9** [`c-73af97`] Frontend/UX pass (tables over cards, fewer-clicks triage workflow, live engagement dashboard).
-- **SEC** [`c-eb32cc`] Scope the remaining capture-proxy clients (chat/conversation agents, custom HTTP tools, transparent listener).
+- **SEC** [`c-15b39d`] Scope the Playwright browser MCP's capture-proxy dials per run (shared process, plain proxy URL today).
+- **SEC** [`c-3b9252`] Capture-proxy upstream connection reuse across scopes (rules checked only at dial time).
 - **SEC** [`c-9b48b7`] Report go-mitmproxy keep-alive host pinning upstream; drop `unpinHostChange` once fixed.
 - **SEC** [`c-dadc14`] Verify the security branch on Linux root, in Docker and against Postgres, plus the web typecheck.
 - **SEC** [`c-8d54d5`] Capture proxy: insecure upstream only for in-scope targets.
@@ -202,6 +208,13 @@ Card ids in brackets:
   and reaches the target, so the gate could only make a name-only check. OPS.md tells operators not to
   run that proxy where it can reach metadata. Keep-alive host pinning is fixed locally with
   go-mitmproxy's separate client rather than closing the client connection, so clients see no resets.
+
+- **2026-11-24** — Remaining proxy clients (`c-eb32cc`): shared clients (the per-profile chat agent,
+  the http custom tool) resolve the scoped URL per call from the run's `intercept.TargetScope` on the
+  context, rather than being rebuilt per run. A task scope whose task is not loaded gets a URL with
+  an unregistered token (refused), never the global-only URL, and `TaskProxyAddr` no longer mints
+  tokens for unloaded tasks. The transparent TCP listener stays global-only: it has no credential,
+  and per-run uid/cgroup mapping is operator netfilter setup; documented in `docs/OPS.md` §6.
 
 ## Deltas
 
