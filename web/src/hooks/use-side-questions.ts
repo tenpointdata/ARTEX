@@ -5,7 +5,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 
 import { t } from "@/i18n";
-import { sseUrl } from "@/lib/api";
+import { sseUrl } from "@/lib/sse";
 import { isBtwCommand, type SideExchange, type SideHistory, sideAPI } from "@/lib/side-questions";
 import { setVisibleInterval } from "@/lib/polling";
 
