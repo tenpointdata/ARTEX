@@ -59,6 +59,22 @@ See `docs/ARCHITECTURE.md` for the code-level map. Summary:
 
 ## Current state
 
+**2026-11-24 (c-d25ff9, E3)** — The `RSI.md` Loop C benchmark gate and Loop B lesson graduation are built,
+flag off (`ARTEX_RSI_LOOP`, default off, read per request). Pure core `rsi/` (search-space allowlist:
+`prompt_body` for goals/planner/worker and `lesson`; immutable and git-reviewed surfaces refused;
+annealed budget 4,2,1,1…; `Evaluate` recomputes per-gate and paired results from raw E8 arm records,
+binds them to the exact body sha / lesson set, refuses proposed-from targets, net regressions and
+gains on fewer than 2 targets). API `/api/rsi/*` (`server/rsi_loop.go`); migration **0020**
+(`rsi_proposals`, `rsi_proposal_evidence`, append-only `rsi_adoption_log`). Adoption = owner
+password + newest passing evidence id + evidence baseline equal to the live prompt; it appends an
+`agent_prompts` version; rollback is a pointer change (refused if an owner edited since, open
+with the flag off). `ARTEX_RSI_LESSONS` gains `adopted` (only graduated lessons) and `bench` (a
+pinned set, `PUT /api/rsi/bench-lessons`). This branch merges the unmerged E8 suite branch
+(`ej/20261124-084655-ccdab2`); harness gains lesson arms and `scripts/benchmark/rsi_submit.py`.
+Verified: `go test ./rsi`, the RSI DB and server tests against Postgres 16, 65 benchmark Python
+tests, `scripts/verify.sh`. Not verified: any live suite run through the gate (`c-772190`); no UI
+(`c-936308`).
+
 **2026-11-24 (c-75c593)** — The benchmark subject instance (`docker-compose.bench.yml`) now builds from a
 clean clone: production `Dockerfile`, a sibling Postgres, named volumes, committed `bench/.env.example`
 with `ARTEX_RSI_LESSONS=off`. Verified on Docker Desktop arm64: `up --build` brings both containers up,
@@ -192,9 +208,11 @@ body, through the versioned prompt API, and the starting bodies are restored aft
    coverage against a codified methodology checklist, not only asset touch. Done = planner can
    read a methodology and the coverage graph shows checklist completion.
 
-- *(unclaimed)* — **Bench image reproducible from a clean clone** (S), card `c-75c593`.
+- *(unclaimed)* — **RSI gate web UI** (M), card `c-936308`. Done = adopt/rollback from a proposals table in ≤2 clicks + password.
 
 **Human lane**
+- **First live run through the RSI gate** (card `c-772190`, after `c-f1518c`): propose → held-out
+  suite → evidence → adopt (password) → rollback on the bench instance with `ARTEX_RSI_LOOP=on`.
 - **E8 first live held-out run** (card `c-f1518c`): needs a bench instance, an LLM, a judge key and a
   drost-benchmarks checkout. Done = a `report.md` with per-gate passes/n for baseline vs builtin.
 - Revisit tracking: E1–E10 are on the private Composite board (decided 2026-11-23, repo is public).
@@ -237,7 +255,7 @@ Card ids in brackets:
 
 - **E1** [`c-8f9cca`] Client-grade reporting & deliverables (scoring, remediation, framework mappings, branded export).
 - **E2** [`c-6def05`] Finding/ticketing integrations out (Jira, GitHub issues, DefectDojo) and more ingest in (Nuclei, Nmap, ZAP/Burp, Semgrep).
-- **E3** [`c-d25ff9`] Loop-B lesson library graduation + Loop-C benchmark gate per the `RSI.md` contract (owner-approval, immutable surfaces).
+- **E3** [`c-d25ff9`] — gate built (in review). Follow-ups: UI `c-936308`, first live run `c-772190`, proposer/critic `c-c89f5b`.
 - **E4** [`c-c0bb07`] Methodology-driven coverage (OWASP WSTG / API Top 10 as structured checklists).
 - **E5** [`c-669406`] Engagement lifecycle & governance: RBAC, per-engagement authorization artifact, scope expiry, tamper-evident (hash-chained) audit log.
 - **E6** [`c-cb0093`] Cost/observability dashboard + OpenTelemetry export, building on existing context telemetry.
@@ -263,6 +281,13 @@ Card ids in brackets:
 - **E10** [`c-72dd9d`] Code-security testing lane (SAST/dependency ingest) feeding the same dual-graph + evidence model.
 
 ## Known issues and gotchas
+
+- **Migration 0020 (RSI) vs other branches' 0015–0019:** the runner refuses a pending migration older
+  than the newest applied one, so merge 0015–0019 (E2, E5, E1, c-ba9f64, c-5b5421) before this branch
+  reaches a database, or renumber 0020 forward at merge. `db/migrate_test.go` lists 0020 explicitly.
+- The RSI gate trusts the judge verdicts inside uploaded arm records (it checks shape, binding, task
+  freshness and uniqueness, not the grading); the owner reads `report.md` before adopting. The generic
+  prompt editor stays an owner path outside the gate and is what the bench harness uses to switch arms.
 
 - go-mitmproxy v1.9.2 has no upstream dial hook. Every capture-proxy upstream dial goes through its
   upstream-proxy URL, which is our loopback gate (random credential, `traffic/upstream_gate.go`). Do not
@@ -295,6 +320,15 @@ Card ids in brackets:
   `ARTEX_SECRET_KEY`) loses stored secrets.
 
 ## Decisions
+
+- **2026-11-24** — E3 (c-d25ff9): "one explicit owner action" is an owner-password step-up on adopt,
+  because on single-user ARTEX a bearer token minted from `jwt.key` (what the loop holds) is the same
+  identity as the owner. The server recomputes every verdict from raw records rather than accepting the
+  harness's comparison (no self-approval). Evidence is bound to the live prompt at adoption (baseline
+  sha) so a stale comparison cannot be adopted. Rollback and reject stay open with the flag off; only
+  propose/evidence/adopt need it. Skills and tool descriptions stay git-PR-only. Lesson graduation uses
+  the same gate via a scope-free benchmark pin (`ARTEX_RSI_LESSONS=bench`), and the new `adopted` mode
+  injects only graduated lessons; `inject` is unchanged. Budget 4·0.6^round (floor 1), rounds forward-only.
 
 - **2026-11-24** — c-75c593: the bench subject instance builds from the production `Dockerfile` instead
   of a separate `Dockerfile.bench`, so the benchmark measures the shipped image and there is one image
