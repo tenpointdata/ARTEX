@@ -59,6 +59,14 @@ See `docs/ARCHITECTURE.md` for the code-level map. Summary:
 
 ## Current state
 
+**2026-11-24 — goals decomposer stops on terminal tasks and caps its output (`c-7361b4`, in review).**
+The `goals` runtime refuses LLM calls once its task is done/failed/timeout
+(`server/task_llm_terminal.go`, gate list `terminalGatedAgents`), and `createGoals` cancels an
+in-flight decomposition when the task turns terminal (no fallback goal is written then). The decomposer
+caps replies at `agent.GoalsMaxTokens` = 8192 (a tighter profile cap wins) and a run at 10 minutes.
+Tests: `server/task_llm_terminal_test.go`, `agent/goals_cap_test.go`; `scripts/verify.sh` passes. Not
+re-run live against Ollama. Other roles still get 32768 when the profile says 0: card `c-83ae7b`.
+
 **2026-11-24 — SSE 401 after console login (`c-13e86c`, fixed; pre-E5).** Streams are same-origin only
 (`web/src/lib/sse.ts`), dev gzip off, `openSSE` writes `: open`. Test `server/activity_stream_auth_pg_test.go`;
 browser-checked on the E5 stack.
@@ -346,6 +354,9 @@ Card ids in brackets:
 
 ## Known issues and gotchas
 
+- **Profile `max_tokens` = 0 is not "no cap".** norma's harness sends 32768 then, for every format
+  (ollama too), and resumes a `max_tokens` truncation up to 3 times. Only the goals decomposer has its
+  own cap (8192); planner/worker/mainagent/compactor follow the profile (`c-83ae7b`).
 - **`next dev` writes `web/AGENTS.md`** (Next 16 agent rules) on start. Delete it before committing; it
   is not this repo's file.
 - **SSE in dev goes through the Next rewrite** (`/api/*` → `AUTOPENTEST_API`, default :8787). Keep
