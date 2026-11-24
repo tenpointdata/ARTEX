@@ -111,6 +111,12 @@ Operator-facing changes:
   Verified: Linux-root tests (`server/execuid_root_linux_test.go`, where task A gets EACCES on
   `tasks/B/i1` and `.artex-home`), the full server and agent suites as root in `golang:1.26.11-bookworm`,
   and egress rules with iptables in a NET_ADMIN container.
+  Spill dirs follow the key too (card `c-dd160a`, `server/execuid_spill_unix.go`). A live key's
+  `<data>/spill/{tasks,sessions}/<id>` is `root:<uid>` 0750 with files `root:<uid>` 0640, so the
+  shared exec gid no longer reads another task's spills. It is regrouped on acquire, closed to
+  `root:root` 0700 at the start of release, and closed at start-up when the key holds no uid. Verified
+  by `TestExecUIDRangeSpillIsolationAsRoot`, where task A's shell and file tool get EACCES on B's spill,
+  plus the full server suite as root in Docker.
   Root tests in Docker: build the test binary into a 0755 dir (`go test -c -o /t/server.test`). The
   default 0700 go-build dir makes the isolation self-tests fail on `main` too.
 
@@ -130,8 +136,7 @@ the newer main (`-exec-uid-range`, #18).
 
 **Agents' lane**
 1. *(unclaimed)* — **SEC: per-task uid follow-ups** (S each): `c-12df03` (single-uid start-up fails on a
-   socket; MCP uid not egress-filtered), `c-dd160a` (spill dirs readable across tasks), `c-e70e5c`
-   (release ended tasks at start-up; per-key lock). The "Done when" is on each card.
+   socket; MCP uid not egress-filtered), `c-e70e5c` (release ended tasks at start-up; per-key lock). The "Done when" is on each card.
 2. *(unclaimed)* — **SEC: gorilla/websocket bump, GO-2026-6278** (XS), card `c-c10f2c`; needs network.
    Done = govulncheck clean.
 3. *(unclaimed)* — **SEC: upstream-gate residuals** (M), card `c-5a6f96`: task-scoped rules on proxy
@@ -198,7 +203,6 @@ Card ids in brackets:
 - **SEC** [`c-c10f2c`] gorilla/websocket bump (GO-2026-6278).
 - **SEC** [`c-bd9a6d`] Residual gaps from the High/Medium fixes.
 - **SEC** [`c-12df03`] Single-uid start-up fails on a socket in a run dir; MCP uid is not egress-filtered.
-- **SEC** [`c-dd160a`] Per-task uids: spill dirs readable across tasks.
 - **SEC** [`c-e70e5c`] Per-task uids: release ended tasks at start-up; per-key lock.
 - **SEC** [`c-cc25b6`] Low-severity audit items.
 - **E10** [`c-72dd9d`] Code-security testing lane (SAST/dependency ingest) feeding the same dual-graph + evidence model.
@@ -255,7 +259,8 @@ Card ids in brackets:
 - **2026-11-24** — Per-task uids derive a process's identity from the **owner of its working run
   directory**, not from a channel between the server and the shim. Norma always starts bash in the
   server-chosen `tc.WorkingDir`, and only root sets that owner. A task's gid is the same number as its
-  uid, and the exec gid stays a supplementary group (script and spill dirs). As a result MCP servers no
+  uid, and the exec gid stays a supplementary group (script dirs; spill dirs are grouped to the task
+  uid instead, `c-dd160a`). As a result MCP servers no
   longer write into run dirs when the range is on. Release kills the uid's processes and gives its files
   back to root, so a uid returned to the pool owns nothing. The mode stays opt-in until it has run in a
   real deployment.
