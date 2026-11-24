@@ -238,7 +238,7 @@ func fileToolIsolationFailures(secrets []string) []string {
 			continue
 		}
 		var openErr error
-		if err := agent.RunAsFileToolIdentity(func() {
+		if err := agent.RunAsFileToolIdentity("", func() {
 			f, err := os.Open(path)
 			if err == nil {
 				f.Close()

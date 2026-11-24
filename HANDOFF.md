@@ -101,10 +101,25 @@ Operator-facing changes:
   summaries are framed as untrusted data.
 - Per-run executor HOME; MCP servers run as uid 10002 (`ARTEX_EXEC_MCP_UID`). The workspace file
   manager uses `os.Root`.
+- **2026-11-24 — per-task executor uids (card `c-13f293`, opt-in).** `-exec-uid-range LO-HI` (e.g.
+  `20000-29999`, passed to `start.sh`/the container command) gives each task and chat session its own
+  uid while it is live. Its run dirs are `<uid>:<uid>` 2770. Processes take the identity of the run dir
+  they start in: the bash shim, custom tools and file tools all read it from the dir's owner. The uid is
+  released (dirs closed, processes reaped, files back to root) on a terminal status, a task delete or a
+  conversation delete. `egress.sh` filters the range. Code: `server/execuid.go`,
+  `server/execuid_unix.go`. Single-uid mode is still the default.
+  Verified: Linux-root tests (`server/execuid_root_linux_test.go`, where task A gets EACCES on
+  `tasks/B/i1` and `.artex-home`), the full server and agent suites as root in `golang:1.26.11-bookworm`,
+  and egress rules with iptables in a NET_ADMIN container.
+  Root tests in Docker: build the test binary into a 0755 dir (`go test -c -o /t/server.test`). The
+  default 0700 go-build dir makes the isolation self-tests fail on `main` too.
 
 ## Triage (next handful)
 
 **Agents' lane**
+0. *(unclaimed)* — **SEC: per-task uid follow-ups** (S each): `c-12df03` (single-uid start-up fails on a
+   socket; MCP uid not egress-filtered), `c-dd160a` (spill dirs readable across tasks), `c-e70e5c`
+   (release ended tasks at start-up; per-key lock). The "Done when" is on each card.
 1. *(unclaimed)* — **SEC: gorilla/websocket bump, GO-2026-6278** (XS), card `c-c10f2c`; needs network.
    Done = govulncheck clean.
 2. *(unclaimed)* — **SEC: upstream-gate residuals** (M), card `c-5a6f96`: task-scoped rules on proxy
@@ -167,6 +182,9 @@ Card ids in brackets:
 - **SEC** [`c-8d54d5`] Capture proxy: insecure upstream only for in-scope targets.
 - **SEC** [`c-c10f2c`] gorilla/websocket bump (GO-2026-6278).
 - **SEC** [`c-bd9a6d`] Residual gaps from the High/Medium fixes.
+- **SEC** [`c-12df03`] Single-uid start-up fails on a socket in a run dir; MCP uid is not egress-filtered.
+- **SEC** [`c-dd160a`] Per-task uids: spill dirs readable across tasks.
+- **SEC** [`c-e70e5c`] Per-task uids: release ended tasks at start-up; per-key lock.
 - **SEC** [`c-cc25b6`] Low-severity audit items.
 - **E10** [`c-72dd9d`] Code-security testing lane (SAST/dependency ingest) feeding the same dual-graph + evidence model.
 
@@ -218,6 +236,14 @@ Card ids in brackets:
   self-signed targets set `ARTEX_CAPTURE_INSECURE_UPSTREAM=1` for that run only, until per-target trust
   (card `c-8d54d5`) exists. Reason: the goproxy setting is global, so turning it on also leaves package
   downloads through the proxy open to tampering.
+
+- **2026-11-24** — Per-task uids derive a process's identity from the **owner of its working run
+  directory**, not from a channel between the server and the shim. Norma always starts bash in the
+  server-chosen `tc.WorkingDir`, and only root sets that owner. A task's gid is the same number as its
+  uid, and the exec gid stays a supplementary group (script and spill dirs). As a result MCP servers no
+  longer write into run dirs when the range is on. Release kills the uid's processes and gives its files
+  back to root, so a uid returned to the pool owns nothing. The mode stays opt-in until it has run in a
+  real deployment.
 
 ## Deltas
 

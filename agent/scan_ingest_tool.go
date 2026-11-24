@@ -121,7 +121,7 @@ func openScanOutputInBase(base, dir, path string) (f *os.File, err error) {
 	}
 	// The open runs as the executor when the privilege drop is active
 	// (filetools_identity.go); the descriptor is then read by the server.
-	idErr := RunAsFileToolIdentity(func() {
+	idErr := RunAsFileToolIdentity(dir, func() {
 		w, oerr := openWorkRoot(base, dir)
 		if oerr != nil {
 			err = oerr

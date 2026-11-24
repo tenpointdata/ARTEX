@@ -107,6 +107,9 @@ func run() int {
 		// A negative uid turns the drop off; 0 (root) is refused.
 		execUID = flag.Int("exec-uid", server.DefaultExecUID, "uid that agent processes run as (Bash, shell, custom tools, MCP stdio); -1 turns the drop off")
 		execGID = flag.Int("exec-gid", server.DefaultExecGID, "gid that agent processes run as")
+		// One uid per task and chat session from this range (LO-HI); empty keeps the
+		// single -exec-uid for every agent process.
+		execUIDRange = flag.String("exec-uid-range", "", "uid range LO-HI to give each task and chat session a uid of its own (e.g. 20000-29999); empty: every agent process runs as -exec-uid")
 		// Development escape of the isolation self-test, off by default.
 		devNoIsolation = flag.Bool(server.DevNoIsolationFlag, false, "DEVELOPMENT ONLY: on Linux as root, start even when the agent isolation self-test fails; agent processes and file tools may then read the server's keys, config and database credentials")
 	)
@@ -188,6 +191,17 @@ func run() int {
 	// Agent processes run as the executor identity, never as the server's root (see
 	// server/execpriv.go). An explicit option that cannot be applied stops the start.
 	priv, err := server.ResolveExecPrivilege(*execUID, *execGID, flagWasSet("exec-uid") || flagWasSet("exec-gid"))
+	if err != nil {
+		log.Printf("[config] %v", err)
+		return 1
+	}
+	uidRange, err := server.ParseExecUIDRange(*execUIDRange)
+	if err == nil && uidRange.Enabled() && !priv.Enabled {
+		err = fmt.Errorf("-exec-uid-range %s needs the executor privilege drop, which is off", uidRange)
+	}
+	if err == nil {
+		priv, err = priv.WithUIDRange(uidRange)
+	}
 	if err != nil {
 		log.Printf("[config] %v", err)
 		return 1

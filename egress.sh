@@ -1,8 +1,9 @@
 #!/bin/sh
 # ARTEX container egress filter, sourced by start.sh before artex starts.
 #
-# Agent processes run as the executor uid (-exec-uid, default 10001). This installs
-# OUTPUT rules that match that uid only (-m owner --uid-owner); the server (root)
+# Agent processes run as the executor uid (-exec-uid, default 10001) and, with
+# -exec-uid-range LO-HI, as the per-task uids of that range. This installs OUTPUT
+# rules that match those uids only (-m owner --uid-owner); the server (root)
 # and the Postgres/LLM connections it makes are untouched. Default-deny for the
 # executor:
 #   - cloud metadata: 169.254.0.0/16 (also covers link-local), 100.100.100.200,
@@ -25,8 +26,10 @@ egress_log() { echo "[artex] egress: $*" >&2; }
 egress_build() {
 	ipt="$1"; fam="$2"
 	"$ipt" -w -N ARTEX_EGRESS 2>/dev/null || "$ipt" -w -F ARTEX_EGRESS || return 1
-	"$ipt" -w -C OUTPUT -m owner --uid-owner "$uid" -j ARTEX_EGRESS 2>/dev/null \
-		|| "$ipt" -w -I OUTPUT 1 -m owner --uid-owner "$uid" -j ARTEX_EGRESS || return 1
+	for owner in "$uid" $uidrange; do
+		"$ipt" -w -C OUTPUT -m owner --uid-owner "$owner" -j ARTEX_EGRESS 2>/dev/null \
+			|| "$ipt" -w -I OUTPUT 1 -m owner --uid-owner "$owner" -j ARTEX_EGRESS || return 1
+	done
 	for c in $allow; do
 		case "$c" in *:*) [ "$fam" = 6 ] || continue ;; *) [ "$fam" = 4 ] || continue ;; esac
 		"$ipt" -w -A ARTEX_EGRESS -d "$c" -j ACCEPT || return 1
@@ -54,15 +57,18 @@ egress_apply() {
 	fi
 
 	uid=10001
+	uidrange=""
 	port=8787
 	prev=""
 	for a in "$@"; do
 		case "$prev" in
 			-exec-uid|--exec-uid) uid="$a" ;;
+			-exec-uid-range|--exec-uid-range) uidrange="$a" ;;
 			-addr|--addr) port="${a##*:}" ;;
 		esac
 		case "$a" in
 			-exec-uid=*|--exec-uid=*) uid="${a#*=}" ;;
+			-exec-uid-range=*|--exec-uid-range=*) uidrange="${a#*=}" ;;
 			-addr=*|--addr=*) port="${a##*:}" ;;
 		esac
 		prev="$a"
@@ -72,6 +78,17 @@ egress_apply() {
 		''|*[!0-9]*) egress_log "WARNING: unreadable -exec-uid '$uid'; egress filter NOT installed"; return 0 ;;
 	esac
 	case "$port" in ''|*[!0-9]*) port=8787 ;; esac
+	# artex refuses a malformed range, so an unreadable one never runs unfiltered.
+	# Canonical decimal, as artex reads it: iptables would read a leading zero as
+	# octal, and artex trims spaces.
+	uidrange="$(echo "$uidrange" | tr -d ' ')"
+	if [ -n "$uidrange" ]; then
+		lo="${uidrange%%-*}"; hi="${uidrange#*-}"
+		case "$lo:$hi" in
+			*[!0-9:]*|:*|*:) egress_log "WARNING: unreadable -exec-uid-range '$uidrange'; egress filter NOT installed (artex refuses to start with it)"; return 1 ;;
+		esac
+		uidrange="$(expr "$lo" + 0)-$(expr "$hi" + 0)"
+	fi
 
 	if [ "$(id -u)" != "0" ]; then
 		egress_log "WARNING: not running as root; egress filter NOT installed (agent can reach metadata, host gateway, API port)"
@@ -89,13 +106,13 @@ egress_apply() {
 	extra="$(echo "${ARTEX_EGRESS_DENY:-}" | tr ',' ' ')"
 
 	if egress_build iptables 4; then
-		egress_log "installed for uid $uid (ipv4): deny metadata, gateway ${gw4:-none}, host.docker.internal ${hd4:-none}, local port $port${extra:+, extra: $extra}${allow:+; allow: $allow}"
+		egress_log "installed for uid $uid${uidrange:+ and uids $uidrange} (ipv4): deny metadata, gateway ${gw4:-none}, host.docker.internal ${hd4:-none}, local port $port${extra:+, extra: $extra}${allow:+; allow: $allow}"
 	else
 		egress_log "WARNING: could not install iptables rules (missing CAP_NET_ADMIN? add cap_add: NET_ADMIN); agent processes are NOT egress filtered"
 		return 0
 	fi
 	if command -v ip6tables >/dev/null 2>&1 && egress_build ip6tables 6; then
-		egress_log "installed for uid $uid (ipv6)"
+		egress_log "installed for uid $uid${uidrange:+ and uids $uidrange} (ipv6)"
 	else
 		egress_log "WARNING: ipv6 rules not installed (no ip6tables or IPv6 unavailable); fd00:ec2::254 stays reachable if the container has IPv6"
 	fi

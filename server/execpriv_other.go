@@ -30,6 +30,10 @@ func shareRestoredTaskDir(p ExecPrivilege, taskDir string) error { return nil }
 
 func shareRestoredSpillDir(p ExecPrivilege, dir string) error { return nil }
 
+func releaseTaskExecIdentity(taskID int64) {}
+
+func releaseSessionExecIdentity(sessionID string) {}
+
 // PrepareExecPrivilege fails when a drop is enabled; a disabled one does nothing.
 func PrepareExecPrivilege(p *ExecPrivilege, dataDir, keyDir, configPath string) error {
 	if p.Enabled {
