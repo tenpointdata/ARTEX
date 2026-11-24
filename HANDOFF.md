@@ -59,14 +59,9 @@ See `docs/ARCHITECTURE.md` for the code-level map. Summary:
 
 ## Current state
 
-**2026-11-24 — bbot as the executor (`c-1229ff`, fixed).** bbot finds tools, bbot.yml and the core-deps marker only
-under `$HOME`; agent runs get a fresh per-run home, so tool-backed modules found nothing and every scan ran
-`ansible-galaxy` (network). The image now snapshots root's bbot home into `/opt/bbot/home-seed` and
-`/usr/local/bin/bbot` is a wrapper that copies it into `$HOME` (no overwrite) before the real bbot
-(`docker/bbot-home.sh`; build step after `chmod 0711 /root`, outside c-2af578's hunk). The build's `check` mode
-scans a loopback server as uid 10001 from an empty home and fails without WEBSCREENSHOT/PROTOCOL events or on
-any ansible/Galaxy line. Verified as a layer on `artex:verify` (arm64), `--network=none`, plus both negative
-cases; the full image was not rebuilt. Works with c-2af578's `/opt/bbot/tools` layout (links resolve).
+**2026-11-24 — bbot as the executor (`c-1229ff`, fixed).** `/usr/local/bin/bbot` now seeds `$HOME` from a
+read-only snapshot of root's bbot home (`docker/bbot-home.sh`; see CHANGELOG), so agent scans find the tools and
+never run ansible-galaxy. Verified as a layer on `artex:verify` (arm64, no network); full image not rebuilt.
 
 **2026-11-24 — SSE 401 after console login (`c-13e86c`, fixed; pre-E5).** Streams are same-origin only
 (`web/src/lib/sse.ts`), dev gzip off, `openSSE` writes `: open`. Test `server/activity_stream_auth_pg_test.go`;
@@ -409,10 +404,8 @@ Card ids in brackets:
 
 ## Decisions
 
-- **2026-11-24** — c-1229ff: bbot's home is seeded by a PATH wrapper running as the caller, not by the
-  server's `execHomeFor`. Root writing into an executor-owned home invites symlink races; the wrapper copies
-  into the caller's own home with the caller's rights, and bbot 3.0.2 has no env override for its home.
-  Tools are per-entry links in a caller-owned dir because bbot aborts when `~/.bbot/tools` is not writable.
+- **2026-11-24** — c-1229ff: bbot's home is seeded by a PATH wrapper running as the caller, not by root in
+  `execHomeFor` (root writing into an executor-owned home invites symlink races).
 
 - **2026-11-24 c-2d91eb (E2 follow-ups):**
   - This branch merges the unmerged E2 UI branch (which carries the backend) instead of waiting, as c-597eb6
