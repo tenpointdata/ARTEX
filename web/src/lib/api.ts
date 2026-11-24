@@ -119,6 +119,7 @@ import type {
   UsageStats,
   WorkspaceFile,
   WorkspaceListing,
+  TaskCoverage,
 } from "@/lib/types";
 
 // Combined file data per attachment upload; matches maxChatUpload in server/chatupload.go.
@@ -429,17 +430,7 @@ export const api = {
   stats: (task?: string) => get<Stats>(`/stats${tq(task)}`),
   // Asset test coverage (rough estimate, for reference): share of in-scope assets touched by facts + total/tested per type.
   taskCoverage: (id: string) =>
-    get<{
-      enabled: boolean; // whether the asset coverage feature is on; when false the other fields are zero values
-      scope_rows: number;
-      denominator: number;
-      tested: number;
-      pct: number | null;
-      by_type: { type: string; total: number; tested: number }[];
-      // coverage ledger (absent when the feature is off): gaps = open items; an unexamined class is never clean
-      gaps?: { kind: string; surface?: string; risk_area: string }[];
-      completeness?: { complete: boolean; state: string; caveat: string };
-    }>(`/tasks/${id}/coverage`),
+    get<TaskCoverage>(`/tasks/${id}/coverage`),
   // Asset coverage graph: every in-scope asset + root-domain/company nodes used for connection, with tested/in_scope.
   taskCoverageGraph: (id: string) => get<CoverageGraphData>(`/tasks/${id}/coverage-graph`),
   // Global llm_usage aggregate (the dashboard's new token view): totals per profile + daily buckets.

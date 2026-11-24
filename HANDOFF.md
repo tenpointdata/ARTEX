@@ -79,6 +79,17 @@ adoption. Remaining findings: `c-0d277f`. Verified: `go test ./rsi`, the RSI DB 
 against Postgres 16, 65 benchmark Python tests, `scripts/verify.sh`. Not verified: any live suite run through the gate (`c-772190`); no UI
 (`c-936308`).
 
+**2026-11-24 (c-c0bb07, E4)** — Methodology-driven coverage: OWASP WSTG 4.2 (97 tests) and the OWASP
+API Security Top 10 2023 are typed checklists in `methodology/` (data in `methodology/data/*.json`,
+embedded and validated). A task's applicable checklists come from its goal and description (no
+column). `db/coverage_methodology.go` scores them from the coverage ledger, findings (vulnclass)
+and intents citing an item (`payload.methodology_item`). The planner gets a `[Methodology coverage]`
+block each round, and `add_intent` takes `methodology_item`, which is validated and stored as the
+canonical item id. `GET /api/tasks/{id}/coverage` returns `methodologies`, and the task overview's
+coverage card shows a filterable table of the items. Verified by the methodology, agent and
+db unit tests, a Postgres integration test (`TestMethodologyCoverage`), `tsc` and `scripts/verify.sh`.
+The UI was not checked in a browser.
+
 **2026-11-24 (c-75c593)** — The benchmark subject instance (`docker-compose.bench.yml`) now builds from a
 clean clone: production `Dockerfile`, a sibling Postgres, named volumes, committed `bench/.env.example`
 with `ARTEX_RSI_LESSONS=off`. Verified on Docker Desktop arm64: `up --build` brings both containers up,
@@ -207,9 +218,6 @@ body, through the versioned prompt API, and the starting bodies are restored aft
    CVSS/EPSS-scored, remediation-bearing, standards-mapped deliverables (OWASP ASVS/WSTG, MITRE
    ATT&CK). Done = a report export with per-finding CVSS vector + remediation + framework tags,
    covered by tests. Card `c-8f9cca`.
-7. *(unclaimed)* — **E4 Methodology-driven coverage** (M), card `c-c0bb07`. Extend the coverage ledger to score
-   coverage against a codified methodology checklist, not only asset touch. Done = planner can
-   read a methodology and the coverage graph shows checklist completion.
 
 - *(unclaimed)* — **RSI gate hardening** (M), card `c-0d277f`: server-side per-task arm ledger, suite
   pre-registration, adopted-lesson retire sync. Done = Postgres tests for each.
@@ -261,7 +269,9 @@ Card ids in brackets:
 - **E1** [`c-8f9cca`] Client-grade reporting & deliverables (scoring, remediation, framework mappings, branded export).
 - **E2** [`c-6def05`] Finding/ticketing integrations out (Jira, GitHub issues, DefectDojo) and more ingest in (Nuclei, Nmap, ZAP/Burp, Semgrep).
 - **E3** [`c-d25ff9`] — gate built (in review). Follow-ups: hardening `c-0d277f`, UI `c-936308`, first live run `c-772190`, proposer/critic `c-c89f5b`.
-- **E4** [`c-c0bb07`] Methodology-driven coverage (OWASP WSTG / API Top 10 as structured checklists).
+- **E3** [`c-d25ff9`] Loop-B lesson library graduation + Loop-C benchmark gate per the `RSI.md` contract (owner-approval, immutable surfaces).
+- **E4** [`c-c0bb07`] Methodology-driven coverage: landed 2026-11-24 (see Current state). Follow-ups:
+  [`c-ca2bd0`] an operator-chosen methodology per task; [`c-ed937d`] checklist completion in the report export (after E1).
 - **E5** [`c-669406`] Engagement lifecycle & governance: RBAC, per-engagement authorization artifact, scope expiry, tamper-evident (hash-chained) audit log.
 - **E6** [`c-cb0093`] Cost/observability dashboard + OpenTelemetry export, building on existing context telemetry.
 - **E7** [`c-d60149`] Distributed/remote workers (queue-backed intents) for larger engagements; Helm chart.
@@ -339,6 +349,14 @@ Card ids in brackets:
   owner-approved prior state; open question in `c-0d277f`). Failing uploads also consume their tasks in
   the ledger, so a run never backs two uploads.
 
+- **2026-11-24** — c-c0bb07 (E4): methodologies are leaf-package data (`methodology/`), not DB rows,
+  so another project can reuse them and a new checklist is one JSON file. Applicability is derived from
+  the task goal and description (`applies_when` words), so it needs no migration. An explicit per-task
+  choice is a follow-up. An item closes only by a closing observation: a ledger entry whose risk_area is
+  the item id or an alias (a no_issue_found needs evidence, a ruled_out or not_applicable needs a
+  reason), or a non-false-positive finding of that class. A citing intent only makes the item
+  in_progress. Within one methodology an alias names one item (Validate), so one "xss" entry never
+  ticks three items. The scores are not added to the report: c-8f9cca (E1) owns `report/` right now.
 - **2026-11-24** — c-75c593: the bench subject instance builds from the production `Dockerfile` instead
   of a separate `Dockerfile.bench`, so the benchmark measures the shipped image and there is one image
   definition. Postgres is a sibling service (not baked in), data/keys are named volumes (Docker Desktop
@@ -442,6 +460,7 @@ Card ids in brackets:
 - **2026-11-24 11:03 MST** · claude-code · `h-721d29` — c-a6891b (card, now in review): built the full Docker image (bbot, chromium, Playwright) from 1abe24f with the committed Dockerfile on Docker Desktop arm64 in 34 min. **Next:** Re-run both probe scripts after c-a0af33 (logout revocation) merges: the old-cookie replay should become 401.
 - **2026-11-24 09:41 MST** · claude-code · `h-691201` — c-ba9f64 done (board card): migration 0018 recreates the intercept_pending, artex_users and engagement_authorizations audit triggers as DEFERRABLE INITIALLY DEFERRED constraint triggers, so audit_chain_head is locked only at COMMIT. **Next:** Merge order: E5 (0016), then this branch (0018), then E1 (0017 on ej/20261124-083744-02fa3c).
 - **2026-11-24 09:33 MST** · claude-code · `h-e8d3e5` — Card c-bd9a6d: every residual gap is now either fixed or recorded as accepted in SECURITY.md (commit 5be8c4b).
+- **2026-11-24 08:48 MST** · claude-code · `h-2396f3` — E8 (c-5487e8, now in review): added the planner/worker evaluation suite in scripts/benchmark. **Next:** c-f1518c (human): first live held-out run on a bench instance with ARTEX_RSI_LESSONS=off; check that DVGA is reachable through the port mapping.
 <!-- /composite:deltas -->
 
 _(written by `merge_handoff`)_

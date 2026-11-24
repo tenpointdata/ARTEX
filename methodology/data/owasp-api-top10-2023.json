@@ -1,0 +1,19 @@
+{
+  "id": "owasp-api-top10",
+  "name": "OWASP API Security Top 10",
+  "version": "2023",
+  "source": "https://owasp.org/API-Security/editions/2023/en/0x11-t10/",
+  "applies_when": ["api", "apis", "graphql", "rest", "restful", "openapi", "swagger", "grpc", "soap", "jwt", "endpoint", "endpoints"],
+  "items": [
+    {"id": "API1:2023", "category": "API Security Top 10", "title": "Broken object level authorization", "risk_areas": ["bola", "idor"]},
+    {"id": "API2:2023", "category": "API Security Top 10", "title": "Broken authentication", "risk_areas": ["broken_authentication", "auth_bypass", "jwt"]},
+    {"id": "API3:2023", "category": "API Security Top 10", "title": "Broken object property level authorization", "risk_areas": ["bopla", "mass_assignment", "excessive_data_exposure"]},
+    {"id": "API4:2023", "category": "API Security Top 10", "title": "Unrestricted resource consumption", "risk_areas": ["resource_consumption", "rate_limit"]},
+    {"id": "API5:2023", "category": "API Security Top 10", "title": "Broken function level authorization", "risk_areas": ["bfla", "privilege_escalation"]},
+    {"id": "API6:2023", "category": "API Security Top 10", "title": "Unrestricted access to sensitive business flows", "risk_areas": ["business_flow"]},
+    {"id": "API7:2023", "category": "API Security Top 10", "title": "Server side request forgery", "risk_areas": ["ssrf"]},
+    {"id": "API8:2023", "category": "API Security Top 10", "title": "Security misconfiguration", "risk_areas": ["misconfiguration", "cors"]},
+    {"id": "API9:2023", "category": "API Security Top 10", "title": "Improper inventory management", "risk_areas": ["api_inventory", "inventory"]},
+    {"id": "API10:2023", "category": "API Security Top 10", "title": "Unsafe consumption of APIs", "risk_areas": ["unsafe_consumption"]}
+  ]
+}

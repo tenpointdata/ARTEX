@@ -2724,5 +2724,13 @@
   "Search company…": "Şirket ara…",
   "Failed to load companies": "Şirketler yüklenemedi",
   "No company found": "Şirket bulunamadı",
-  "Manage companies": "Şirketleri yönet"
+  "Manage companies": "Şirketleri yönet",
+  "{covered}/{total} covered": "{covered}/{total} kapsandı",
+  "{count} in progress": "{count} devam ediyor",
+  "{count} open": "{count} açık",
+  "Filter by status": "Duruma göre filtrele",
+  "Covered": "Kapsandı",
+  "Item": "Öğe",
+  "Intents": "Niyetler",
+  "No items": "Öğe yok"
 }

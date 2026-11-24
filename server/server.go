@@ -2155,6 +2155,11 @@ func (s *Server) taskCoverage(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 500, "coverage ledger query failed")
 		return
 	}
+	if cov.Methodologies, err = as.MethodologyCoverage(taskID); err != nil {
+		log.Printf("[coverage] methodology query failed for task %d: %v", taskID, err)
+		writeErr(w, 500, "methodology coverage query failed")
+		return
+	}
 	writeJSON(w, 200, cov)
 }
 

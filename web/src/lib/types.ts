@@ -1872,3 +1872,44 @@ export interface TamperDryRunResult extends TamperDryRunIO {
   changed: boolean;
   lines: TamperTraceLine[] | null;
 }
+
+export type MethodologyItemStatusValue = "open" | "in_progress" | "covered";
+
+export interface MethodologyItemStatus {
+  id: string;
+  category: string;
+  title: string;
+  status: MethodologyItemStatusValue;
+  outcomes: string[];
+  intents: number[];
+}
+
+export interface MethodologyScore {
+  id: string;
+  name: string;
+  version: string;
+  source: string;
+  total: number;
+  covered: number;
+  in_progress: number;
+  open: number;
+  /** 0..1 */
+  pct: number;
+  items: MethodologyItemStatus[];
+}
+
+/** Response of GET /api/tasks/{id}/coverage. */
+export interface TaskCoverage {
+  /** Whether the asset coverage feature is on; when false the other fields are zero values. */
+  enabled: boolean;
+  scope_rows: number;
+  denominator: number;
+  tested: number;
+  pct: number | null;
+  by_type: { type: string; total: number; tested: number }[];
+  /** Coverage ledger (absent when the feature is off): gaps = open items; an unexamined class is never clean. */
+  gaps?: { kind: string; surface?: string; risk_area: string }[];
+  completeness?: { complete: boolean; state: string; caveat: string };
+  /** Checklist completion per testing methodology; absent/empty when none applies. */
+  methodologies?: MethodologyScore[];
+}

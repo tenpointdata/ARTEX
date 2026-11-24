@@ -135,7 +135,7 @@ func TestGraphOverviewExpandsAssociatedCompanyScope(t *testing.T) {
 	intentID, err := tools.addOneIntent(intentItem{
 		Summary:  "test associated company asset",
 		AssetIDs: []json.RawMessage{assetJSON},
-	})
+	}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -173,7 +173,7 @@ func TestGraphOverviewExpandsAssociatedCompanyScope(t *testing.T) {
 	disabledIntentID, err := disabledTools.addOneIntent(intentItem{
 		Summary:  "test associated company asset without coverage metrics",
 		AssetIDs: []json.RawMessage{assetJSON},
-	})
+	}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -270,7 +270,7 @@ func TestBlackboardToolsReadDirectSources(t *testing.T) {
 	parentID, _ := json.Marshal(sourceFact)
 	derivedID, err := tools.addOneIntent(intentItem{
 		Summary: "derive locally from shared fact", ParentIDs: []json.RawMessage{parentID},
-	})
+	}, nil)
 	if err != nil {
 		t.Fatalf("derive from inherited fact: %v", err)
 	}
