@@ -1,0 +1,75 @@
+{{- if .Values.postgresql.bundled.enabled }}
+{{- $b := .Values.postgresql.bundled }}
+{{- $name := printf "%s-postgresql" (include "artex.fullname" .) }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "artex.labels" . | nindent 4 }}
+spec:
+  clusterIP: None
+  ports:
+    - {name: postgres, port: 5432, targetPort: postgres}
+  selector:
+    {{- include "artex.selector" (dict "ctx" . "component" "postgresql") | nindent 4 }}
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "artex.labels" . | nindent 4 }}
+spec:
+  serviceName: {{ $name }}
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "artex.selector" (dict "ctx" . "component" "postgresql") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "artex.selector" (dict "ctx" . "component" "postgresql") | nindent 8 }}
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        fsGroup: 70
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        - name: postgresql
+          image: {{ $b.image.repository }}:{{ $b.image.tag }}
+          imagePullPolicy: {{ $b.image.pullPolicy }}
+          env:
+            - {name: POSTGRES_USER, value: {{ $b.user | quote }}}
+            - {name: POSTGRES_DB, value: {{ $b.database | quote }}}
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "artex.pgSecretName" . }}
+                  key: {{ include "artex.pgSecretKey" . }}
+            # Password (SCRAM) for every TCP connection, as in docker-compose.yml.
+            - {name: POSTGRES_HOST_AUTH_METHOD, value: scram-sha-256}
+            - {name: PGDATA, value: /var/lib/postgresql/data/pgdata}
+          ports:
+            - {name: postgres, containerPort: 5432}
+          readinessProbe:
+            exec:
+              command: ["sh", "-c", "pg_isready -U \"$POSTGRES_USER\" -d \"$POSTGRES_DB\""]
+            periodSeconds: 5
+          resources: {{ toYaml $b.resources | nindent 12 }}
+          securityContext:
+            allowPrivilegeEscalation: false
+          volumeMounts:
+            - {name: pgdata, mountPath: /var/lib/postgresql/data}
+  volumeClaimTemplates:
+    - metadata:
+        name: pgdata
+      spec:
+        accessModes: [ReadWriteOnce]
+        {{- with $b.persistence.storageClass }}
+        storageClassName: {{ . | quote }}
+        {{- end }}
+        resources:
+          requests:
+            storage: {{ $b.persistence.size }}
+{{- end }}

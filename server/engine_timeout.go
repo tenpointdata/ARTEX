@@ -118,6 +118,9 @@ func (e *Engine) resetTimeoutRevival(taskID string) {
 func (e *Engine) resetSettledRun(taskID string) {
 	e.settling.Delete(taskID)
 	e.budgets.Delete(taskID)
+	if e.distributed() {
+		e.openDispatch(taskID)
+	}
 	if e.m != nil && e.m.pg != nil {
 		if n, err := strconv.ParseInt(taskID, 10, 64); err == nil {
 			if err := e.m.pg.ClearRunEndReason(n); err != nil {
@@ -227,6 +230,7 @@ func (e *Engine) settleTask(ctx context.Context, t *Task, budget bool) {
 	if !e.markSettling(t.ID) {
 		return
 	}
+	e.closeDispatch(t.ID, db.DispatchSettling) // worker nodes stop claiming too
 	if budget {
 		log.Printf("[budget] task %s run budget exhausted, entering the settle sequence", t.ID)
 	} else {
@@ -237,10 +241,11 @@ func (e *Engine) settleTask(ctx context.Context, t *Task, budget bool) {
 	// via the clamped MaxDuration); if not drained within the grace period, hard-cancel the
 	// task's exec ctx (the settling-aware branches classify it correctly).
 	hardStop := time.Now().Add(settleDrainGrace)
-	for e.inflightCount(t.ID) > 0 {
+	for e.inflightCount(t.ID) > 0 || e.remoteRunning(t) > 0 {
 		if time.Now().After(hardStop) {
 			log.Printf("[deadline] task %s drain timed out (%s), hard-cancelling running runs", t.ID, settleDrainGrace)
 			e.cancelExec(t.ID, agent.AbortSettleDrainTimeout)
+			e.revokeRemoteClaims(t)
 			_ = sleepCtx(ctx, 3*time.Second) // give the worker branches a moment to persist/classify
 			break
 		}
