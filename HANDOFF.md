@@ -66,13 +66,18 @@ results come in as SARIF through the E2 import API and now share the runtime rec
   rule id, or a manifest or lockfile; `scanimport/lane.go`).
 - `POST /api/integrations/imports?format=sarif&task_id=N&asset_ids=…` writes one exploration fact
   for the scan run that `yields` a finding node per new finding (`findings.node_id` set), anchored to
-  the runtime assets the code serves (`db/code_findings.go`, `server/scan_import_lane.go`).
+  the runtime assets the code serves, which must already be in the task's scope or asset set
+  (`db/code_findings.go`, `server/scan_import_lane.go`). The fact itself anchors nothing (coverage).
+  Task imports dedup per task.
 - `GET /api/report` lists code and runtime findings together, with a Source line
   (lane, tool, rule, `path:line`, import id) and a per-lane summary (`report/source.go`).
 - `findings_total` skips imported claims and `finding_list` marks them; `prove_goal` already refused them.
 - Migration `0024_code_security_lane.sql` adds lane/location/line and fact/anchor columns. E2's
   unreleased `0015_integrations.sql` is renumbered to `0023_integrations.sql` here, so an existing
   main database (0022 applied) can start; the loader refuses a pending version older than an applied one.
+- An independent review found four anchor and dedup problems (client cross-visibility, inflated
+  coverage, a second task missing known results, task deletion owning foreign assets); all are
+  fixed in `d483374b`.
 - E2 × E5 fix: `GET /api/exploration/findings/{id}/integrations` now needs `read`, not client_read.
 - Verified against Postgres 16: `TestCodeScanJoinsTaskGraphAndReport` (semgrep + trivy/osv SARIF
   plus a runtime finding in one task report), the `db`, `agent`, `report` and `scanimport` suites, and
@@ -359,7 +364,10 @@ Card ids in brackets:
 - **E2's migration is 0023 now, not 0015** (renumbered on the E10 branch, `ej/20261124-150533-1ba29e`,
   because main already applies 0016–0022 and the loader refuses an older pending version). The other
   E2 branches (`…132955-7aef3f` UI, `…135159-6d9961` sync) still carry `0015_integrations.sql`: merge
-  main into them after E10 lands, and git takes the rename.
+  main into them after E10 lands, and git takes the rename. A dev database that already applied
+  `0015_integrations` refuses to start ("applied in the database but missing from this binary"):
+  drop it, or `DELETE FROM schema_migrations WHERE version=15` and start again (0023 is idempotent).
+  Server tests use per-package databases (`artex_server`, `artex_db`, …), so reset those too.
 - **Migration 0020 (RSI) vs other branches' 0015–0019:** the runner refuses a pending migration older
   than the newest applied one, so merge 0015–0019 (E2, E5, E1, c-ba9f64, c-5b5421) before this branch
   reaches a database, or renumber 0020 forward at merge. `db/migrate_test.go` lists 0020 explicitly.

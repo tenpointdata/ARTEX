@@ -80,14 +80,21 @@ curl -H "Authorization: Bearer $TOKEN" --data-binary @semgrep.sarif \
   run (format, tool, version, file hash, counts by lane; typed values only), and every new finding
   becomes a **finding node** of the task that the fact `yields`, with `findings.node_id` set, the
   same as a worker's finding. A task that is archived or being archived refuses the import (409).
-- **Asset graph.** `asset_ids` (at most 20 existing assets, and only with `task_id`) anchors the
-  import fact and the code findings to the runtime assets the scanned code serves, such as the
-  `http_service` of the application. A SAST finding and a runtime finding on the same application
-  then share the asset. Runtime findings use the anchors only when no imported asset matched
-  their host. An unknown id returns 400.
+- **Asset graph.** `asset_ids` (at most 20, and only with `task_id`) anchors the code findings to
+  the runtime assets the scanned code serves, such as the application's `http_service`. A SAST
+  finding and a runtime finding on the same application then share the asset. Each anchor must
+  already belong to the task, either in its declared scope or carrying the task in `task_ids`;
+  otherwise the request gets 400 and nothing is written. An anchor decides which client companies
+  see the finding, so an arbitrary asset id is never accepted. The import fact itself anchors
+  nothing, because an import tests no runtime asset and must not raise coverage. Runtime findings
+  use the anchors only when no imported asset matched their host.
+- **Dedup per task.** A task import's dedup key includes the task, so a result already known
+  from another engagement still reaches this task's graph and report. Re-importing into the same
+  task adds nothing.
 - **Report.** `GET /api/report?task=N` lists code and runtime findings together, sorted by
   severity. Each imported finding has a **Source** line (lane, tool, rule, `path:line`, import
-  id), and the summary breaks the findings down by lane.
+  id). In the summary, "Confirmed findings" leaves out imported claims; they get their own count
+  and a per-lane breakdown.
 - **Goals.** Imported findings are leads, not results. `graph_overview.findings_total` does not
   count them, `finding_list` marks them `imported: <lane>`, and `prove_goal` refuses them because
   they have no verified traffic. To report a code finding as proven, reproduce it at runtime and
