@@ -148,9 +148,13 @@ func (s *sink) ClientConnected(c *mproxy.ClientConn) {
 }
 
 // scopeOf is the scope token bound to the client connection of req ("" for none).
+// A scope relay's binding wins over a credential the client sent through it.
 func (s *sink) scopeOf(req *http.Request) string {
 	if req == nil || req.RemoteAddr == "" {
 		return ""
+	}
+	if v, ok := s.relayed.Load(req.RemoteAddr); ok {
+		return v.(string)
 	}
 	if v, ok := s.scoped.Load(req.RemoteAddr); ok {
 		return v.(scopeBinding).token

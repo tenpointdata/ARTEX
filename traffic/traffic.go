@@ -687,6 +687,7 @@ type sink struct {
 	t       *Traffic
 	paced   sync.Map // ClientConn.Id of a marked connection -> struct{}
 	scoped  sync.Map // client remote address -> scopeBinding (scope.go)
+	relayed sync.Map // address of a scope relay's connection -> scope token (scope_relay.go)
 	streams sync.Map // *mproxy.Flow of a live WebSocket/SSE stream -> *streamState (stream.go)
 	bypass  sync.Map // flowKey of a replay flow bypassing rewrite rules -> struct{}
 }

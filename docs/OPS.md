@@ -120,8 +120,17 @@ The recording proxy (go-mitmproxy) has no dial hook, so its upstream is a loopba
   netfilter owner matching set up by the operator. The listener is opt-in and operator-configured;
   treat it as a global-rules path and do not point a run's tools at it when that run's own block
   rules or gate must hold.
-- **Not scoped yet:** the seeded Playwright browser MCP. It is one process shared by every run,
-  started with the plain proxy URL (`syncBrowserMCPProxy`), so its dials get the global rules only.
+- **Browser and other stdio MCP servers.** A stdio MCP is spawned per run (each worker run,
+  planner round, main-agent turn and chat turn). The stored row names the plain proxy URL (the
+  seeded browser gets `--proxy-server` from `syncBrowserMCPProxy`), but every spawn replaces a
+  `--proxy-server` flag or an `HTTP_PROXY`/`HTTPS_PROXY`/`ALL_PROXY` variable naming the recording
+  proxy with a **scope relay** of the run: a loopback listener (`http://127.0.0.1:<port>`, no
+  credential, because Chromium drops a userinfo from `--proxy-server`) whose connections the proxy
+  binds to the run's token. The relay closes with the run; a relay of a deleted conversation or an
+  ended task is refused. If the relay cannot start, the server is not started for that run.
+  A reference to another proxy is left as stored. Listing an MCP's tools from the UI (no run)
+  spawns it with the stored URL: global rules. Code: `traffic/scope_relay.go`,
+  `Manager.scopeMCPProxy`.
 - **Global egress proxy.** When one is set, go-mitmproxy forwards through it and the gate is not on
   the path. Neither global nor task rules then apply to the proxy's dials: the operator's proxy
   reaches the target. That is the intended behaviour for a remote egress proxy. **Do not run that

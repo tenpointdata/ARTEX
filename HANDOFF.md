@@ -103,8 +103,11 @@ Operator-facing changes:
   carries the not-yet-merged `c-5a6f96` branch): chat/conversation agents and `use_recording_proxy`
   HTTP tools now get their run's scoped URL (`Manager.ScopedProxyAddr`, `server/proxy_scope.go`);
   conversations have their own token, forgotten on delete; an unloaded task's call gets a refused
-  URL. The transparent listener is global-only by decision; the Playwright browser MCP is still
-  unscoped (`c-15b39d`). Operators' own clients keep the global rules. go-mitmproxy's keep-alive host pinning is worked around
+  URL. The transparent listener is global-only by decision. **2026-11-24** (card `c-15b39d`, branch
+  `ej/20261124-110649-dbd854`, stacked on PR #13's branch): stdio MCP servers, the Playwright browser
+  included, are spawned per run with their capture-proxy `--proxy-server`/proxy env rewritten to a
+  per-run loopback **scope relay** (`traffic/scope_relay.go`, `Manager.scopeMCPProxy`), so browser
+  dials carry the run's scope; listing tools from the UI (no run) still uses the global rules. Operators' own clients keep the global rules. go-mitmproxy's keep-alive host pinning is worked around
   (`unpinHostChange`; upstream report `c-9b48b7`). The global-egress-proxy bypass is accepted and
   documented (`docs/OPS.md` §6). `scripts/verify.sh` passes.
   Block rules apply even with the gate off. Fuzzy allow rules match on name and address boundaries.
@@ -135,7 +138,6 @@ Operator-facing changes:
    Done = govulncheck clean.
 2. *(unclaimed)* — **SEC: upstream connection reuse across proxy scopes** (S), card `c-3b9252`.
    Done = test that two scopes never share an upstream connection, or a recorded decision.
-   Then **SEC: scope the Playwright browser MCP** (M), card `c-15b39d`.
 3. *(unclaimed)* — **SEC: logout revocation** (S), card `c-a0af33`. Done = a token replayed after
    logout or a password change gets 401, by a test.
 4. *(unclaimed)* — **SEC: Docker Desktop named volumes** (S), card `c-775dc2`. Done = `docker compose up`
@@ -186,7 +188,6 @@ Card ids in brackets:
 - **E7** [`c-d60149`] Distributed/remote workers (queue-backed intents) for larger engagements; Helm chart.
 - **E8** [`c-5487e8`] Planner/worker evaluation suite (regression targets, prompt-version A/B via the benchmark gate).
 - **E9** [`c-73af97`] Frontend/UX pass (tables over cards, fewer-clicks triage workflow, live engagement dashboard).
-- **SEC** [`c-15b39d`] Scope the Playwright browser MCP's capture-proxy dials per run (shared process, plain proxy URL today).
 - **SEC** [`c-3b9252`] Capture-proxy upstream connection reuse across scopes (rules checked only at dial time).
 - **SEC** [`c-9b48b7`] Report go-mitmproxy keep-alive host pinning upstream; drop `unpinHostChange` once fixed.
 - **SEC** [`c-dadc14`] Verify the security branch on Linux root, in Docker and against Postgres, plus the web typecheck.
@@ -211,7 +212,9 @@ Card ids in brackets:
 - A task's proxy scope rides on the proxy URL userinfo (`egress/proxycred.go`). Code that rewrites a
   proxy URL must keep it (`MarkProxyURL` does); prompts and logs show it stripped
   (`egress.WithoutProxyCredential`). The client-connection binding is keyed by remote address, the only
-  key go-mitmproxy hands `upstreamFor` (`traffic/scope.go`).
+  key go-mitmproxy hands `upstreamFor` (`traffic/scope.go`). A client that cannot send a credential
+  (Chromium's `--proxy-server`) gets a scope relay instead (`traffic/scope_relay.go`): the binding is
+  the relay's outbound address, stored before any byte is forwarded, and it wins over a credential.
 
 - **Guardrails are invariants.** Scope/target gate, interception gate, budgets, noise governor,
   untrusted-output boundary, audit trail — never weaken/bypass/route around them. `RSI.md`
@@ -280,6 +283,16 @@ Card ids in brackets:
   an unregistered token (refused), never the global-only URL, and `TaskProxyAddr` no longer mints
   tokens for unloaded tasks. The transparent TCP listener stays global-only: it has no credential,
   and per-run uid/cgroup mapping is operator netfilter setup; documented in `docs/OPS.md` §6.
+
+- **2026-11-24** — Browser MCP scope (`c-15b39d`): the card assumed one shared browser process; in
+  fact `wireAgentAugment` spawns every stdio MCP per run (worker run, planner round, main-agent and
+  chat turn) on a context that already carries the run's `TargetScope`. So the fix rewrites the spawn,
+  not the process model: any stdio MCP's `--proxy-server` or `HTTP(S)_PROXY`/`ALL_PROXY` naming the
+  recording proxy is replaced by a per-run loopback relay. A relay, not the userinfo, because
+  Chromium drops it from `--proxy-server` and only answers a 407 the proxy never sends. A relay
+  that cannot start skips the server for the run (fail closed) rather than spawning on the plain
+  URL. UI tool discovery (no run) keeps the stored URL, global rules: it lists tools and browses
+  nothing. This branch merges PR #13's branch (`ej/20261124-075745-5a4987`), which this work needs.
 
 ## Deltas
 
