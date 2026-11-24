@@ -59,6 +59,26 @@ See `docs/ARCHITECTURE.md` for the code-level map. Summary:
 
 ## Current state
 
+**2026-11-24 — TLS between worker nodes and the control node by default (`c-548e8b`, E7; in review).**
+Worker nodes reach the control API (node RPC) over **TLS with the CA pinned**: `ARTEX_CONTROL_CA`
+(`server/node_tls.go`) makes the worker accept only `https://` and trust only that CA, never the system
+roots; without it an `http://` API still works with a start-up WARNING. The control listener rereads a
+renewed `ARTEX_TLS_CERT`/`KEY` within 30 s (`cmd/artex/certreload.go`). Helm: `controlTLS.enabled=true`
+by default, `source` = `generate` (chart-made CA via `lookup`) | `secret` | `certManager`; HTTPS probes,
+`appProtocol: https`, nginx backend-protocol annotation; worker pods mount only the CA key. Compose
+overlay: one-shot `artex-tls-init` runs the new `artex node-tls` subcommand (CA + pair, CA key
+discarded) into separate volumes. Docs: `docs/DISTRIBUTED.md` "Transport", chart README.
+**This branch merges the unmerged c-3b781a branch (`ej/20261124-155351-f5bfb9`), which carries E7, so
+landing it lands E7 + c-3b781a.** Verified: `TestWorkerNodeFindingBindsControlCapture` now runs its
+control API over pinned TLS (Postgres 16, passes); `TestControlRPCPinnedCA` (wrong CA and system roots
+refused), cert reload and `node-tls` tests; `helm lint` and `helm template` in all three sources plus
+disabled and the error cases; a chart-generated cert verified by the pinned Go client;
+`docker compose config` of the overlay; `scripts/verify.sh` passed. Full `go test ./server` with
+Postgres: only the known macOS SOCKS5 test and the order-dependent
+`TestFindingWorkflowAutoHintToPlannerAndSetting` (passes alone) failed. **Not checked:** a live
+`helm install` (c-8cfbfe) or a live compose run with a built image. **Still clear text:** the
+worker→control recording-proxy hop (plain-HTTP targets and the scope token), carded `c-677166`.
+
 **2026-11-24 — Worker-node findings carry their captured proof (`c-3b781a`, E7 follow-up; in review).**
 A finding recorded by an intent on a `-role worker` node now binds the request/response the control
 node's recording proxy captured. The worker calls a **signed node RPC** on the control API
@@ -270,6 +290,9 @@ body, through the versioned prompt API, and the starting bodies are restored aft
   pre-registration, adopted-lesson retire sync. Done = Postgres tests for each.
 - *(unclaimed)* — **RSI gate web UI** (M), card `c-936308`. Done = adopt/rollback from a proposals table in ≤2 clicks + password.
 
+- *(unclaimed)* — **E7: TLS on the worker→control proxy hop** (M), card `c-677166`. Done = a plain-HTTP
+  target request from a worker crosses the network inside TLS; Helm/compose default to it.
+
 **Human lane**
 - **First live run through the RSI gate** (card `c-772190`, after `c-f1518c`): propose → held-out
   suite → evidence → adopt (password) → rollback on the bench instance with `ARTEX_RSI_LOOP=on`.
@@ -335,6 +358,8 @@ Card ids in brackets:
 - **TEST** [`c-3157b4`] `TestGateOffTaskIsUnchanged` fails on main with Postgres (also fails before E5).
 - **E6** [`c-cb0093`] Cost/observability dashboard + OpenTelemetry export, building on existing context telemetry.
 - **E7** [`c-d60149`] Distributed/remote workers (queue-backed intents) for larger engagements; Helm chart.
+  Follow-ups: `c-3b781a` and `c-548e8b` (TLS to the control API) in review; `c-677166` (TLS on the
+  proxy hop), `c-7ad4da`, `c-29ff19`, `c-18f7a8`, `c-8cfbfe` (live install, human).
 - **E8** [`c-5487e8`] Planner/worker evaluation suite (regression targets, prompt-version A/B via the benchmark gate).
 - **E9** [`c-73af97`] Frontend/UX pass (tables over cards, fewer-clicks triage workflow, live engagement dashboard).
 - **SEC** [`c-517c2d`] Live Playwright task check of the scope relay (human/bench: needs an LLM key and an authorized target).
@@ -413,6 +438,14 @@ Card ids in brackets:
   `ARTEX_SECRET_KEY`) loses stored secrets.
 
 ## Decisions
+
+- **2026-11-24** — c-548e8b: the worker pins the control API's CA (`ARTEX_CONTROL_CA`) rather than
+  trusting system roots, so a publicly valid certificate for the same name cannot impersonate the
+  control node. TLS covers the control API only; the recording-proxy hop stays HTTP for now because
+  agent tools cannot use a TLS proxy (needs a worker-side relay, c-677166). Plain `http://` still works
+  with a warning, for existing single-network deployments. Compose uses a new `artex node-tls`
+  subcommand because the runtime image has no openssl; it discards the CA key so nothing else can be
+  signed with it.
 
 - **2026-11-24** — c-3b781a: worker nodes reach the capture and evidence stores through a control-node
   RPC (option a), not a Postgres capture index (c) or after-the-fact matching (b). (c) is a large
