@@ -1,6 +1,6 @@
 # HANDOFF.md — ARTEX
 
-**Last updated:** 2026-11-23 15:14 MST, by claude-code: Fixed the High and Medium findings (#1–#16) from the 2026-11-23 ARTEX security audit on the local branch ej/20261123-145205-6a3af6. Earlier hand-offs are under Deltas and in `ej handoff log`.
+**Last updated:** 2026-11-23 16:51 MST, by claude-code: Verified the security fixes (now on main via PR #1, plus main's c-485de0 upstream gate) on Linux as root with Postgres, in Docker with the egress iptables filter, and in a browser over the HttpOnly cookie. Earlier hand-offs are under Deltas and in `ej handoff log`.
 
 > Single entry point for whoever picks this up next (any agent or human), with no access to the
 > originating conversation. Read this first, then the sections of the code it points at.
@@ -59,11 +59,29 @@ See `docs/ARCHITECTURE.md` for the code-level map. Summary:
 
 ## Current state
 
-**2026-11-23** — Fixes for the High and Medium findings from the 2026-11-23 security audit are on the
-local branch `ej/20261123-145205-6a3af6` (not pushed). It covers audit findings #1–#16 except as listed
-under Open work. `go build ./...`, `go vet ./...` and `go test ./...` pass on macOS. Not yet run: the
-Linux-root tests, the Docker egress iptables rules, the Postgres-backed tests and the web typecheck
-(card `c-dadc14`). Operator-facing changes:
+**2026-11-23** — Fixes for the High and Medium findings from the 2026-11-23 security audit are on
+`main` (PR #1, branch `ej/20261123-145205-6a3af6`); the Linux/Docker verification fixes come from
+`ej/20261123-152406-fccff3`. It covers audit findings #1–#16 except as listed under Open work.
+Verified 2026-11-23 (card `c-dadc14`, done):
+- `go vet ./...` + `go test ./...` **as root on Linux** (golang:1.26.11-bookworm, arm64) with
+  `ARTEX_PG_DSN` set: all packages ok, including the `*AsRoot` executor/isolation tests,
+  `TestExecHomePerRunDirAsRoot` and the MCP uid-10002 split. Two test fixes were needed (commit
+  `fc8c3f9`): the isolation probe could not exec the `go test` binary from its 0700 build dir (also
+  broken on main), and `TestGateOffTaskIsUnchanged` still expected zero lookups with the gate off.
+- Docker egress: through the real `docker-compose.yml` (NET_ADMIN) on a slim image of the same
+  runtime base, `[artex] egress: installed` is logged, `-m owner`/`-m addrtype` load on bookworm's
+  nf_tables iptables 1.8.9, and the executor is refused for 169.254.169.254, 100.100.100.200, the
+  gateway, host.docker.internal (root reaches the host service) and :8787 on every local address,
+  while a LAN router, another container and the internet stay reachable. The full image did not
+  finish building on a slow link (`c-a6891b`).
+- Web: `npm ci` and `npx tsc --noEmit` clean. `npm run lint` fails with 84 errors, all already on main
+  and none in the changed files (`c-834a5a`). Headless Chromium: setup, login, Sign out over the
+  HttpOnly SameSite=Strict cookie work and `document.cookie` is empty, **but a token copied before
+  logout stays valid for 7 days** (`c-a0af33`).
+- The stock compose cannot start on Docker Desktop for Mac: bind mounts ignore permissions, so the
+  isolation self-test fails closed (also on main; `c-775dc2`). Use named volumes there.
+
+Operator-facing changes:
 - Native (non-Linux-root) starts now refuse unless `ARTEX_ALLOW_UNSANDBOXED=1` is set; `dev.sh` sets it.
 - A non-loopback `-addr` without TLS is refused. Use `-tls-cert`/`-tls-key` (or
   `ARTEX_TLS_CERT`/`ARTEX_TLS_KEY`), or set `ARTEX_ALLOW_INSECURE_BIND=1`; the Dockerfile sets that env.
@@ -83,6 +101,18 @@ Linux-root tests, the Docker egress iptables rules, the Postgres-backed tests an
   summaries are framed as untrusted data.
 - Per-run executor HOME; MCP servers run as uid 10002 (`ARTEX_EXEC_MCP_UID`). The workspace file
   manager uses `os.Root`.
+- **2026-11-24 — per-task executor uids (card `c-13f293`, opt-in).** `-exec-uid-range LO-HI` (e.g.
+  `20000-29999`, passed to `start.sh`/the container command) gives each task and chat session its own
+  uid while it is live. Its run dirs are `<uid>:<uid>` 2770. Processes take the identity of the run dir
+  they start in: the bash shim, custom tools and file tools all read it from the dir's owner. The uid is
+  released (dirs closed, processes reaped, files back to root) on a terminal status, a task delete or a
+  conversation delete. `egress.sh` filters the range. Code: `server/execuid.go`,
+  `server/execuid_unix.go`. Single-uid mode is still the default.
+  Verified: Linux-root tests (`server/execuid_root_linux_test.go`, where task A gets EACCES on
+  `tasks/B/i1` and `.artex-home`), the full server and agent suites as root in `golang:1.26.11-bookworm`,
+  and egress rules with iptables in a NET_ADMIN container.
+  Root tests in Docker: build the test binary into a 0755 dir (`go test -c -o /t/server.test`). The
+  default 0700 go-build dir makes the isolation self-tests fail on `main` too.
 
 **2026-11-24: full Docker image verified (card `c-a6891b`).** The complete image (bbot, chromium,
 Playwright) built from `1abe24f` with the committed Dockerfile on Docker Desktop arm64 in 34 min. The
@@ -99,21 +129,28 @@ the newer main (`-exec-uid-range`, #18).
 ## Triage (next handful)
 
 **Agents' lane**
+0. *(unclaimed)* — **SEC: per-task uid follow-ups** (S each): `c-12df03` (single-uid start-up fails on a
+   socket; MCP uid not egress-filtered), `c-dd160a` (spill dirs readable across tasks), `c-e70e5c`
+   (release ended tasks at start-up; per-key lock). The "Done when" is on each card.
 1. *(unclaimed)* — **SEC: gorilla/websocket bump, GO-2026-6278** (XS), card `c-c10f2c`; needs network.
    Done = govulncheck clean.
 2. *(unclaimed)* — **SEC: upstream-gate residuals** (M), card `c-5a6f96`: task-scoped rules on proxy
    dials, go-mitmproxy keep-alive host pinning, and the global-egress-proxy bypass. Done = a test or a decision for each.
-3. *(unclaimed)* — **E1 Client-grade reporting & deliverables** (M). Turn `report/` into
+3. *(unclaimed)* — **SEC: logout revocation** (S), card `c-a0af33`. Done = a token replayed after
+   logout or a password change gets 401, by a test.
+4. *(unclaimed)* — **SEC: Docker Desktop named volumes** (S), card `c-775dc2`. Done = `docker compose up`
+   starts on a Mac with the isolation self-test passing; Linux bind-mount path documented.
+5. *(unclaimed)* — **E1 Client-grade reporting & deliverables** (M). Turn `report/` into
    CVSS/EPSS-scored, remediation-bearing, standards-mapped deliverables (OWASP ASVS/WSTG, MITRE
    ATT&CK). Done = a report export with per-finding CVSS vector + remediation + framework tags,
    covered by tests. Card `c-8f9cca`.
-4. *(unclaimed)* — **E4 Methodology-driven coverage** (M), card `c-c0bb07`. Extend the coverage ledger to score
+6. *(unclaimed)* — **E4 Methodology-driven coverage** (M), card `c-c0bb07`. Extend the coverage ledger to score
    coverage against a codified methodology checklist, not only asset touch. Done = planner can
    read a methodology and the coverage graph shows checklist completion.
 
 **Human lane**
-- **SEC: verify on Linux/Docker** (card `c-dadc14`): Linux-root tests, the egress iptables rules,
-  Postgres tests and the web typecheck. Needed before the security branch goes anywhere public.
+- **Full-image Docker check** (card `c-a6891b`): needs a fast link for the recon-toolbox build; repeat
+  the egress probes and the login script there (the slim-image run passed).
 - Revisit tracking: E1–E10 are on the private Composite board (decided 2026-11-23, repo is public).
   File GitHub issues only if the repo goes private or you want them public.
 - Decide engagement-governance direction (E5): how formal the rules-of-engagement/authorization
@@ -127,7 +164,7 @@ the newer main (`-exec-uid-range`, #18).
 - **Toolchain:** Go (see `go.mod`), Node (web), Docker + Compose, PostgreSQL. Verified present
   locally: Go 1.27.1, Docker 29.4, Compose v5.1, Node v24.14.
 - **Build backend:** `go build ./...` (verified: exit 0).
-- **Web deps (not yet installed):** `cd web && npm ci`. **Embedded-UI build:** `./build.sh`.
+- **Web deps:** `cd web && npm ci`, then `npx tsc --noEmit` (clean) and `npm run lint` (84 known errors, `c-834a5a`). **Embedded-UI build:** `./build.sh`.
 - **Run (Docker):** `cp .env.example .env` (set `POSTGRES_PASSWORD`), `docker compose up -d --build`,
   open http://localhost:8787, setup token via `docker compose logs artex | grep "Setup token"`.
 - **Verify (reproduces CI):** `scripts/verify.sh` (fast set, no Docker); `--full` adds `go test -race`
@@ -156,10 +193,16 @@ Card ids in brackets:
 - **E8** [`c-5487e8`] Planner/worker evaluation suite (regression targets, prompt-version A/B via the benchmark gate).
 - **E9** [`c-73af97`] Frontend/UX pass (tables over cards, fewer-clicks triage workflow, live engagement dashboard).
 - **SEC** [`c-5a6f96`] Capture-proxy upstream gate residuals (task-scoped rules, go-mitmproxy host pinning, egress-proxy bypass).
-- **SEC** [`c-dadc14`] Verify the security branch on Linux root, in Docker and against Postgres, plus the web typecheck.
+- **SEC** [`c-a0af33`] Logout does not revoke the session token (valid until the 7-day JWT TTL).
+- **SEC** [`c-775dc2`] Docker Desktop bind mounts defeat executor isolation; stock compose will not start on a Mac.
+- [`c-a6891b`] Repeat the egress/login check on the full image once it builds.
+- [`c-834a5a`] web: 84 pre-existing biome lint errors; `npm run lint` cannot gate CI yet.
 - **SEC** [`c-8d54d5`] Capture proxy: insecure upstream only for in-scope targets.
 - **SEC** [`c-c10f2c`] gorilla/websocket bump (GO-2026-6278).
 - **SEC** [`c-bd9a6d`] Residual gaps from the High/Medium fixes.
+- **SEC** [`c-12df03`] Single-uid start-up fails on a socket in a run dir; MCP uid is not egress-filtered.
+- **SEC** [`c-dd160a`] Per-task uids: spill dirs readable across tasks.
+- **SEC** [`c-e70e5c`] Per-task uids: release ended tasks at start-up; per-key lock.
 - **SEC** [`c-cc25b6`] Low-severity audit items.
 - **E10** [`c-72dd9d`] Code-security testing lane (SAST/dependency ingest) feeding the same dual-graph + evidence model.
 
@@ -174,11 +217,24 @@ Card ids in brackets:
   "immutable surfaces" must never enter an automated search space.
 - **Migrations fix forward** — a published `db/migrations/*.sql` is never edited.
 - **Embedded UI** requires `-tags embedui`; a plain `go build` omits the web assets.
+- **Root tests on Linux:** run them as root in a container, e.g. `docker run --rm --cap-add NET_ADMIN
+  -v "$PWD":/src -w /src -e ARTEX_PG_DSN=postgres://… golang:1.26.11-bookworm go test ./...`. Without
+  root, the `*AsRoot` tests skip; without `ARTEX_PG_DSN`, the PG-backed tests skip (macOS runs miss both).
+- **Docker Desktop (Mac):** bind-mounted `data/`, `keys/` and `skills/` are writable by any uid in the
+  container, so the isolation self-test refuses to start. Use named volumes (`c-775dc2`).
+- **Egress probes:** as the executor, `/app/artex __artex-exec-drop 10001 10001 -- curl …`; rule hits
+  show up in `iptables -L ARTEX_EGRESS -v -n -x`.
 - **Secrets** are AES-256-GCM sealed with per-column AAD; losing the key (`keys/secret.key` or
   `ARTEX_SECRET_KEY`) loses stored secrets.
 
 ## Decisions
 
+- **2026-11-23** — c-dadc14: the security branch's always-on metadata check resolves each name the
+  platform dials (gate on or off); `TestGateOffTaskIsUnchanged` now asserts one lookup per platform
+  connection instead of none, since this is the intended behaviour, not a regression. The isolation
+  probe binary became a test hook (`isolationProbeBinary`) rather than being changed in production.
+  Logout revocation and the Docker Desktop bind-mount problem were filed as cards, not fixed here: both
+  predate the branch and need a design choice.
 - **2026-11-23** — Stood ARTEX up locally and registered it as a Composite project rather than
   forking/renaming; it stays an AGPL-3.0 fork under `tenpointdata`. Backend verified building; web
   install and Docker run deferred (not needed to produce the setup + plan deliverable).
@@ -199,9 +255,18 @@ Card ids in brackets:
   (card `c-8d54d5`) exists. Reason: the goproxy setting is global, so turning it on also leaves package
   downloads through the proxy open to tampering.
 
+- **2026-11-24** — Per-task uids derive a process's identity from the **owner of its working run
+  directory**, not from a channel between the server and the shim. Norma always starts bash in the
+  server-chosen `tc.WorkingDir`, and only root sets that owner. A task's gid is the same number as its
+  uid, and the exec gid stays a supplementary group (script and spill dirs). As a result MCP servers no
+  longer write into run dirs when the range is on. Release kills the uid's processes and gives its files
+  back to root, so a uid returned to the pool owns nothing. The mode stays opt-in until it has run in a
+  real deployment.
+
 ## Deltas
 
 <!-- composite:deltas · newest first; Composite rewrites this block on every merge (ej handoff merge / merge_handoff) -->
+- **2026-11-23 16:51 MST** · claude-code · `ej/20261123-152406-fccff3` `87f3a86`→`841aec9` (5 commits) · `h-61510f` — Verified the security fixes (now on main via PR #1, plus main's c-485de0 upstream gate) on Linux as root with Postgres, in Docker with the egress iptables filter, and in a browser over the HttpOnly cookie. go vet + go test ./... as root in golang:1.26.11-bookworm with ARTEX_PG_DSN: all packages pass after two test fixes (fc8c3f9): the isolation probe now runs a 0755 copy of the go-test binary via the isolationProbeBinary hook (it failed on main too), and TestGateOffTaskIsUnchanged asserts one lookup per platform connection. Through docker-compose.yml with NET_ADMIN on a slim image of the same runtime base, egress.sh installs on bookworm's nf_tables iptables, and the executor is refused for metadata, the gateway, host.docker.internal and :8787 while the LAN and the internet stay reachable. Web tsc is clean; lint has 84 errors, all already on main. Login and logout work over the cookie. Closed card c-dadc14; opened c-a0af33, c-775dc2, c-a6891b, c-834a5a. **Next:** c-a0af33: server-side logout revocation (token epoch). c-775dc2: named volumes so the compose stack starts on Docker Desktop. c-a6891b: repeat the probes on the full image when a fast link is available. c-834a5a: clear the lint baseline. Then c-c10f2c and c-5a6f96. **Decided:** The gate-off lookups are intended (the always-on metadata check), so the test changed, not the code. The probe binary is a test hook; production still execs os.Executable(). The egress check ran on a slim image because the full image's recon-toolbox layers would not finish on this link; base, iptables, binary and scripts are identical. Logout revocation and Docker Desktop bind mounts predate the branch and need design choices, so they were filed as cards.
 - **2026-11-23 15:14 MST** · claude-code · `ej/20261123-145205-6a3af6` `7eaf424`→`e3a7fad` (19 commits) · `h-04e098` — Fixed the High and Medium findings (#1–#16) from the 2026-11-23 ARTEX security audit on the local branch ej/20261123-145205-6a3af6. The fixes cover scope/metadata egress checks, bare-host gating, strict allow rules, fail-closed native sandboxing, a symlink-safe file manager, per-run HOME, a separate MCP uid, an HttpOnly session cookie, TLS and an insecure-bind guard, capture-proxy TLS verification, permissions and loopback-only listening, a Docker egress iptables filter, install.sh hardening, framed compaction and agent-authored goal/hint provenance. go build, vet and test pass on macOS. **Next:** c-485de0: route the MITM proxy's upstream dials through the metadata/block check. c-dadc14: verify on Linux root, in Docker, against Postgres, and run the web tsc. c-c10f2c: websocket bump (needs network). Then c-8d54d5, c-bd9a6d and c-cc25b6. **Decided:** Fail closed with explicit env opt-outs. No metadata deny on Bash command text (SSRF payloads); enforce it at dial level instead. Block rules stay substring-matched; allow rules are strict. Follow-ups go on the private board because the repo is public. **Issues:** opened #c-485de0, #c-8d54d5, #c-bd9a6d, #c-c10f2c, #c-cc25b6, #c-dadc14.
 - **2026-11-23 13:37 MST** · claude-code · `main` at `81eafd0`, no commits · `h-e3d121` — Stood ARTEX up locally as a Composite project and produced a comprehensive expansion plan. Cloned tenpointdata/ARTEX to ~/Documents/Projects/ARTEX at 81eafd0; registered Composite project ARTEX; verified backend builds (go build ./... exit 0, Go 1.27.1); scaffolded AGENTS.md, CLAUDE.md (imports @AGENTS.md), and HANDOFF.md in standard form. Wrote the expansion plan & analysis as an Office doc. **Decided:** Kept ARTEX an AGPL-3.0 fork under tenpointdata rather than renaming. All proposed expansion is guardrail-preserving; no item touches the RSI.md immutable surfaces and Loop-C learning (E3) is gated behind that contract and the E8 benchmark. Deferred filing public issues pending owner decision. Expansion plan: Office doc o-b38b1ac0efa9 (#/office/o-b38b1ac0efa9).
 <!-- /composite:deltas -->

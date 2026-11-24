@@ -10,7 +10,7 @@ import (
 func TestRunAsFileToolIdentityWithoutIdentity(t *testing.T) {
 	SetFileToolIdentity(nil)
 	ran := false
-	if err := RunAsFileToolIdentity(func() { ran = true }); err != nil || !ran {
+	if err := RunAsFileToolIdentity("", func() { ran = true }); err != nil || !ran {
 		t.Fatalf("err=%v ran=%v", err, ran)
 	}
 }
@@ -24,7 +24,7 @@ func TestRunAsFileToolIdentityFailsClosed(t *testing.T) {
 	SetFileToolIdentity(&FileToolIdentity{UID: 10001, GID: 10001})
 	t.Cleanup(func() { SetFileToolIdentity(nil) })
 	ran := false
-	if err := RunAsFileToolIdentity(func() { ran = true }); err == nil || ran {
+	if err := RunAsFileToolIdentity("", func() { ran = true }); err == nil || ran {
 		t.Fatalf("err=%v ran=%v, want an error and fn not run", err, ran)
 	}
 	f := newConfinedFixture(t)

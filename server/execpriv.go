@@ -48,6 +48,10 @@ type ExecPrivilege struct {
 	// PrepareExecPrivilege creates it and sets it: root-owned, outside the workspace
 	// tree the executor can write.
 	ScriptDir string
+	// Range, when set, gives each task and chat session a uid of its own from it
+	// while it is live (execuid.go); UID stays the identity of agent processes that
+	// do not run in a run directory. Set it with WithUIDRange.
+	Range ExecUIDRange
 }
 
 // ResolveExecPrivilege turns the -exec-uid and -exec-gid options into an
