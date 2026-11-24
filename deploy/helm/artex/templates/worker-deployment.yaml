@@ -1,0 +1,90 @@
+{{- if .Values.worker.enabled }}
+{{- $w := .Values.worker }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "artex.fullname" . }}-worker
+  labels:
+    {{- include "artex.labels" . | nindent 4 }}
+    app.kubernetes.io/component: worker
+spec:
+  replicas: {{ $w.replicas }}
+  selector:
+    matchLabels:
+      {{- include "artex.selector" (dict "ctx" . "component" "worker") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "artex.selector" (dict "ctx" . "component" "worker") | nindent 8 }}
+        {{- with $w.podLabels }}{{ toYaml . | nindent 8 }}{{ end }}
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+        {{- with $w.podAnnotations }}{{ toYaml . | nindent 8 }}{{ end }}
+    spec:
+      serviceAccountName: {{ include "artex.serviceAccountName" . }}
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: {{ $w.terminationGracePeriodSeconds }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets: {{ toYaml . | nindent 8 }}
+      {{- end }}
+      {{- if or $w.affinity (ne $w.antiAffinity "none") }}
+      affinity:
+        {{- with $w.affinity }}{{ toYaml . | nindent 8 }}{{ end }}
+        {{- if ne $w.antiAffinity "none" }}
+        {{- $term := dict "labelSelector" (dict "matchLabels" (dict "app.kubernetes.io/name" (include "artex.name" .) "app.kubernetes.io/instance" .Release.Name "app.kubernetes.io/component" "worker")) "topologyKey" $w.topologyKey }}
+        podAntiAffinity:
+          {{- if eq $w.antiAffinity "hard" }}
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - {{ toYaml $term | nindent 14 | trim }}
+          {{- else }}
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm: {{ toYaml $term | nindent 16 }}
+          {{- end }}
+        {{- end }}
+      {{- end }}
+      containers:
+        - name: artex
+          image: {{ include "artex.image" . | quote }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          # No local capture proxy: tool traffic goes through the control node's
+          # recording proxy (ARTEX_CONTROL_PROXY) with a per-task scope token.
+          args: ["-role", "worker", "-proxy", "", "-health-addr", ":{{ $w.healthPort }}"]
+          envFrom:
+            {{- include "artex.envFrom" . | nindent 12 }}
+          env:
+            - name: ARTEX_NODE_ID
+              valueFrom:
+                fieldRef: {fieldPath: metadata.name}
+            {{- include "artex.sharedEnv" (dict "ctx" . "extra" (merge (dict "ARTEX_ROLE" "worker" "ARTEX_NODE_WORKERS" (toString $w.concurrency) "ARTEX_HEALTH_ADDR" (printf ":%v" $w.healthPort) "ARTEX_CONTROL_PROXY" (printf "http://%s-control-proxy:8788" (include "artex.fullname" .))) $w.extraEnv)) | nindent 12 }}
+          ports:
+            - {name: health, containerPort: {{ $w.healthPort }}}
+          startupProbe:
+            httpGet: {path: /healthz, port: health}
+            periodSeconds: 5
+            failureThreshold: 60
+          readinessProbe:
+            httpGet: {path: /healthz, port: health}
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: {path: /healthz, port: health}
+            periodSeconds: 20
+            failureThreshold: 6
+          resources: {{ toYaml $w.resources | nindent 12 }}
+          securityContext:
+            {{- include "artex.containerSecurityContext" . | nindent 12 }}
+          volumeMounts:
+            - {name: data, mountPath: /app/data}
+            - {name: keys, mountPath: /app/keys}
+      volumes:
+        - name: data
+          emptyDir: {sizeLimit: {{ $w.ephemeralDataSizeLimit }}}
+        - name: keys
+          emptyDir: {}
+      {{- with $w.nodeSelector }}
+      nodeSelector: {{ toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $w.tolerations }}
+      tolerations: {{ toYaml . | nindent 8 }}
+      {{- end }}
+{{- end }}

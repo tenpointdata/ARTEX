@@ -277,7 +277,12 @@ type Traffic struct {
 	// scopes are the run scopes a proxy client may name in its credential
 	// (scope.go); sink binds client connections to them.
 	scopes scopeRegistry
-	sink   *sink
+	// remote resolves scope tokens worker nodes minted (scope_remote.go).
+	remote remoteScopes
+	// isLoopback classifies a client remote address; nil is isLoopbackAddr.
+	// Tests replace it to stand a loopback client in for a remote one.
+	isLoopback atomic.Pointer[func(addr string) bool]
+	sink       *sink
 	// rewriteRules is the compiled snapshot of the rewrite rules, replaced as a
 	// whole by SetRewriteRules and applied by the sink (rewrite_flow.go).
 	rewriteRules atomic.Pointer[rewrite.Set]
@@ -379,7 +384,7 @@ func Open(dir, addr string) (*Traffic, error) {
 	// "Directly" means through the upstream gate (upstream_gate.go): go-mitmproxy
 	// has no dial hook, so its upstream is a loopback proxy that dials with the
 	// platform's checks (SetUpstreamDialer), never a bare net.Dialer.
-	gate, err := startUpstreamGate(nil, t.scopes.lookup)
+	gate, err := startUpstreamGate(nil, t.resolveScope)
 	if err != nil {
 		db.Close()
 		return nil, fmt.Errorf("start the upstream gate: %w", err)

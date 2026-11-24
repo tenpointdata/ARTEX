@@ -1,0 +1,13 @@
+apiVersion: v2
+name: artex
+description: ARTEX, a self-hosted autonomous penetration-testing platform for authorized security testing (control node, horizontally scalable worker nodes, optional bundled PostgreSQL).
+type: application
+version: 0.1.0
+appVersion: "0.7.0"
+home: https://github.com/tenpointdata/ARTEX
+sources:
+  - https://github.com/tenpointdata/ARTEX
+keywords:
+  - security
+  - pentest
+  - autonomous

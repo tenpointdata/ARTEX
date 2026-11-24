@@ -100,10 +100,15 @@ func (t *Traffic) ScopedProxyURL(key string, fn ScopeFunc) string {
 // first dial; a tunnel is one dial) would keep reaching that host unchecked.
 // Closing the client connection closes its upstream with it. A client that
 // reconnects with the token is refused at the gate.
+//
+// The remote tokens resolved to key (scope_remote.go) are dropped and their
+// connections closed the same way.
 func (t *Traffic) ForgetScope(key string) {
-	if tok := t.scopes.forget(key); tok != "" && t.sink != nil {
-		t.sink.closeScope(tok)
+	toks := t.remote.forget(key)
+	if tok := t.scopes.forget(key); tok != "" {
+		toks = append(toks, tok)
 	}
+	t.closeTokens(toks)
 }
 
 // EndedScopeURL returns the recording proxy's URL carrying a fresh token that

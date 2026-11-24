@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -154,7 +155,7 @@ func (s *Server) interceptCreateRule(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 500, err.Error())
 		return
 	}
-	s.m.interceptor.Invalidate()
+	s.invalidateInterceptRules()
 	writeJSON(w, 200, rule)
 }
 
@@ -182,7 +183,7 @@ func (s *Server) interceptUpdateRule(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 500, err.Error())
 		return
 	}
-	s.m.interceptor.Invalidate()
+	s.invalidateInterceptRules()
 	writeJSON(w, 200, rule)
 }
 
@@ -200,7 +201,7 @@ func (s *Server) interceptDeleteRule(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 500, err.Error())
 		return
 	}
-	s.m.interceptor.Invalidate()
+	s.invalidateInterceptRules()
 	writeJSON(w, 200, map[string]any{"deleted": id})
 }
 
@@ -225,7 +226,7 @@ func (s *Server) interceptToggleRule(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 500, err.Error())
 		return
 	}
-	s.m.interceptor.Invalidate()
+	s.invalidateInterceptRules()
 	writeJSON(w, 200, map[string]any{"ok": true, "enabled": req.Enabled})
 }
 
@@ -541,7 +542,7 @@ func (s *Server) interceptAlwaysAllow(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 500, err.Error())
 		return
 	}
-	s.m.interceptor.Invalidate()
+	s.invalidateInterceptRules()
 	writeJSON(w, 200, map[string]any{"rule": rule, "created": true})
 }
 
@@ -903,4 +904,14 @@ func (s *Server) interceptExecution(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, 200, map[string]any{"conversation_id": target.ConversationID, "task_id": target.TaskID, "session": target.Session, "seq": target.Seq, "items": activityDTOs(target.Items)})
+}
+
+// invalidateInterceptRules drops this process's rule cache and bumps the shared
+// revision so every other node reloads on its next gated call. A failed bump
+// is logged: the other nodes then pick the change up within the cache's
+// maximum age (intercept rulesMaxAge) instead of the revision window.
+func (s *Server) invalidateInterceptRules() {
+	if err := s.m.interceptor.Invalidate(); err != nil {
+		log.Printf("[intercept] rules saved; other nodes see them within the cache's maximum age: revision bump failed: %v", err)
+	}
 }

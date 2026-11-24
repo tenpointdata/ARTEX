@@ -104,6 +104,7 @@ var rbacPolicy = []policyRule{
 	{http.MethodGet, "/api/workspace/read", false, permOperate},
 	{http.MethodGet, "/api/llm/records", true, permOperate},
 	{http.MethodGet, "/api/logs", true, permOperate},
+	{http.MethodGet, "/api/settings/nodes", false, permOperate}, // node host names (E7)
 	// Raw recorded traffic carries the Authorization headers and cookies the
 	// agents used; conversation messages echo them. Host and list summaries stay read.
 	{http.MethodGet, "/api/traffic/exchange", false, permOperate},
