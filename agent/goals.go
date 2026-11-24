@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/Autumn-27/artex/db"
 	"github.com/Autumn-27/norma/agentcore"
@@ -103,10 +104,30 @@ func DecomposeGoals(ctx context.Context, prov llm.Provider, dataDir, goalText, d
 	return DecomposeGoalsWithProvider(ctx, prov, dataDir, goalText, desc, as, ts, taskID, false, 0, emit)
 }
 
+// GoalsMaxTokens caps each decomposer reply. Its output is a few small tool calls
+// (constraints, scope, goals), far below this even with reasoning. Without a cap of
+// its own a profile max_tokens of 0 meant norma's 32768 default, and a degenerate
+// repetition loop ran to that ceiling three times over through max_tokens
+// resume-recovery (c-7361b4: 10–20 minutes per call on a local model).
+const GoalsMaxTokens = 8192
+
+// GoalsMaxDuration bounds one decomposition's wall-clock time (checked at turn
+// boundaries; the output cap bounds a single turn).
+const GoalsMaxDuration = 10 * time.Minute
+
+// goalsReplyCap returns the decomposer's output cap: the profile's cap when it is
+// set and tighter, else GoalsMaxTokens.
+func goalsReplyCap(profileMax int) int {
+	if profileMax > 0 && profileMax < GoalsMaxTokens {
+		return profileMax
+	}
+	return GoalsMaxTokens
+}
+
 // DecomposeGoalsWithProvider is the task-runtime variant used when a task has an
 // ordered provider chain. It preserves the same tools and write behavior while
 // letting the caller own provider selection/failover. maxTokens is the profile's
-// per-reply output cap (0 = send none).
+// per-reply output cap; the decomposer never exceeds GoalsMaxTokens (0 = that default).
 func DecomposeGoalsWithProvider(ctx context.Context, prov llm.Provider, dataDir, goalText, desc string, as *db.AssetStore, ts *db.ExplorationStore, taskID int64, nonStreaming bool, maxTokens int, emit func(db.Activity)) []GoalSpec {
 	if prov == nil {
 		return nil
@@ -163,7 +184,8 @@ func DecomposeGoalsWithProvider(ctx context.Context, prov llm.Provider, dataDir,
 		// 3 steps (extract constraints → register scope → decompose goals) each need one tool call; give enough turns so set_goals is not missed before wrap-up.
 		MaxTurns:     8,
 		NonStreaming: nonStreaming, // when this profile selects non-streaming, use Provider.Complete
-		MaxTokens:    maxTokens,    // 0 = send no cap, the server's default decides
+		MaxTokens:    goalsReplyCap(maxTokens),
+		MaxDuration:  GoalsMaxDuration,
 	}, userMsg, captureEmit)
 	// set_goals persisted the goals directly; read them back so the caller sees what
 	// was written (empty slice ⇒ the LLM produced nothing ⇒ caller falls back).

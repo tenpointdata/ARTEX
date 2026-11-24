@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"sort"
@@ -388,12 +389,23 @@ func (s *Server) createGoals(ctx context.Context, t *Task, emit func(db.Activity
 	taskID, _ := strconv.ParseInt(t.ID, 10, 64)
 	s.engine.BeginLLMCall(t.ID)
 	goalRuntime := s.agentsForTask(t).runtime
+	// The decomposer runs alongside the seed intent, so the task can turn terminal
+	// before it finishes: abort the in-flight call then (c-7361b4). goalRuntime also
+	// refuses any further call on a terminal task.
+	ctx, stopWatch := s.cancelOnTerminal(ctx, t.ID)
+	defer stopWatch()
 	decomposed := agent.DecomposeGoalsWithProvider(ctx, goalRuntime, s.m.dir, t.Goal, t.Description, as, t.Store, taskID, goalRuntime.nonStreaming(), goalRuntime.maxTokens(), emit)
 	s.engine.EndLLMCall(t.ID)
 	for _, g := range decomposed {
 		if strings.TrimSpace(g.Text) != "" {
 			specs = append(specs, goalSpec{Text: g.Text, VulnClass: g.VulnClass})
 		}
+	}
+	if len(specs) == 0 && errors.Is(context.Cause(ctx), errTaskTerminal) {
+		// The task ended while decomposing: do not write an open goal into a
+		// terminal task. A later revive re-enters admission and decomposes again.
+		log.Printf("[goals] task %s: turned terminal during goal decomposition, decomposition aborted", t.ID)
+		return nil
 	}
 	if len(specs) == 0 {
 		// No decomposed goals (LLM error / no provider): use the raw task goal verbatim

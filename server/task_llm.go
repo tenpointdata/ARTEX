@@ -291,7 +291,8 @@ func (r *taskLLMRuntime) nonStreaming() bool {
 }
 
 // maxTokens returns the currently-active source's per-reply output cap.
-// Unresolvable → 0, i.e. send no cap, matching the pre-setting behaviour.
+// Unresolvable → 0. Note 0 does NOT mean "no cap": norma's harness then sends its
+// own default (32768) on every request, for every provider format including ollama.
 func (r *taskLLMRuntime) maxTokens() int {
 	cfg, _ := r.activeCfg() // zero value 0 when no configuration resolves
 	return cfg.MaxTokens
@@ -338,6 +339,9 @@ func (r *taskLLMRuntime) streamHooks() taskLLMStreamHooks {
 }
 
 func (r *taskLLMRuntime) Stream(ctx context.Context, req llm.CompletionRequest) iter.Seq2[llm.StreamEvent, error] {
+	if err := r.terminalRefusal(); err != nil {
+		return refusedStream(err)
+	}
 	ctx = llmrec.WithTaskID(ctx, r.taskID)
 	return streamTaskLLM(ctx, r.taskID, req, r.streamHooks())
 }
@@ -348,6 +352,9 @@ func (r *taskLLMRuntime) Stream(ctx context.Context, req llm.CompletionRequest) 
 // duplicated model output or tool execution (the "committed" bookkeeping the
 // streaming path needs is unnecessary here).
 func (r *taskLLMRuntime) Complete(ctx context.Context, req llm.CompletionRequest) (llm.Message, string, llm.Usage, error) {
+	if err := r.terminalRefusal(); err != nil {
+		return llm.Message{}, "", llm.Usage{}, err
+	}
 	ctx = llmrec.WithTaskID(ctx, r.taskID)
 	return completeTaskLLM(ctx, r.taskID, req, r.streamHooks())
 }
