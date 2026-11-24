@@ -2,10 +2,12 @@ package server
 
 import (
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"io"
 	"net"
 	"sync/atomic"
+	"syscall"
 	"testing"
 	"time"
 
@@ -72,6 +74,11 @@ func TestManagerSOCKS5UDPOptInAndAssetBlockRuleDropsDatagram(t *testing.T) {
 			t.Fatal(err)
 		}
 		ln, err := net.ListenUDP("udp4", ua)
+		if errors.Is(err, syscall.EADDRNOTAVAIL) {
+			// macOS configures only 127.0.0.1 on lo0; 127.0.0.2 needs
+			// `sudo ifconfig lo0 alias 127.0.0.2 up`.
+			t.Skipf("the UDP part needs a second loopback address: %v", err)
+		}
 		if err != nil {
 			t.Fatal(err)
 		}

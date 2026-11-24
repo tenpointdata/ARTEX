@@ -615,8 +615,11 @@ func TestBypass_CustomScriptToolTargetNotGated(t *testing.T) {
 }
 
 // A task with the gate off (the default) runs as before: a worker's WebFetch
-// and the custom tools reach their targets, and the gate writes no row and
-// resolves no name.
+// and the custom tools reach their targets, and the gate writes no row. The
+// names a connection of the platform dials (WebFetch, the custom http tool)
+// are still resolved, by the always-on egress floor (target_egress.go): block
+// rules and the metadata deny apply to the addresses. A command's targets are
+// matched as declared and never resolved.
 func TestGateOffTaskIsUnchanged(t *testing.T) {
 	g := newGateServer(t)
 	task := g.newTask(t, db.TaskCreateOptions{})
@@ -644,6 +647,10 @@ func TestGateOffTaskIsUnchanged(t *testing.T) {
 	if out, isErr := callTool(t, httpTool, gatedCtx(task, intercept.DefaultTargetWaitBound), fmt.Sprintf(`{"port":%q}`, port), nil); isErr || !strings.Contains(out, "probe-reached") {
 		t.Fatalf("custom http tool: error=%v out=%q", isErr, out)
 	}
+	connectLookups := res.lookups()
+	if connectLookups == 0 {
+		t.Fatal("no lookup for the connections the platform opened; the egress floor did not resolve their names")
+	}
 	cmdTool := g.s.buildCustomTool(&db.Tool{Key: "probe_cmd", Kind: "command",
 		Exec: execJSON(t, map[string]any{"command": ": http://localhost:" + port + "/ && echo ran-gate-off"})})
 	if out, isErr := callTool(t, cmdTool, gatedCtx(task, intercept.DefaultTargetWaitBound), `{}`, &actool.ToolContext{WorkingDir: t.TempDir()}); isErr || !strings.Contains(out, "ran-gate-off") {
@@ -656,7 +663,7 @@ func TestGateOffTaskIsUnchanged(t *testing.T) {
 	if n := targetRowCount(t, g.m.pg, task.ID); n != 0 {
 		t.Fatalf("%d target rows, want none", n)
 	}
-	if n := res.lookups(); n != 0 {
-		t.Fatalf("%d lookups, want none", n)
+	if n := res.lookups(); n != connectLookups {
+		t.Fatalf("%d lookups after the command tool, want %d: a command's targets are not resolved with the gate off", n, connectLookups)
 	}
 }

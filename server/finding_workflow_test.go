@@ -81,10 +81,12 @@ func TestFindingWorkflowAutoHintToPlannerAndSetting(t *testing.T) {
 			t.Fatal("handoff lost reference", ref.TrafficID)
 		}
 	}
-	for range 6 {
-		if _, err := task.Store.AddNode(db.KindFact, map[string]any{"summary": "ID separation"}, 0, "confirmed", "test", nil); err != nil {
-			t.Fatal(err)
-		}
+	// Keep the next node ID clear of the next finding ID, so a mix-up between
+	// them shows. The package's tests share one database, so a fixed number of
+	// extra nodes does not do it: earlier tests move both sequences.
+	if _, err := pg.Exec(`SELECT setval('exploration_nodes_id_seq',
+		GREATEST((SELECT last_value FROM exploration_nodes_id_seq), (SELECT last_value FROM findings_id_seq)) + 1000)`); err != nil {
+		t.Fatal(err)
 	}
 	ts := agent.NewToolSet(task.Store, "planner")
 	ts.SetTaskID(*f.TaskID)
