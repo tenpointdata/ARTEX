@@ -71,6 +71,8 @@ var clientBinders = map[string]clientBinder{
 	"GET /api/stats":                             bindTaskQuery,
 	"GET /api/tasks/{id}/outcome":                bindTaskPath,
 	"GET /api/tasks/{id}/coverage":               bindTaskPath,
+	"GET /api/me/companies":                      bindBound,
+	"GET /api/me/tasks":                          bindCompany,
 	"GET /api/exploration/findings":              bindFindingsList,
 	"GET /api/exploration/findings/groups":       bindCompany,
 	"GET /api/exploration/findings/asset-tree":   bindCompany,
@@ -149,6 +151,9 @@ func bindCompany(_ *Server, r *http.Request, sc *clientScope) *bindErr {
 	sc.Company = id
 	return nil
 }
+
+// bindBound admits the request as is: the handler lists only sc.Companies.
+func bindBound(*Server, *http.Request, *clientScope) *bindErr { return nil }
 
 // bindTask admits a task the user's companies own.
 func bindTask(s *Server, raw string, sc *clientScope) *bindErr {

@@ -80,8 +80,8 @@ export function authorizationStatus(
   return "in_force";
 }
 
-// landingPath is where a session starts: the task list, or the findings for a
-// client_read account (it cannot list tasks).
+// landingPath is where a session starts: the task list, or the client summary
+// (its bound tasks' reports and outcomes) for a client_read account.
 export function landingPath(session: Pick<SessionInfo, "permissions"> | null | undefined): string {
-  return can(session, "read") ? "/function/tasks" : "/function/findings";
+  return can(session, "read") ? "/function/tasks" : "/function/reports";
 }
