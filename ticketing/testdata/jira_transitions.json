@@ -1,0 +1,25 @@
+{
+  "expand": "transitions",
+  "transitions": [
+    {
+      "id": "11",
+      "name": "Start Progress",
+      "to": {"id": "3", "name": "In Progress", "statusCategory": {"id": 4, "key": "indeterminate", "name": "In Progress"}}
+    },
+    {
+      "id": "21",
+      "name": "Done",
+      "to": {"id": "10001", "name": "Done", "statusCategory": {"id": 3, "key": "done", "name": "Done"}}
+    },
+    {
+      "id": "22",
+      "name": "Resolve Issue",
+      "to": {"id": "5", "name": "Resolved", "statusCategory": {"id": 3, "key": "done", "name": "Done"}}
+    },
+    {
+      "id": "31",
+      "name": "Reopen",
+      "to": {"id": "10000", "name": "To Do", "statusCategory": {"id": 2, "key": "new", "name": "To Do"}}
+    }
+  ]
+}

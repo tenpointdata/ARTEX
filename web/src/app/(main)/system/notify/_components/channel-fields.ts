@@ -1,4 +1,8 @@
 import { t } from "@/i18n";
+import type { FieldDef } from "@/lib/config-form";
+
+export type { FieldDef, FieldKind } from "@/lib/config-form";
+export { parseKV } from "@/lib/config-form";
 
 // Channel field table and config-value parsing helpers.
 //
@@ -23,15 +27,6 @@ export const KIND_LABEL: Record<string, string> = {
 // because only the channel implementation knows which values are credentials (WeCom's entire Webhook is the credential,
 // whereas DingTalk's is just one secret). A missing entry here for a new channel only blanks the form;
 // it does not fail silently (hasFields below surfaces it).
-export type FieldKind = "text" | "password" | "number" | "select" | "textarea" | "switch" | "kv" | "list";
-export interface FieldDef {
-  key: string;
-  label: string;
-  kind: FieldKind;
-  placeholder?: string;
-  help?: string;
-  options?: { value: string; label: string }[];
-}
 export const CHANNEL_FIELDS: Record<string, FieldDef[]> = {
   dingtalk: [
     {
@@ -153,17 +148,6 @@ export const emptyForm = (kind: string): ChannelForm => ({
   onStatusChange: false,
 });
 
-// parseKV parses a "KEY=VALUE per line" textarea.
-export function parseKV(text: string): Record<string, string> {
-  const out: Record<string, string> = {};
-  for (const line of text.split("\n")) {
-    const ln = line.trim();
-    if (!ln) continue;
-    const i = ln.indexOf("=");
-    if (i > 0) out[ln.slice(0, i).trim()] = ln.slice(i + 1).trim();
-  }
-  return out;
-}
 // parseIDs parses a comma/whitespace-separated id list.
 export function parseIDs(text: string): number[] {
   return text
