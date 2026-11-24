@@ -73,6 +73,7 @@ import {
   VERIFICATION_META,
   VERIFICATION_STATUSES,
 } from "./_components/findings-table";
+import { PushToTrackerSelect, useEnabledTrackers } from "./_components/push-to-tracker";
 import { setVisibleInterval } from "@/lib/polling";
 import { t } from "@/i18n";
 
@@ -290,6 +291,7 @@ export default function FindingsPage() {
   // Export selection: tracked by finding_id (the standalone table's id), preserved across pages.
   const [selectedIds, setSelectedIds] = React.useState<Set<string>>(() => new Set());
   const [bulkBusy, setBulkBusy] = React.useState(false);
+  const trackers = useEnabledTrackers();
   // Export dialog state: scope (current filter / all / selected) × format (single md / per-finding md zip / csv / json).
   const [exportOpen, setExportOpen] = React.useState(false);
   const [exportScope, setExportScope] = React.useState<"filtered" | "all" | "selected">("filtered");
@@ -1229,6 +1231,7 @@ export default function FindingsPage() {
                     ))}
                   </SelectContent>
                 </Select>
+                <PushToTrackerSelect findingIds={selectedIds} trackers={trackers} />
               </div>
             )}
             <Button size="sm" variant="outline" onClick={openExport}>

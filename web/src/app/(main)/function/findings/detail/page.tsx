@@ -32,6 +32,7 @@ import {
   ReportStateBadge,
   VerificationBadge,
 } from "../_components/findings-table";
+import { FindingIntegrationsPanel } from "./integrations-panel";
 import { FindingLineageView } from "./lineage";
 
 const SEVERITIES: Severity[] = ["critical", "high", "medium", "low"];
@@ -233,6 +234,7 @@ function FindingDetailInner() {
                   </CardContent>
                 </Card>
               )}
+              <FindingIntegrationsPanel key={`integrations-${id}`} findingId={id} />
               <FindingTrafficPanel
                 key={id}
                 findingId={id}

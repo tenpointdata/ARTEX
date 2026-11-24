@@ -1,9 +1,3 @@
-import assert from "node:assert/strict";
-import fs from "node:fs";
-import path from "node:path";
-import test from "node:test";
-import { fileURLToPath } from "node:url";
-
 import { buildConfig, isMasked, maskedTail, parseList } from "./config-form.ts";
 import {
   chunk,
@@ -14,6 +8,11 @@ import {
   summarizeSync,
   trackerDestination,
 } from "./integrations.ts";
+import assert from "node:assert/strict";
+import fs from "node:fs";
+import path from "node:path";
+import test from "node:test";
+import { fileURLToPath } from "node:url";
 
 const fixtures = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../scanimport/testdata");
 const head = (name) => fs.readFileSync(path.join(fixtures, name), "utf8").slice(0, 4096);
@@ -82,12 +81,15 @@ test("chunk splits pushes at the server cap", () => {
 });
 
 test("summarizePush counts created, updated and failed", () => {
-  const s = summarizePush([
-    { finding_id: 1, created: true },
-    { finding_id: 2, created: false },
-    { finding_id: 3, created: false, error: "boom" },
-    { finding_id: 4, created: false, error: "again" },
-  ], 1);
+  const s = summarizePush(
+    [
+      { finding_id: 1, created: true },
+      { finding_id: 2, created: false },
+      { finding_id: 3, created: false, error: "boom" },
+      { finding_id: 4, created: false, error: "again" },
+    ],
+    1,
+  );
   assert.deepEqual(s, { created: 1, updated: 1, failed: 2, errors: ["#3: boom"] });
 });
 

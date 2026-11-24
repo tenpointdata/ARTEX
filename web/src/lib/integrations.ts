@@ -88,27 +88,35 @@ export function summarizeSync(results: TicketSyncResult[]): Record<TicketSyncAct
   return s;
 }
 
+function configText(config: ConfigValues, key: string): string {
+  const v = config[key];
+  if (v === null || v === undefined) return "";
+  return typeof v === "string" ? v.trim() : String(v);
+}
+
+function urlHost(raw: string): string {
+  try {
+    return new URL(raw).host;
+  } catch {
+    return raw;
+  }
+}
+
+// Per-kind "where tickets go"; a kind not listed shows its base URL's host.
+const DESTINATION: Record<string, (c: ConfigValues) => string> = {
+  github: (c) => {
+    const base = configText(c, "base_url");
+    return base ? `${urlHost(base)}/${configText(c, "repo")}` : configText(c, "repo");
+  },
+  jira: (c) => [urlHost(configText(c, "base_url")), configText(c, "project_key")].filter(Boolean).join(" · "),
+  defectdojo: (c) => {
+    const test = configText(c, "test_id");
+    return [urlHost(configText(c, "base_url")), test && `test ${test}`].filter(Boolean).join(" · ");
+  },
+};
+
 // trackerDestination is the one-line "where tickets go" for the trackers table.
 export function trackerDestination(tr: Pick<TicketTracker, "kind" | "config">): string {
-  const c = tr.config;
-  const str = (k: string) => (typeof c[k] === "string" ? (c[k] as string).trim() : c[k] == null ? "" : String(c[k]));
-  const host = (raw: string) => {
-    try {
-      return new URL(raw).host;
-    } catch {
-      return raw;
-    }
-  };
-  switch (tr.kind) {
-    case "github": {
-      const base = str("base_url");
-      return base ? `${host(base)}/${str("repo")}` : str("repo");
-    }
-    case "jira":
-      return [host(str("base_url")), str("project_key")].filter(Boolean).join(" · ");
-    case "defectdojo":
-      return [host(str("base_url")), str("test_id") && `test ${str("test_id")}`].filter(Boolean).join(" · ");
-    default:
-      return host(str("base_url"));
-  }
+  const fn = DESTINATION[tr.kind];
+  return fn ? fn(tr.config) : urlHost(configText(tr.config, "base_url"));
 }
