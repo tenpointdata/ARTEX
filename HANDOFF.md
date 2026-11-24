@@ -59,25 +59,10 @@ See `docs/ARCHITECTURE.md` for the code-level map. Summary:
 
 ## Current state
 
-**2026-11-24 (c-f4115c, E5 lifecycle, branch `ej/20261124-133353-5aceb1`)** — The six E5 lifecycle gaps are
-closed on a branch that merges the E5 + client_read branch (`ej/20261124-110647-182fa9`, PR #16), so it
-lands after PR #16 and c-5b5421. (1) Task archives snapshot `engagement_authorizations`; archiving keeps
-the rows with the stub; restore re-creates missing versions (audit actor `archive-restore`) and keeps a
-differing DB copy with a warning. (2) An artifact requires the target gate: `AddAuthorization` turns it on
-in the same transaction, `PATCH target_gate=false` answers 409 (`db.ErrTargetGateRequired`), and spawned
-children under an artifact are gated. (3) The scheduler pauses tasks whose artifact is revoked or past
-`not_after` (`server/authorization_expiry.go`, cause `authorization_ended`); a revocation pauses at once;
-resume answers 409 until a version that has not ended is stored. (4) `POST /api/auth/change-password`
-serves console users (compare-and-swap on the session's user version, 409 on a race); the sidebar
-dialog signs out after a change. (5) SSE in-stream re-checks use `db.CachedUser`; (6) the gate reads
-`db.CachedAuthorization`. Both are 2 s caches on the new generic `memo/` package, invalidated by every
-write through `db`. Docs: `docs/GOVERNANCE.md`. Verified: PG tests in `db/authorization_lifecycle_test.go`,
-`db/task_archives_authorization_pg_test.go`, `server/authorization_lifecycle_pg_test.go`,
-`server/user_password_pg_test.go` (each key assertion mutation-checked); `go test ./db ./intercept ./memo
-./agent ./server` with PG passes except the two known environmental failures; `scripts/verify.sh` with
-web steps passes. Not checked: a live task actually being paused by the scheduler at expiry (covered by
-calling the sweep directly). Legacy artifacts stored before this change with the gate off are not
-backfilled (only unreleased dev data). Follow-ups: `c-5018f6`, `c-01377e`.
+**2026-11-24 (c-f4115c, in review)** — E5 lifecycle gaps closed on `ej/20261124-133353-5aceb1`, stacked on
+PR #16 + c-5b5421: archives carry the artifact, an artifact forces the gate on, expiry/revocation pauses
+the task, console users change their own password, 2 s caches (`memo/`) for SSE re-checks and the
+gate's artifact read. Detail in `docs/GOVERNANCE.md`; follow-ups `c-5018f6`, `c-01377e`.
 
 **2026-11-24 (c-d25ff9, E3)** — The `RSI.md` Loop C benchmark gate and Loop B lesson graduation are built,
 flag off (`ARTEX_RSI_LOOP`, default off, read per request). Pure core `rsi/` (search-space allowlist:
