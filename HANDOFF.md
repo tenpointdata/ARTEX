@@ -80,7 +80,7 @@ triage. Allow/Deny is one gated `components/approval-decision-buttons.tsx`, and 
 `web/src/lib/rich-text.tsx`. Every touched file over 600 lines shrank by extraction. Browser-probed
 (headless Chromium, real backend + Postgres 16) as reviewer and operator on 23 pages: no 403 on load, and
 no enabled mutating control the role lacks. Rows that were not seeded (MCP servers, channels, LLM
-profiles, pending approvals, traffic, files, skills) were checked in code only. Open: `c-7c4715`, `c-601ec6`.
+profiles, pending approvals, traffic, files, skills) were checked in code only. Open: `c-4ee114` (seeded-row re-probe, biome on extracted files), `c-7c4715`, `c-601ec6`.
 
 **2026-11-24 (c-d25ff9, E3)** — The `RSI.md` Loop C benchmark gate and Loop B lesson graduation are built,
 flag off (`ARTEX_RSI_LOOP`, default off, read per request). Pure core `rsi/` (search-space allowlist:
