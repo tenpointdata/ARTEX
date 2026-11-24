@@ -615,8 +615,12 @@ func TestBypass_CustomScriptToolTargetNotGated(t *testing.T) {
 }
 
 // A task with the gate off (the default) runs as before: a worker's WebFetch
-// and the custom tools reach their targets, and the gate writes no row and
-// resolves no name.
+// and the custom tools reach their targets, and the gate writes no row. Names
+// are still resolved: the always-on egress checks (intercept/target_egress.go)
+// resolve the name a connecting tool declares (WebFetch, the custom http tool)
+// to apply the asset block rules and the metadata deny, and its dial connects
+// to the addresses they compared. A command tool's text is not connected to,
+// so it costs no lookup.
 func TestGateOffTaskIsUnchanged(t *testing.T) {
 	g := newGateServer(t)
 	task := g.newTask(t, db.TaskCreateOptions{})
@@ -644,6 +648,10 @@ func TestGateOffTaskIsUnchanged(t *testing.T) {
 	if out, isErr := callTool(t, httpTool, gatedCtx(task, intercept.DefaultTargetWaitBound), fmt.Sprintf(`{"port":%q}`, port), nil); isErr || !strings.Contains(out, "probe-reached") {
 		t.Fatalf("custom http tool: error=%v out=%q", isErr, out)
 	}
+	connectLookups := res.lookups()
+	if connectLookups == 0 {
+		t.Fatal("no lookups: the always-on egress checks did not resolve the names WebFetch and the http tool connect to")
+	}
 	cmdTool := g.s.buildCustomTool(&db.Tool{Key: "probe_cmd", Kind: "command",
 		Exec: execJSON(t, map[string]any{"command": ": http://localhost:" + port + "/ && echo ran-gate-off"})})
 	if out, isErr := callTool(t, cmdTool, gatedCtx(task, intercept.DefaultTargetWaitBound), `{}`, &actool.ToolContext{WorkingDir: t.TempDir()}); isErr || !strings.Contains(out, "ran-gate-off") {
@@ -656,7 +664,7 @@ func TestGateOffTaskIsUnchanged(t *testing.T) {
 	if n := targetRowCount(t, g.m.pg, task.ID); n != 0 {
 		t.Fatalf("%d target rows, want none", n)
 	}
-	if n := res.lookups(); n != 0 {
-		t.Fatalf("%d lookups, want none", n)
+	if n := res.lookups(); n != connectLookups {
+		t.Fatalf("the command tool made %d lookups, want none", n-connectLookups)
 	}
 }

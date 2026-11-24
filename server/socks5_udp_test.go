@@ -53,6 +53,15 @@ func TestManagerSOCKS5UDPOptInAndAssetBlockRuleDropsDatagram(t *testing.T) {
 		t.Fatalf("expected SOCKS5+UDP enabled, got addr=%q udp=%v", socksAddr, mOn.traffic.SOCKS5UDPEnabled())
 	}
 
+	// The datagram check needs a second loopback address. Linux routes all of
+	// 127.0.0.0/8 to lo; macOS has only 127.0.0.1 on lo0 unless an alias is
+	// added (sudo ifconfig lo0 alias 127.0.0.2 up).
+	if probe, perr := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 2)}); perr != nil {
+		t.Skipf("the datagram check needs 127.0.0.2 on loopback (%v); on macOS run `sudo ifconfig lo0 alias 127.0.0.2 up`", perr)
+	} else {
+		_ = probe.Close()
+	}
+
 	// Block 127.0.0.2 via global asset intercept rule; leave 127.0.0.1 allowed.
 	rule, err := mOn.pg.CreateAssetInterceptRule(
 		"exact_ip",
