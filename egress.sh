@@ -21,6 +21,10 @@
 #                        address) and denied like ARTEX_EGRESS_DENY: the database
 #                        and the control API Services in Kubernetes. A name that
 #                        does not resolve after a few tries is logged loudly.
+#   ARTEX_EGRESS_ALLOW_DNS  1 (default) accepts port 53 (udp/tcp) to the nameservers
+#                        in /etc/resolv.conf before any deny rule, so a denied range
+#                        that holds the resolver (a cluster's Service CIDR) does not
+#                        take name resolution from the agent; 0 leaves DNS to the rules
 #   ARTEX_EGRESS_ALLOW_HOSTS  host names resolved the same way and accepted like
 #                        ARTEX_EGRESS_ALLOW (the control node's recording proxy when
 #                        the cluster's CIDRs are denied)
@@ -60,6 +64,12 @@ egress_build() {
 	for c in $allow; do
 		case "$c" in *:*) [ "$fam" = 6 ] || continue ;; *) [ "$fam" = 4 ] || continue ;; esac
 		"$ipt" -w -A ARTEX_EGRESS -d "$c" -j ACCEPT || return 1
+	done
+	for ns in $dns; do
+		case "$ns" in *:*) [ "$fam" = 6 ] || continue ;; *) [ "$fam" = 4 ] || continue ;; esac
+		for proto in udp tcp; do
+			"$ipt" -w -A ARTEX_EGRESS -d "$ns" -p "$proto" --dport 53 -j ACCEPT || return 1
+		done
 	done
 	# The API, on loopback and on every address of this container.
 	"$ipt" -w -A ARTEX_EGRESS -m addrtype --dst-type LOCAL -p tcp --dport "$port" -j REJECT || return 1
@@ -136,10 +146,15 @@ egress_apply() {
 	# shellcheck disable=SC2046
 	allowhosts="$(egress_resolve $(echo "${ARTEX_EGRESS_ALLOW_HOSTS:-}" | tr ',' ' ') | tr '\n' ' ')"
 	extra="$(echo $extra $denyhosts)"
+	dns=""
+	if [ "${ARTEX_EGRESS_ALLOW_DNS:-1}" != "0" ] && [ -r /etc/resolv.conf ]; then
+		dns="$(awk '$1 == "nameserver" {print $2}' /etc/resolv.conf | tr '\n' ' ')"
+		dns="$(echo $dns)"
+	fi
 	allow="$(echo $allow $allowhosts)"
 
 	if egress_build iptables 4; then
-		egress_log "installed for uid $uid${uidrange:+ and uids $uidrange} (ipv4): deny metadata, gateway ${gw4:-none}, host.docker.internal ${hd4:-none}, local port $port${extra:+, extra: $extra}${allow:+; allow: $allow}"
+		egress_log "installed for uid $uid${uidrange:+ and uids $uidrange} (ipv4): deny metadata, gateway ${gw4:-none}, host.docker.internal ${hd4:-none}, local port $port${extra:+, extra: $extra}${allow:+; allow: $allow}${dns:+; dns: $dns}"
 	else
 		egress_log "WARNING: could not install iptables rules (missing CAP_NET_ADMIN? add cap_add: NET_ADMIN); agent processes are NOT egress filtered"
 		return 0

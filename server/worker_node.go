@@ -31,9 +31,10 @@ import (
 
 // workerNodeState is the node-wide claim gate.
 type workerNodeState struct {
-	blocked atomic.Value // string: why this node may not claim ("" = may claim)
-	mu      sync.Mutex
-	served  map[string]bool // task ids whose worker loops run here
+	blocked       atomic.Value // string: why this node may not claim ("" = may claim)
+	mu            sync.Mutex
+	served        map[string]bool       // task ids whose worker loops run here
+	agentSettings agentSettingsFollower // touched by the dispatch loop only
 }
 
 func (w *workerNodeState) reason() string {
@@ -93,6 +94,7 @@ func (s *Server) workerDispatchOnce(ctx context.Context) {
 			w.setBlocked(s.node.NodeID, "")
 		}
 	}
+	s.followAgentSettings(&w.agentSettings)
 	ids, err := pg.DispatchableTaskIDs()
 	if err != nil {
 		log.Printf("[node %s] list tasks: %v", s.node.NodeID, err)
