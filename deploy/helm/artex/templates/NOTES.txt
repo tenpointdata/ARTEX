@@ -1,0 +1,29 @@
+ARTEX {{ .Chart.AppVersion }} installed as release "{{ .Release.Name }}".
+
+AUTHORIZED USE ONLY: run ARTEX only against systems you are explicitly authorized to
+test. Scope gate, approvals, budgets, noise governor and audit run on every node.
+
+1. First-run setup token:
+     kubectl -n {{ .Release.Namespace }} logs deploy/{{ include "artex.fullname" . }}-control | grep "Setup token"
+
+2. Open the UI:
+{{- if .Values.control.ingress.enabled }}
+{{- range .Values.control.ingress.hosts }}
+     http{{ if $.Values.control.ingress.tls }}s{{ end }}://{{ .host }}
+{{- end }}
+{{- else }}
+     kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "artex.fullname" . }}-control {{ .Values.control.service.port }}:{{ .Values.control.service.port }}
+     then http://localhost:{{ .Values.control.service.port }}
+{{- end }}
+
+3. Workers: {{ if .Values.worker.enabled }}{{ .Values.worker.replicas }} replica(s), anti-affinity "{{ .Values.worker.antiAffinity }}" on {{ .Values.worker.topologyKey }}.
+     kubectl -n {{ .Release.Namespace }} get pods -l app.kubernetes.io/component=worker -o wide{{ else }}disabled (set control.localWorkers > 0 or enable worker).{{ end }}
+{{- if and .Values.postgresql.bundled.enabled }}
+
+WARNING: the bundled PostgreSQL is a single instance without backups. Use
+postgresql.external for production.
+{{- end }}
+{{- if not .Values.secretKey.existingSecret }}
+
+Back up the Secret "{{ include "artex.secretKeyName" . }}" (key {{ include "artex.secretKeyKey" . }}): without ARTEX_SECRET_KEY, stored secrets cannot be decrypted.
+{{- end }}

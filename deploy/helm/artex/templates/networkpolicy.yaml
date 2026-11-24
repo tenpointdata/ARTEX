@@ -1,0 +1,23 @@
+{{- if and .Values.worker.enabled .Values.networkPolicy.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "artex.fullname" . }}-worker
+  labels:
+    {{- include "artex.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "artex.selector" (dict "ctx" . "component" "worker") | nindent 6 }}
+  policyTypes: [Ingress]
+  # Nothing may connect to a worker except to its health port (kubelet probes).
+  ingress:
+    - ports:
+        - {protocol: TCP, port: {{ .Values.worker.healthPort }}}
+      {{- with .Values.networkPolicy.healthSourceCIDRs }}
+      from:
+        {{- range . }}
+        - ipBlock: {cidr: {{ . | quote }}}
+        {{- end }}
+      {{- end }}
+{{- end }}

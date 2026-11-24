@@ -1,0 +1,82 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "artex.fullname" . }}-control
+  labels:
+    {{- include "artex.labels" . | nindent 4 }}
+    app.kubernetes.io/component: control
+spec:
+  # One replica only: the control node holds in-memory planner state.
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "artex.selector" (dict "ctx" . "component" "control") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "artex.selector" (dict "ctx" . "component" "control") | nindent 8 }}
+        {{- with .Values.control.podLabels }}{{ toYaml . | nindent 8 }}{{ end }}
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+        {{- with .Values.control.podAnnotations }}{{ toYaml . | nindent 8 }}{{ end }}
+    spec:
+      serviceAccountName: {{ include "artex.serviceAccountName" . }}
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: {{ .Values.control.terminationGracePeriodSeconds }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets: {{ toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: artex
+          image: {{ include "artex.image" . | quote }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args: ["-role", "control", "-addr", ":8787", "-proxy", {{ .Values.control.proxyAddr | quote }}]
+          envFrom:
+            {{- include "artex.envFrom" . | nindent 12 }}
+          env:
+            {{- include "artex.sharedEnv" (dict "ctx" . "extra" (merge (dict "ARTEX_ROLE" "control" "ARTEX_LOCAL_WORKERS" (toString .Values.control.localWorkers)) .Values.control.extraEnv)) | nindent 12 }}
+          ports:
+            - {name: http, containerPort: 8787}
+          startupProbe:
+            httpGet: {path: /api/health, port: http}
+            periodSeconds: 5
+            failureThreshold: 60
+          readinessProbe:
+            httpGet: {path: /api/health, port: http}
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: {path: /api/health, port: http}
+            periodSeconds: 20
+            failureThreshold: 6
+          resources: {{ toYaml .Values.control.resources | nindent 12 }}
+          securityContext:
+            {{- include "artex.containerSecurityContext" . | nindent 12 }}
+          volumeMounts:
+            - {name: data, mountPath: /app/data}
+            - {name: keys, mountPath: /app/keys}
+      volumes:
+        - name: data
+          {{- if .Values.control.persistence.data.enabled }}
+          persistentVolumeClaim:
+            claimName: {{ default (printf "%s-control-data" (include "artex.fullname" .)) .Values.control.persistence.data.existingClaim }}
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
+        - name: keys
+          {{- if .Values.control.persistence.keys.enabled }}
+          persistentVolumeClaim:
+            claimName: {{ default (printf "%s-control-keys" (include "artex.fullname" .)) .Values.control.persistence.keys.existingClaim }}
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
+      {{- with .Values.control.nodeSelector }}
+      nodeSelector: {{ toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.control.affinity }}
+      affinity: {{ toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.control.tolerations }}
+      tolerations: {{ toYaml . | nindent 8 }}
+      {{- end }}
