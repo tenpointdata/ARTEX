@@ -20,6 +20,7 @@ import (
 	"github.com/Autumn-27/artex/agent"
 	"github.com/Autumn-27/artex/config"
 	"github.com/Autumn-27/artex/egress"
+	"github.com/Autumn-27/artex/ownerfw"
 	"github.com/Autumn-27/artex/server"
 )
 
@@ -214,11 +215,16 @@ func run() int {
 		log.Printf("[config] %v", err)
 		return 1
 	}
+	// Agent processes dial for themselves: refuse them the cloud instance-metadata
+	// and link-local addresses at the dial level (server/egress_floor.go). The
+	// self-test below then dials those addresses as the executor.
+	egressFloor := server.InstallAgentEgressFloor(runtime.GOOS, priv, ownerfw.ExecRunner)
 	// Before the stores open and any agent runs: check that the isolation above holds
 	// (server/isolation.go). On Linux as root a failure stops the start unless the
 	// escape is set; elsewhere the server starts degraded and says so.
 	selfTest := server.IsolationSelfTest(priv, server.IsolationTargets{
 		DataDir: *dataDir, KeyDir: keyDir, ConfigPath: cfgPath, SkillDir: skillDir, DSN: dsn,
+		MetadataDial: server.MetadataProbeAddrs(), EgressFloor: egressFloor,
 	})
 	isolation, err := server.EnforceIsolation(runtime.GOOS, priv, selfTest, *devNoIsolation)
 	if err != nil {
