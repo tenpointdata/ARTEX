@@ -21,7 +21,8 @@
     "test:i18n": "node scripts/check-i18n.mjs && node --test scripts/i18n.test.mjs",
     "test:bash": "node --test src/lib/bash-exit-status.test.mjs",
     "test:governance": "node --test src/lib/governance.test.mjs",
-    "test:integrations": "node --test src/lib/integrations.test.mjs"
+    "test:integrations": "node --test src/lib/integrations.test.mjs",
+    "test:sse": "node --test src/lib/sse.test.mjs"
   },
   "lint-staged": {
     "*.{js,ts,jsx,tsx}": [

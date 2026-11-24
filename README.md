@@ -674,7 +674,7 @@ offload cold task archives to object storage.
 
 The frontend, API and SSE stream share port 8787 (the binary listens on `127.0.0.1:8787` by
 default; the Docker container publishes on `127.0.0.1`), and the activity stream is same-origin by
-default, so **no `NEXT_PUBLIC_SSE_BASE` is needed**: expose 443 and keep 8787 internal.
+default: expose 443 and keep 8787 internal.
 
 SSE keeps a long-lived connection with continuous pushes, so the proxy **must disable buffering**;
 otherwise the browser connects but never receives events.
@@ -742,9 +742,10 @@ known to be HTTPS: directly over TLS, or via `X-Forwarded-Proto: https` from a t
 same list above enables it, so with nginx in front, the 443 server answers with HSTS after you set
 `ARTEX_TRUSTED_PROXIES`.
 
-> Only when SSE needs a different origin from the page (e.g. a dedicated subdomain) should you set
-> `NEXT_PUBLIC_SSE_BASE` **at build time** (it is baked into the static bundle during `next build`;
-> setting it at container runtime has no effect).
+> The streams are always same-origin with the page: the session is an HttpOnly cookie that the
+> browser sends only to the page's own origin, so serve the SSE routes through the same host as the
+> console (the former `NEXT_PUBLIC_SSE_BASE` override is gone; a cross-origin stream was refused
+> with 401).
 
 ---
 

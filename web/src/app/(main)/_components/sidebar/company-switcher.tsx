@@ -28,15 +28,21 @@ import { useCompanyStore } from "@/stores/company/company-store";
 // The active company narrows every page that reads assets. "All companies" is
 // the default and the way back out; it is never persisted as a sentinel, the
 // store holds null for it.
-export function CompanySwitcher() {
+//
+// bound: a client_read session picks only among its bound companies (the
+// store's list, loaded by ClientCompanyGate): no "All companies", no link to
+// the operator's company management.
+export function CompanySwitcher({ bound = false }: { bound?: boolean }) {
   const { isMobile, setOpenMobile } = useSidebar();
   const companyId = useCompanyStore((s) => s.companyId);
   const companyName = useCompanyStore((s) => s.companyName);
   const setCompany = useCompanyStore((s) => s.setCompany);
+  const boundCompanies = useCompanyStore((s) => s.bound);
 
   const [open, setOpen] = React.useState(false);
-  const [companies, setCompanies] = React.useState<Company[]>([]);
+  const [loaded, setLoaded] = React.useState<Company[]>([]);
   const [error, setError] = React.useState<string | null>(null);
+  const companies = bound ? (boundCompanies ?? []) : loaded;
 
   // Loaded on mount for the trigger label, and again on open and after a switch
   // so a company created on the assets page shows up without a reload. open and
@@ -44,12 +50,13 @@ export function CompanySwitcher() {
   React.useEffect(() => {
     void open;
     void companyId;
+    if (bound) return;
     let disposed = false;
     api
       .companies()
       .then((rows) => {
         if (disposed) return;
-        setCompanies(rows);
+        setLoaded(rows);
         setError(null);
       })
       .catch((e) => {
@@ -59,7 +66,7 @@ export function CompanySwitcher() {
     return () => {
       disposed = true;
     };
-  }, [open, companyId]);
+  }, [open, companyId, bound]);
 
   const active = companyId === null ? null : (companies.find((c) => c.id === companyId) ?? null);
 
@@ -109,16 +116,18 @@ export function CompanySwitcher() {
               <CommandInput placeholder={t("Search company…")} />
               <CommandList>
                 <CommandEmpty>{error ? t("Failed to load companies") : t("No company found")}</CommandEmpty>
-                <CommandGroup>
-                  <CommandItem value="__all__ all companies" onSelect={() => select(null)}>
-                    <LayersIcon className="size-4" />
-                    <span className="flex-1 truncate">{t("All companies")}</span>
-                    <CheckIcon className={cn("size-4", companyId === null ? "opacity-100" : "opacity-0")} />
-                  </CommandItem>
-                </CommandGroup>
+                {bound ? null : (
+                  <CommandGroup>
+                    <CommandItem value="__all__ all companies" onSelect={() => select(null)}>
+                      <LayersIcon className="size-4" />
+                      <span className="flex-1 truncate">{t("All companies")}</span>
+                      <CheckIcon className={cn("size-4", companyId === null ? "opacity-100" : "opacity-0")} />
+                    </CommandItem>
+                  </CommandGroup>
+                )}
                 {companies.length > 0 ? (
                   <>
-                    <CommandSeparator />
+                    {bound ? null : <CommandSeparator />}
                     <CommandGroup heading={t("Companies")}>
                       {companies.map((company) => (
                         <CommandItem
@@ -137,13 +146,15 @@ export function CompanySwitcher() {
                 ) : null}
               </CommandList>
             </Command>
-            <div className="border-t p-2">
-              <Button variant="ghost" size="sm" className="w-full justify-start" asChild>
-                <Link prefetch={false} href="/function/assets">
-                  {t("Manage companies")}
-                </Link>
-              </Button>
-            </div>
+            {bound ? null : (
+              <div className="border-t p-2">
+                <Button variant="ghost" size="sm" className="w-full justify-start" asChild>
+                  <Link prefetch={false} href="/function/assets">
+                    {t("Manage companies")}
+                  </Link>
+                </Button>
+              </div>
+            )}
           </PopoverContent>
         </Popover>
       </SidebarMenuItem>

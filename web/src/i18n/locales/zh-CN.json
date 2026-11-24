@@ -2926,5 +2926,15 @@
   "{name} sees only the reports and findings of the companies checked here. With none checked the account is refused everywhere.": "{name} 只能看到此处勾选的企业的报告和发现。若一个都不勾选，该账号在所有位置都会被拒绝。",
   "Import #{id}": "导入 #{id}",
   "Clear the import filter": "清除导入筛选",
-  "Show the {count} new findings of import #{id}": "查看导入 #{id} 的 {count} 条新发现"
+  "Show the {count} new findings of import #{id}": "查看导入 #{id} 的 {count} 条新发现",
+  "This account is not bound to any company yet. Ask an administrator to bind it.": "此账号尚未绑定任何公司，请联系管理员绑定。",
+  "Engagement": "测试项目",
+  "Started": "开始时间",
+  "Finished": "结束时间",
+  "Retest: fixed": "复测：已修复",
+  "Retest: reproduced": "复测：仍可复现",
+  "Reports": "报告",
+  "Engagements for {company}": "{company} 的测试项目",
+  "Pick a company in the sidebar to see its engagements.": "在侧边栏选择一个公司以查看其测试项目。",
+  "No engagements for this company yet.": "该公司暂无测试项目。"
 }

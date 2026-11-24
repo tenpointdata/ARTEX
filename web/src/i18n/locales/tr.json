@@ -2926,5 +2926,15 @@
   "{name} sees only the reports and findings of the companies checked here. With none checked the account is refused everywhere.": "{name} yalnızca burada işaretlenen şirketlerin raporlarını ve bulgularını görür. Hiçbiri işaretli değilse hesap her yerde reddedilir.",
   "Import #{id}": "İçe aktarma #{id}",
   "Clear the import filter": "İçe aktarma filtresini temizle",
-  "Show the {count} new findings of import #{id}": "#{id} içe aktarmasının {count} yeni bulgusunu göster"
+  "Show the {count} new findings of import #{id}": "#{id} içe aktarmasının {count} yeni bulgusunu göster",
+  "This account is not bound to any company yet. Ask an administrator to bind it.": "Bu hesap henüz hiçbir şirkete bağlı değil. Bağlaması için bir yöneticiye başvurun.",
+  "Engagement": "Çalışma",
+  "Started": "Başladı",
+  "Finished": "Bitti",
+  "Retest: fixed": "Yeniden test: düzeltildi",
+  "Retest: reproduced": "Yeniden test: yeniden üretildi",
+  "Reports": "Raporlar",
+  "Engagements for {company}": "{company} için çalışmalar",
+  "Pick a company in the sidebar to see its engagements.": "Çalışmalarını görmek için kenar çubuğundan bir şirket seçin.",
+  "No engagements for this company yet.": "Bu şirket için henüz çalışma yok."
 }

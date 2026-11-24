@@ -9,12 +9,15 @@ import type {
   AuditVerification,
   AuthorizationInput,
   AuthorizationView,
+  ClientTask,
   ConsoleUser,
   EngagementAuthorization,
   NewUser,
+  TaskOutcome,
   UserList,
   UserPatch,
 } from "@/lib/governance-types";
+import type { Company } from "@/lib/types";
 
 const json = (method: string, body?: unknown): RequestInit => ({
   method,
@@ -58,4 +61,9 @@ export const governanceApi = {
   auditChain: (f: AuditFilter = {}) =>
     http<{ entries: AuditEntry[] | null }>(`/intercept/history/chain${chainQuery(f)}`).then((r) => r.entries ?? []),
   verifyAuditChain: () => http<AuditVerification>("/intercept/history/chain/verify"),
+
+  // ---- client console: what the caller may pick from (client_read binds both) ----
+  myCompanies: () => http<Company[] | null>("/me/companies").then((r) => r ?? []),
+  myTasks: (company: number) => http<ClientTask[] | null>(`/me/tasks?company=${company}`).then((r) => r ?? []),
+  taskOutcome: (taskId: string) => http<TaskOutcome>(`/tasks/${encodeURIComponent(taskId)}/outcome`),
 };

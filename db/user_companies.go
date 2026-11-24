@@ -127,3 +127,56 @@ func int64Array(ids []int64) string {
 	}
 	return string(append(b, '}'))
 }
+
+// CompanySummary is the client-safe view of a company: no scope rules.
+type CompanySummary struct {
+	ID         int64   `json:"id"`
+	Name       string  `json:"name"`
+	Logo       *string `json:"logo,omitempty"`
+	AssetCount int     `json:"asset_count"`
+}
+
+// CompanySummaries lists the companies among ids (nil = every company), by name.
+func (d *DB) CompanySummaries(ids []int64) ([]CompanySummary, error) {
+	q := `SELECT c.id, c.name, c.logo, COUNT(a.id) FROM companies c
+		LEFT JOIN assets a ON a.company_id = c.id`
+	args := []any{}
+	if ids != nil {
+		q += ` WHERE c.id = ANY($1::bigint[])`
+		args = append(args, int64Array(ids))
+	}
+	rows, err := d.Query(q+` GROUP BY c.id ORDER BY c.name, c.id`, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []CompanySummary{}
+	for rows.Next() {
+		var c CompanySummary
+		if err := rows.Scan(&c.ID, &c.Name, &c.Logo, &c.AssetCount); err != nil {
+			return nil, err
+		}
+		out = append(out, c)
+	}
+	return out, rows.Err()
+}
+
+// CompanyTaskIDs lists the tasks an operator scoped to companyID, with the
+// TaskCompaniesIn rule (agent-added rows do not count), ascending.
+func (d *DB) CompanyTaskIDs(companyID int64) ([]int64, error) {
+	rows, err := d.Query(`SELECT DISTINCT task_id FROM task_scope
+		WHERE company_id = $1 AND kind = 'company' AND source <> 'agent' ORDER BY task_id`, companyID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []int64{}
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		out = append(out, id)
+	}
+	return out, rows.Err()
+}

@@ -122,3 +122,35 @@ export interface AuditVerification {
   rows_mismatched: number[] | null;
   rows_unchained: number;
 }
+
+// ---- client console (server/client_console.go) ----
+
+// GET /api/me/tasks: a task as a client sees it (no goal text, tokens or task-wide counts).
+export interface ClientTask {
+  id: string;
+  name: string;
+  status: string;
+  created_at: string;
+  completed_at: string;
+  last_activity_unix: number;
+  coverage_enabled: boolean;
+}
+
+// GET /api/tasks/{id}/outcome (db.TaskOutcome); the fields the client summary shows.
+export interface TaskOutcome {
+  task_id: number;
+  status: string;
+  findings: {
+    total: number;
+    confirmed: number;
+    open: number;
+    false_positive: number;
+    duplicate: number;
+    critical: number;
+    high: number;
+    medium: number;
+    low: number;
+  };
+  retests: { reproduced: number; fixed: number; inconclusive: number };
+  wall_seconds: number;
+}
