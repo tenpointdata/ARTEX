@@ -59,6 +59,26 @@ See `docs/ARCHITECTURE.md` for the code-level map. Summary:
 
 ## Current state
 
+**2026-11-24 (c-f4115c, E5 lifecycle, branch `ej/20261124-133353-5aceb1`)** — The six E5 lifecycle gaps are
+closed on a branch that merges the E5 + client_read branch (`ej/20261124-110647-182fa9`, PR #16), so it
+lands after PR #16 and c-5b5421. (1) Task archives snapshot `engagement_authorizations`; archiving keeps
+the rows with the stub; restore re-creates missing versions (audit actor `archive-restore`) and keeps a
+differing DB copy with a warning. (2) An artifact requires the target gate: `AddAuthorization` turns it on
+in the same transaction, `PATCH target_gate=false` answers 409 (`db.ErrTargetGateRequired`), and spawned
+children under an artifact are gated. (3) The scheduler pauses tasks whose artifact is revoked or past
+`not_after` (`server/authorization_expiry.go`, cause `authorization_ended`); a revocation pauses at once;
+resume answers 409 until a version that has not ended is stored. (4) `POST /api/auth/change-password`
+serves console users (compare-and-swap on the session's user version, 409 on a race); the sidebar
+dialog signs out after a change. (5) SSE in-stream re-checks use `db.CachedUser`; (6) the gate reads
+`db.CachedAuthorization`. Both are 2 s caches on the new generic `memo/` package, invalidated by every
+write through `db`. Docs: `docs/GOVERNANCE.md`. Verified: PG tests in `db/authorization_lifecycle_test.go`,
+`db/task_archives_authorization_pg_test.go`, `server/authorization_lifecycle_pg_test.go`,
+`server/user_password_pg_test.go` (each key assertion mutation-checked); `go test ./db ./intercept ./memo
+./agent ./server` with PG passes except the two known environmental failures; `scripts/verify.sh` with
+web steps passes. Not checked: a live task actually being paused by the scheduler at expiry (covered by
+calling the sweep directly). Legacy artifacts stored before this change with the gate off are not
+backfilled (only unreleased dev data). Follow-ups: `c-5018f6`, `c-01377e`.
+
 **2026-11-24 (c-d25ff9, E3)** — The `RSI.md` Loop C benchmark gate and Loop B lesson graduation are built,
 flag off (`ARTEX_RSI_LOOP`, default off, read per request). Pure core `rsi/` (search-space allowlist:
 `prompt_body` for goals/planner/worker and `lesson`; immutable and git-reviewed surfaces refused;
@@ -270,10 +290,14 @@ body, through the versioned prompt API, and the starting bodies are restored aft
   artifact should be for your use.
 - **SEC: live Playwright scope-relay check** (S), card `c-517c2d`: a real task with capture on and the
   seeded Playwright MCP. Done = the browser's dials show the task scope and an out-of-scope host is refused.
-- E5 shipped a lightweight artifact (reference, signatory, scope, window, technique classes). Decide
-  whether tasks with an artifact must have the target gate forced on (card `c-f4115c` item 2), and
-  whether the extra admin-only routes in `server/rbac_policy.go` (tools, MCP, agents, LLM config,
+- E5 shipped a lightweight artifact (reference, signatory, scope, window, technique classes); the gate
+  is now forced on for tasks with one (c-f4115c). Decide whether the extra admin-only routes in `server/rbac_policy.go` (tools, MCP, agents, LLM config,
   notify) suit how operators work.
+
+- *(unclaimed)* — **E5 UI for the gate requirement and authorization_ended pauses** (S), card `c-01377e`,
+  after `c-869050`. Done = no console click hits those 409s unexplained.
+- *(unclaimed)* — **Change-password 401 logs the user out** (XS), card `c-5018f6`. Done = a wrong current
+  password shows an error and keeps the session.
 
 **Blocked**
 - Nothing blocked.
@@ -311,7 +335,7 @@ Card ids in brackets:
 - **E3** [`c-d25ff9`] — gate built (in review). Follow-ups: hardening `c-0d277f`, UI `c-936308`, first live run `c-772190`, proposer/critic `c-c89f5b`.
 - **E4** [`c-c0bb07`] Methodology-driven coverage (OWASP WSTG / API Top 10 as structured checklists).
 - **E5** [`c-669406`] Engagement governance. The backend is done on `ej/20261124-055929-bd2253`. Follow-ups:
-  `c-5b5421` (client binding), `c-869050` (UI), `c-f4115c` (lifecycle gaps).
+  `c-5b5421` (client binding), `c-869050` (UI); `c-f4115c` (lifecycle gaps) is in review, follow-ups `c-5018f6`, `c-01377e`.
 - **TEST** [`c-3157b4`] `TestGateOffTaskIsUnchanged` fails on main with Postgres (also fails before E5).
 - **E6** [`c-cb0093`] Cost/observability dashboard + OpenTelemetry export, building on existing context telemetry.
 - **E7** [`c-d60149`] Distributed/remote workers (queue-backed intents) for larger engagements; Helm chart.
@@ -381,6 +405,18 @@ Card ids in brackets:
 
 ## Decisions
 
+- **2026-11-24** — E5 lifecycle (c-f4115c): an artifact *forces* the target gate (refuse turning it off,
+  409) rather than recommending it, because with the gate off the scope sees only declared targets and
+  platform dials. Expiry/revocation pauses the task (unconditionally, no setting) and blocks resume until
+  a new version: pausing is reversible and the gate already refuses every target call. A window that
+  has not started does not pause. Password self-service extends the existing `/api/auth/change-password`
+  instead of adding `/api/users/me/password`: the UI already calls it and it is already rate-limited.
+  Archives keep the artifact rows with the stub (gate still applies on restore; no DELETE audit noise)
+  and carry them in the package; restore re-creates missing versions under its own audit actor using
+  `SET CONSTRAINTS trg_engagement_authorizations_audit IMMEDIATE` for that one insert (0018 reads
+  `artex.actor` at commit, so a transaction-wide actor would relabel the restored intercept rows).
+  Caches: one generic `memo` package (TTL + race-safe invalidation), 2 s, invalidated by every write
+  through `db`; the first auth check of a request stays uncached.
 - **2026-11-24** — E3 (c-d25ff9): "one explicit owner action" is an owner-password step-up on adopt,
   because on single-user ARTEX a bearer token minted from `jwt.key` (what the loop holds) is the same
   identity as the owner. The server recomputes every verdict from raw records rather than accepting the
