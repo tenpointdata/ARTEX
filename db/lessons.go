@@ -422,18 +422,17 @@ func retireLessonsIfEmptyQ(ctx context.Context, q sqlExecQuerier, ids []int64) e
 // any category inside that company filter. Scope matches rank first, then
 // positive before negative before caution, then support.
 func (d *DB) TaskLessons(ctx context.Context, taskID int64, limit int) ([]Lesson, error) {
-	categoryID, companyIDs, err := taskLessonScope(ctx, d, taskID)
-	if err != nil {
-		return nil, err
-	}
-	if limit <= 0 {
-		limit = 8
-	}
-	// A separate flag, not CARDINALITY of the array: an empty company list can
-	// arrive as SQL NULL, and CARDINALITY(NULL) is NULL.
-	unscoped := len(companyIDs) == 0
-	rows, err := d.QueryContext(ctx, `
-		SELECT l.id, l.kind, l.cue, l.action,
+	return d.taskLessons(ctx, taskID, limit, false)
+}
+
+// TaskAdoptedLessons is TaskLessons restricted to lessons an owner adopted
+// through the benchmark gate (ARTEX_RSI_LESSONS=adopted).
+func (d *DB) TaskAdoptedLessons(ctx context.Context, taskID int64, limit int) ([]Lesson, error) {
+	return d.taskLessons(ctx, taskID, limit, true)
+}
+
+// lessonSelectCols reads one lesson row with its live support and evidence.
+const lessonSelectCols = `l.id, l.kind, l.cue, l.action,
 		       COALESCE(l.category_id,0), COALESCE(l.company_id,0), l.status,
 		       (SELECT COUNT(*) FROM rsi_lesson_evidence e
 		        WHERE e.lesson_id=l.id AND e.withdrawn_at IS NULL) AS support,
@@ -443,22 +442,9 @@ func (d *DB) TaskLessons(ctx context.Context, taskID int64, limit int) ([]Lesson
 		                  ORDER BY e.source_kind, e.source_id)
 		           FROM rsi_lesson_evidence e
 		           WHERE e.lesson_id=l.id AND e.withdrawn_at IS NULL
-		       ), '[]'::jsonb)
-		FROM rsi_lessons l
-		WHERE l.status <> 'retired'
-		  AND (
-		        ($3::bool AND l.company_id IS NULL)
-		        OR l.company_id = ANY($1::bigint[])
-		      )
-		  AND (l.category_id IS NULL OR l.category_id=$2)
-		ORDER BY (l.company_id IS NOT NULL AND l.company_id = ANY($1::bigint[])) DESC,
-		         (l.category_id IS NOT NULL AND l.category_id=$2) DESC,
-		         CASE l.kind WHEN 'positive' THEN 0 WHEN 'negative' THEN 1 ELSE 2 END,
-		         support DESC, l.id DESC
-		LIMIT $4`, companyIDs, categoryID, unscoped, limit)
-	if err != nil {
-		return nil, err
-	}
+		       ), '[]'::jsonb)`
+
+func scanLessons(rows *sql.Rows) ([]Lesson, error) {
 	defer rows.Close()
 	out := []Lesson{}
 	for rows.Next() {
@@ -474,6 +460,50 @@ func (d *DB) TaskLessons(ctx context.Context, taskID int64, limit int) ([]Lesson
 		out = append(out, l)
 	}
 	return out, rows.Err()
+}
+
+// LessonsByIDs returns the non-retired lessons among ids, in id order. It
+// ignores scope: it serves the benchmark pin (ARTEX_RSI_LESSONS=bench), where
+// the arm names the exact lessons under test.
+func (d *DB) LessonsByIDs(ctx context.Context, ids []int64) ([]Lesson, error) {
+	rows, err := d.QueryContext(ctx, `SELECT `+lessonSelectCols+`
+		FROM rsi_lessons l WHERE l.id = ANY($1::bigint[]) AND l.status <> 'retired' ORDER BY l.id`, nonNilIDs(ids))
+	if err != nil {
+		return nil, err
+	}
+	return scanLessons(rows)
+}
+
+func (d *DB) taskLessons(ctx context.Context, taskID int64, limit int, adoptedOnly bool) ([]Lesson, error) {
+	categoryID, companyIDs, err := taskLessonScope(ctx, d, taskID)
+	if err != nil {
+		return nil, err
+	}
+	if limit <= 0 {
+		limit = 8
+	}
+	// A separate flag, not CARDINALITY of the array: an empty company list can
+	// arrive as SQL NULL, and CARDINALITY(NULL) is NULL.
+	unscoped := len(companyIDs) == 0
+	rows, err := d.QueryContext(ctx, `
+		SELECT `+lessonSelectCols+`
+		FROM rsi_lessons l
+		WHERE l.status <> 'retired'
+		  AND (NOT $5::bool OR l.status = 'adopted')
+		  AND (
+		        ($3::bool AND l.company_id IS NULL)
+		        OR l.company_id = ANY($1::bigint[])
+		      )
+		  AND (l.category_id IS NULL OR l.category_id=$2)
+		ORDER BY (l.company_id IS NOT NULL AND l.company_id = ANY($1::bigint[])) DESC,
+		         (l.category_id IS NOT NULL AND l.category_id=$2) DESC,
+		         CASE l.kind WHEN 'positive' THEN 0 WHEN 'negative' THEN 1 ELSE 2 END,
+		         support DESC, l.id DESC
+		LIMIT $4`, companyIDs, categoryID, unscoped, limit, adoptedOnly)
+	if err != nil {
+		return nil, err
+	}
+	return scanLessons(rows)
 }
 
 // LogLessonUsage records that these lessons were considered for a task in the
