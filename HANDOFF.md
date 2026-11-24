@@ -59,6 +59,17 @@ See `docs/ARCHITECTURE.md` for the code-level map. Summary:
 
 ## Current state
 
+**2026-11-24 (c-ca2bd0, E4 follow-up)** — An operator can choose a task's methodologies. Migration
+**0022** adds `tasks.methodologies TEXT[]` (empty `{}` = automatic, as before). The create request
+(`methodologies`, ids matched loosely, stored canonical, unknown id = 400) and the create form
+(`methodology-picker.tsx`, a table fed by the new `GET /api/methodologies`) set it; `db.TaskMethodologies`
+uses it when set, so the coverage API and the planner block show only the chosen checklists. It is
+carried through archive/restore and echoed on the task DTO. This branch merges the unmerged E4 branch
+(`ej/20261124-123222-d3dc8a`). Verified against Postgres 16: `TestTaskMethodologiesOperatorChoice`,
+the archive round-trip, `TestCreateTaskMethodologies` (server), the full `go test -p 1 ./...` (only the
+known macOS 127.0.0.2 SOCKS5 test fails), web `tsc` and i18n. Not checked: the form in a browser.
+Gaps carded as `c-aed5fd`: no "none" choice, and the choice is fixed at creation.
+
 **2026-11-24 (c-d25ff9, E3)** — The `RSI.md` Loop C benchmark gate and Loop B lesson graduation are built,
 flag off (`ARTEX_RSI_LOOP`, default off, read per request). Pure core `rsi/` (search-space allowlist:
 `prompt_body` for goals/planner/worker and `lesson`; immutable and git-reviewed surfaces refused;
@@ -271,7 +282,7 @@ Card ids in brackets:
 - **E3** [`c-d25ff9`] — gate built (in review). Follow-ups: hardening `c-0d277f`, UI `c-936308`, first live run `c-772190`, proposer/critic `c-c89f5b`.
 - **E3** [`c-d25ff9`] Loop-B lesson library graduation + Loop-C benchmark gate per the `RSI.md` contract (owner-approval, immutable surfaces).
 - **E4** [`c-c0bb07`] Methodology-driven coverage: landed 2026-11-24 (see Current state). Follow-ups:
-  [`c-ca2bd0`] an operator-chosen methodology per task; [`c-ed937d`] checklist completion in the report export (after E1).
+  [`c-ca2bd0`] an operator-chosen methodology per task (landed, in review; gaps `c-aed5fd`); [`c-ed937d`] checklist completion in the report export (after E1).
 - **E5** [`c-669406`] Engagement lifecycle & governance: RBAC, per-engagement authorization artifact, scope expiry, tamper-evident (hash-chained) audit log.
 - **E6** [`c-cb0093`] Cost/observability dashboard + OpenTelemetry export, building on existing context telemetry.
 - **E7** [`c-d60149`] Distributed/remote workers (queue-backed intents) for larger engagements; Helm chart.
@@ -337,6 +348,13 @@ Card ids in brackets:
 
 ## Decisions
 
+- **2026-11-24** — c-ca2bd0: the operator's methodology choice is a list column on `tasks`, with an empty
+  list meaning automatic, so existing tasks and every other create path (spawn, templates) keep the
+  goal-word selection. A non-empty list replaces the automatic set rather than adding to it, which also
+  covers excluding a checklist. An unknown id is refused at creation, so a typo never falls back to auto
+  without notice. A stored id whose checklist has since been removed is skipped. The migration is
+  numbered 0022 because 0015–0021 are taken on open branches, and the migrate test refuses an
+  out-of-order version, so 0022 must land after them.
 - **2026-11-24** — E3 (c-d25ff9): "one explicit owner action" is an owner-password step-up on adopt,
   because on single-user ARTEX a bearer token minted from `jwt.key` (what the loop holds) is the same
   identity as the owner. The server recomputes every verdict from raw records rather than accepting the
