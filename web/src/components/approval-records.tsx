@@ -36,6 +36,8 @@ import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { AlwaysAllowAction, DecisionActions, type Decide } from "@/components/approval-actions";
+import { useCan } from "@/hooks/use-session";
 import { api } from "@/lib/api";
 import type {
   InterceptApprovalFilter,
@@ -323,55 +325,6 @@ function ModelReviewContext({ input }: { input: InterceptReviewInput }) {
         </CollapsibleContent>
       </Collapsible>
     </section>
-  );
-}
-
-type Decide = (id: number, decision: "allowed" | "denied") => Promise<void>;
-
-function DecisionActions({ row, busy, decide }: { row: InterceptApprovalRow; busy: boolean; decide: Decide }) {
-  if (row.status !== "pending") return null;
-  return (
-    <div className="flex flex-wrap gap-2">
-      <Button size="sm" disabled={busy} onClick={() => void decide(row.id, "allowed")}>
-        <CheckIcon data-icon="inline-start" />
-        {t("Allow")}
-      </Button>
-      <Button size="sm" variant="destructive" disabled={busy} onClick={() => void decide(row.id, "denied")}>
-        <XIcon data-icon="inline-start" />
-        {t("Deny")}
-      </Button>
-    </div>
-  );
-}
-
-// AlwaysAllowAction creates an argv allow rule from a pending Bash request.
-// The prefix comes from the server; the request itself stays pending.
-function AlwaysAllowAction({ id, prefix }: { id: number; prefix?: string }) {
-  const [busy, setBusy] = React.useState(false);
-  async function create() {
-    setBusy(true);
-    try {
-      const res = await api.interceptAlwaysAllow(id);
-      toast.success(
-        res.created
-          ? t("Rule created, the request is still pending approval")
-          : t("Rule already exists, the request is still pending approval"),
-      );
-    } catch (e) {
-      toast.error((e as Error).message);
-    } finally {
-      setBusy(false);
-    }
-  }
-  return (
-    <div className="flex flex-col gap-1">
-      <Button size="sm" variant="outline" className="self-start" disabled={busy} onClick={() => void create()}>
-        {prefix ? t('Always allow "{prefix} *"', { prefix }) : t("Always allow")}
-      </Button>
-      <p className="text-muted-foreground text-xs">
-        {t("The prefix does not constrain flags, and it does not cover what the program does next (git hooks, npm scripts, docker images).")}
-      </p>
-    </div>
   );
 }
 
@@ -840,6 +793,7 @@ export function ApprovalRecords({ taskId }: { taskId?: string }) {
   const [error, setError] = React.useState("");
   const [pendingError, setPendingError] = React.useState("");
   const [deciding, setDeciding] = React.useState(false);
+  const canReview = useCan("review");
   const [revision, setRevision] = React.useState(0);
   const [selected, setSelected] = React.useState<Set<number>>(() => new Set());
   const [batchDecision, setBatchDecision] = React.useState<"allowed" | "denied" | null>(null);
@@ -1162,26 +1116,32 @@ export function ApprovalRecords({ taskId }: { taskId?: string }) {
             decide={decide}
             revision={revision}
             label={t("Pending approvals")}
-            selection={selection}
+            selection={canReview ? selection : undefined}
           />
-          <div className="flex flex-wrap items-center justify-between gap-2 border-t px-4 py-3 text-sm">
-            <span className="text-muted-foreground">{t("{count} selected", { count: selectedRows.length })}</span>
-            <div className="flex flex-wrap gap-2">
-              <Button size="sm" disabled={deciding || !selectedRows.length} onClick={() => setBatchDecision("allowed")}>
-                <CheckIcon data-icon="inline-start" />
-                {t("Approve selected")}
-              </Button>
-              <Button
-                size="sm"
-                variant="destructive"
-                disabled={deciding || !selectedRows.length}
-                onClick={() => setBatchDecision("denied")}
-              >
-                <XIcon data-icon="inline-start" />
-                {t("Deny selected")}
-              </Button>
+          {canReview && (
+            <div className="flex flex-wrap items-center justify-between gap-2 border-t px-4 py-3 text-sm">
+              <span className="text-muted-foreground">{t("{count} selected", { count: selectedRows.length })}</span>
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  size="sm"
+                  disabled={deciding || !selectedRows.length}
+                  onClick={() => setBatchDecision("allowed")}
+                >
+                  <CheckIcon data-icon="inline-start" />
+                  {t("Approve selected")}
+                </Button>
+                <Button
+                  size="sm"
+                  variant="destructive"
+                  disabled={deciding || !selectedRows.length}
+                  onClick={() => setBatchDecision("denied")}
+                >
+                  <XIcon data-icon="inline-start" />
+                  {t("Deny selected")}
+                </Button>
+              </div>
             </div>
-          </div>
+          )}
         </section>
       ) : null}
       <AlertDialog

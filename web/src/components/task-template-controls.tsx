@@ -32,9 +32,11 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Sheet, SheetContent, SheetDescription, SheetFooter, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Spinner } from "@/components/ui/spinner";
 import { Textarea } from "@/components/ui/textarea";
-import { api } from "@/lib/api";
-import type { AssetInterceptRuleInput, TaskCategory, TaskTemplate } from "@/lib/types";
+import { useCan } from "@/hooks/use-session";
 import { t } from "@/i18n";
+import { api } from "@/lib/api";
+import { errorText } from "@/lib/api-errors";
+import type { AssetInterceptRuleInput, TaskCategory, TaskTemplate } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 interface TemplateDraft {
@@ -170,7 +172,7 @@ function TaskTemplateManager({
         toast.success(t("Template updated"));
       }
     } catch (error) {
-      toast.error(t("Save failed: {error}", { error: (error as Error).message }));
+      toast.error(t("Save failed: {error}", { error: errorText(error) }));
     } finally {
       setSaving(false);
     }
@@ -193,7 +195,7 @@ function TaskTemplateManager({
       setDeleteOpen(false);
       toast.success(t("Template deleted"));
     } catch (error) {
-      toast.error(t("Delete failed: {error}", { error: (error as Error).message }));
+      toast.error(t("Delete failed: {error}", { error: errorText(error) }));
     } finally {
       setDeleting(false);
     }
@@ -291,7 +293,9 @@ function TaskTemplateManager({
                       </NativeSelectOption>
                     ))}
                   </NativeSelect>
-                  <FieldDescription>{t("This category is prefilled when the template is applied (still editable).")}</FieldDescription>
+                  <FieldDescription>
+                    {t("This category is prefilled when the template is applied (still editable).")}
+                  </FieldDescription>
                 </Field>
                 <Field>
                   <FieldLabel>{t("Task-level intercept / allow rules")}</FieldLabel>
@@ -300,7 +304,9 @@ function TaskTemplateManager({
                     onChange={(rules) => patchDraft({ interceptRules: rules })}
                   />
                   <FieldDescription>
-                    {t("These task-level rules are prefilled when the template is applied (intercept/allow, effective only for new tasks, never global).")}
+                    {t(
+                      "These task-level rules are prefilled when the template is applied (intercept/allow, effective only for new tasks, never global).",
+                    )}
                   </FieldDescription>
                 </Field>
               </FieldGroup>
@@ -326,8 +332,12 @@ function TaskTemplateManager({
       <AlertDialog open={deleteOpen} onOpenChange={setDeleteOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>{t('Delete template "{name}"?', { name: draft.name || t("Untitled template") })}</AlertDialogTitle>
-            <AlertDialogDescription>{t("Tasks already created from this template are not affected.")}</AlertDialogDescription>
+            <AlertDialogTitle>
+              {t('Delete template "{name}"?', { name: draft.name || t("Untitled template") })}
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {t("Tasks already created from this template are not affected.")}
+            </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel disabled={deleting}>{t("Cancel")}</AlertDialogCancel>
@@ -370,6 +380,7 @@ export function TaskTemplateControls({
   onApply,
   portalContainer,
 }: TaskTemplateControlsProps) {
+  const canOperate = useCan("operate"); // template writes are operate-level
   const [templates, setTemplates] = React.useState<TaskTemplate[]>([]);
   const [loading, setLoading] = React.useState(true);
   const [templateInputValue, setTemplateInputValue] = React.useState("");
@@ -383,7 +394,7 @@ export function TaskTemplateControls({
       setTemplates(await api.taskTemplates());
     } catch (error) {
       setTemplates([]);
-      toast.error(t("Failed to load templates: {error}", { error: (error as Error).message }));
+      toast.error(t("Failed to load templates: {error}", { error: errorText(error) }));
     } finally {
       setLoading(false);
     }
@@ -446,29 +457,31 @@ export function TaskTemplateControls({
       <Field>
         <div className="flex flex-wrap items-center justify-between gap-2">
           <FieldLabel htmlFor="task-template-picker">{t("Task template")}</FieldLabel>
-          <div className="flex flex-wrap gap-2">
-            <Button type="button" variant="ghost" size="sm" onClick={() => openManager(null)}>
-              <Settings2Icon data-icon="inline-start" />
-              {t("Manage templates")}
-            </Button>
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              disabled={!description.trim() || !goal.trim()}
-              onClick={() =>
-                openManager({
-                  description,
-                  goal,
-                  categoryID: categoryID ?? null,
-                  interceptRules: interceptRules ?? [],
-                })
-              }
-            >
-              <SaveIcon data-icon="inline-start" />
-              {t("Save as template")}
-            </Button>
-          </div>
+          {canOperate && (
+            <div className="flex flex-wrap gap-2">
+              <Button type="button" variant="ghost" size="sm" onClick={() => openManager(null)}>
+                <Settings2Icon data-icon="inline-start" />
+                {t("Manage templates")}
+              </Button>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                disabled={!description.trim() || !goal.trim()}
+                onClick={() =>
+                  openManager({
+                    description,
+                    goal,
+                    categoryID: categoryID ?? null,
+                    interceptRules: interceptRules ?? [],
+                  })
+                }
+              >
+                <SaveIcon data-icon="inline-start" />
+                {t("Save as template")}
+              </Button>
+            </div>
+          )}
         </div>
         <Combobox
           items={templates}

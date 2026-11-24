@@ -7,7 +7,6 @@ import {
   PlugZapIcon,
   PlusIcon,
   RefreshCwIcon,
-  RotateCcwIcon,
   SaveIcon,
   StarIcon,
   Trash2Icon,
@@ -22,22 +21,19 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Separator } from "@/components/ui/separator";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { t } from "@/i18n";
+import { useCan } from "@/hooks/use-session";
 import { api } from "@/lib/api";
+import { errorText } from "@/lib/api-errors";
 import type { LLMPoolMember, LLMPoolStatus, LLMProfile, LLMRetryOverride } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
+import { healthOf, PoolSheet } from "./_components/pool-sheet";
+import { rich } from "@/lib/rich-text";
 import { ProfileRetryFields, RetryPolicyPanel, ZERO_OVERRIDE } from "./_components/retry";
-import { setVisibleInterval } from "@/lib/polling";
-
-// Renders a translated string, turning <b>…</b> spans into bold elements, so a sentence with emphasis stays one key.
-function rich(s: string): React.ReactNode[] {
-  return s.split(/<b>(.*?)<\/b>/).map((part, i) => (i % 2 === 1 ? <b key={i}>{part}</b> : part));
-}
 
 // The thinking switch (thinking.type) and the thinking effort (reasoning_effort) are two [independent] fields,
 // each set on its own — some APIs have no thinking field and activate thinking via the effort parameter alone, hence the decoupling.
@@ -78,247 +74,6 @@ const EFFORT_LEVELS: { value: string; label: string }[] = [
   { value: "max", label: "max" },
 ];
 
-function cooldownText(secs: number) {
-  if (secs <= 0) return "";
-  if (secs < 60) return t("{n}s", { n: secs });
-  return t("{n}min", { n: Math.ceil(secs / 60) });
-}
-
-// The "healthy or not" badge a profile shows on its card. A profile without a Key cannot send any request at all — say that before the breaker;
-// the exception is Ollama, a keyless local server that IS callable without a key. The other states come from the pool's breaker
-// records (with polling off no new records appear, so "healthy" = no known failure).
-type Health = { label: string; cls: string; hint?: string };
-function healthOf(p: LLMProfile, m?: LLMPoolMember): Health {
-  if (!p.api_key_hint && p.format !== "ollama") {
-    return {
-      label: t("No Key configured"),
-      cls: "border-muted-foreground/40 text-muted-foreground",
-      hint: t("No API Key set; cannot be called"),
-    };
-  }
-  if (m?.state === "tripped") {
-    return {
-      label: m.cooldown_secs > 0 ? t("Tripped · {cooldown}", { cooldown: cooldownText(m.cooldown_secs) }) : t("Tripped"),
-      cls: "border-destructive/50 text-destructive",
-      hint: m.last_error,
-    };
-  }
-  if (m?.state === "degraded") {
-    return {
-      label: t("Degraded · failed {count} times", { count: m.fails }),
-      cls: "border-amber-500/50 text-amber-600 dark:text-amber-400",
-      hint: m.last_error,
-    };
-  }
-  return { label: t("Healthy"), cls: "border-emerald-500/50 text-emerald-600 dark:text-emerald-400" };
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Pool settings drawer
-// ─────────────────────────────────────────────────────────────────────────────
-
-function PoolSheet({
-  open,
-  onOpenChange,
-  pool,
-  onReload,
-}: {
-  open: boolean;
-  onOpenChange: (o: boolean) => void;
-  pool: LLMPoolStatus | null;
-  onReload: () => Promise<void>;
-}) {
-  const [busy, setBusy] = React.useState(false);
-
-  // The cooldown countdown is the remaining seconds computed by the backend — fetched on a timer only while the drawer is open and some profile is unhealthy, to keep it ticking.
-  React.useEffect(() => {
-    if (!open || !pool?.enabled || !pool.chain.some((m) => m.state !== "ok")) return;
-    const stopPolling = setVisibleInterval(() => void onReload(), 10_000);
-    return stopPolling;
-  }, [open, pool, onReload]);
-
-  async function toggle(patch: { llm_pool_enabled?: boolean; llm_pool_bind_fallback?: boolean }) {
-    if (busy) return;
-    setBusy(true);
-    try {
-      await api.setSettings(patch);
-      await onReload();
-      if (patch.llm_pool_enabled !== undefined) {
-        toast.success(patch.llm_pool_enabled ? t("LLM pool enabled") : t("LLM pool disabled"));
-      } else {
-        toast.success(t("Fallback settings updated"));
-      }
-    } catch (e) {
-      toast.error(t("Failed to apply settings: {error}", { error: (e as Error).message }));
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function recover(id?: string) {
-    try {
-      await api.resetLLMPool(id);
-      await onReload();
-      toast.success(id ? t("Profile recovered") : t("All profiles recovered"));
-    } catch (e) {
-      toast.error(t("Recovery failed: {error}", { error: (e as Error).message }));
-    }
-  }
-
-  const enabled = pool?.enabled ?? false;
-  const chain = pool?.chain ?? [];
-  // Members taking part in the pool (excluding those flagged "excluded from pool"), in the exact order the backend tries them.
-  const inChain = chain.filter((m) => m.active || !m.excluded);
-  const tripped = chain.filter((m) => m.state === "tripped");
-
-  return (
-    <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent side="right" className="flex flex-col gap-0 p-0 data-[side=right]:sm:max-w-lg">
-        <SheetHeader className="px-4">
-          <SheetTitle className="flex items-center gap-2">
-            <ZapIcon className="size-4" /> {t("LLM Pool · Failover")}
-          </SheetTitle>
-          <SheetDescription>
-            {rich(
-              t(
-                "When enabled, an Agent <b>without a pinned model</b> automatically fails over to the next config when the current one is unusable (insufficient balance / dead Key / rate limiting / service error).",
-              ),
-            )}
-          </SheetDescription>
-        </SheetHeader>
-
-        <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-4 pb-6">
-          <div className="flex items-center justify-between gap-4 rounded-lg border p-3">
-            <div className="grid gap-0.5">
-              <Label className="text-sm">{t("Enable pool")}</Label>
-              <p className="text-muted-foreground text-xs">{t("Off by default. When off, only the active profile is ever used and a failure stays a failure.")}</p>
-            </div>
-            <Switch
-              checked={enabled}
-              disabled={busy}
-              onCheckedChange={(v) => void toggle({ llm_pool_enabled: v })}
-              aria-label={t("LLM pool toggle")}
-            />
-          </div>
-
-          {enabled && (
-            <>
-              <div className="flex items-center justify-between gap-4 rounded-lg border p-3">
-                <div className="grid gap-0.5">
-                  <Label className="text-sm">{t("Also fall back when a pinned config fails")}</Label>
-                  <p className="text-muted-foreground text-xs">
-                    {t(
-                      "Off by default: when an Agent or task pins a config, only that config is used and a failure stays a failure (no silent switch to another model). When enabled, a failing pinned config also falls back to the pool chain below.",
-                    )}
-                  </p>
-                </div>
-                <Switch
-                  checked={pool?.bind_fallback ?? false}
-                  disabled={busy}
-                  onCheckedChange={(v) => void toggle({ llm_pool_bind_fallback: v })}
-                  aria-label={t("Bound-config failure fallback toggle")}
-                />
-              </div>
-
-              <Separator />
-
-              <div className="grid gap-2">
-                <div className="flex items-center justify-between">
-                  <Label className="text-sm">{t("Pool order")}</Label>
-                  {tripped.length > 0 && (
-                    <Button size="sm" variant="ghost" onClick={() => void recover()}>
-                      <RotateCcwIcon /> {t("Recover all")}
-                    </Button>
-                  )}
-                </div>
-                {inChain.length < 2 && (
-                  <p className="text-muted-foreground text-xs">
-                    {t(
-                      "Only {count} usable profile(s) right now, so the pool has no effect — at least 2 usable profiles (API Key set, or Ollama) with pool participation are required.",
-                      { count: inChain.length },
-                    )}
-                  </p>
-                )}
-                {chain.map((m) => {
-                  const excluded = m.excluded && !m.active;
-                  const order = excluded ? null : inChain.findIndex((x) => x.profile_id === m.profile_id) + 1;
-                  return (
-                    <div
-                      key={m.profile_id}
-                      className={cn(
-                        "grid gap-1 rounded-lg border p-2.5 text-sm",
-                        excluded && "opacity-55",
-                        m.state === "tripped" && "border-destructive/40",
-                      )}
-                    >
-                      <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-                        <span className="w-5 shrink-0 text-center font-mono text-muted-foreground text-xs">
-                          {order ?? "—"}
-                        </span>
-                        <span className="font-medium">{m.name}</span>
-                        {m.active && (
-                          <Badge variant="outline" className="border-amber-400/50 text-amber-500">
-                            {t("Active")}
-                          </Badge>
-                        )}
-                        {excluded && <Badge variant="outline">{t("Excluded from pool")}</Badge>}
-                        <div className="ml-auto flex items-center gap-2">
-                          {m.state === "tripped" && m.cooldown_secs > 0 && (
-                            <span className="text-muted-foreground text-xs">
-                              {t("Cooldown {time}", { time: cooldownText(m.cooldown_secs) })}
-                            </span>
-                          )}
-                          {m.state === "degraded" && (
-                            <span className="text-muted-foreground text-xs">
-                              {t("{count} consecutive failures", { count: m.fails })}
-                            </span>
-                          )}
-                          {m.state !== "ok" && (
-                            <Button
-                              size="icon"
-                              variant="ghost"
-                              className="size-7"
-                              aria-label={t("Recover now")}
-                              title={t("Recover now: clears the breaker so the next call retries this profile")}
-                              onClick={() => void recover(m.profile_id)}
-                            >
-                              <RotateCcwIcon className="size-3.5" />
-                            </Button>
-                          )}
-                        </div>
-                      </div>
-                      <div className="flex flex-wrap items-center gap-x-3 pl-7 text-muted-foreground text-xs">
-                        <code className="truncate font-mono">{m.model}</code>
-                        {!m.active && <span>{t("Priority {priority}", { priority: m.priority })}</span>}
-                      </div>
-                      {m.last_error && (
-                        <p className="truncate pl-7 font-mono text-muted-foreground text-xs" title={m.last_error}>
-                          {m.last_error}
-                        </p>
-                      )}
-                    </div>
-                  );
-                })}
-                {chain.length === 0 && (
-                  <div className="rounded-lg border border-dashed p-4 text-center text-muted-foreground text-sm">
-                    {t("No profiles yet")}
-                  </div>
-                )}
-              </div>
-
-              <div className="rounded-lg border border-dashed p-3 text-muted-foreground text-xs leading-relaxed">
-                {t(
-                  "The active profile is always first; the rest follow priority from high to low (set per profile). After a failure a profile enters a cooldown (60s → 5min → 30min), is skipped while cooling down, and switches back automatically once recovered. Profiles whose context window cannot fit the current request are skipped. Agents and tasks with a pinned model do not join the pool by default.",
-                )}
-              </div>
-            </>
-          )}
-        </div>
-      </SheetContent>
-    </Sheet>
-  );
-}
-
 // ─────────────────────────────────────────────────────────────────────────────
 // Model profile drawer (create / edit share the same form)
 // ─────────────────────────────────────────────────────────────────────────────
@@ -347,6 +102,8 @@ function ProfileSheet({
   const [cw, setCw] = React.useState("0"); // context window (K tokens); 0 = default 200K
   const [thinkingType, setThinkingType] = React.useState(NONE);
   const [effort, setEffort] = React.useState(NONE);
+  // Profiles live under /api/llm (admin); other roles get a read-only view.
+  const canAdmin = useCan("admin");
   const [priority, setPriority] = React.useState("0"); // pool order; higher = tried earlier
   const [poolExclude, setPoolExclude] = React.useState(false);
   const [streaming, setStreaming] = React.useState(true); // true = streaming (default); false = non-streaming
@@ -424,7 +181,7 @@ function ProfileSheet({
         toast.error(t("Failed to load models: {error}", { error: r.error ?? t("no models returned") }));
       }
     } catch (e) {
-      toast.error(t("Error loading models: {error}", { error: (e as Error).message }));
+      toast.error(t("Error loading models: {error}", { error: errorText(e) }));
     } finally {
       setLoadingModels(false);
     }
@@ -457,7 +214,7 @@ function ProfileSheet({
         });
       else toast.error(t("Connection failed: {error}", { error: r.error ?? t("unknown") }));
     } catch (e) {
-      toast.error(t("Test error: {error}", { error: (e as Error).message }));
+      toast.error(t("Test error: {error}", { error: errorText(e) }));
     } finally {
       setTesting(false);
     }
@@ -505,7 +262,7 @@ function ProfileSheet({
       onSaved(String(id));
       onOpenChange(false);
     } catch (e) {
-      toast.error(t("Save failed: {error}", { error: (e as Error).message }));
+      toast.error(t("Save failed: {error}", { error: errorText(e) }));
     } finally {
       setSaving(false);
     }
@@ -548,7 +305,7 @@ function ProfileSheet({
           </SheetDescription>
         </SheetHeader>
 
-        <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-4 pb-4">
+        <fieldset disabled={!canAdmin} className="flex min-h-0 min-w-0 flex-1 flex-col gap-4 overflow-y-auto px-4 pb-4">
           <div className="grid gap-4 sm:grid-cols-2">
             <div className="grid gap-2">
               <Label htmlFor="p-name">{t("Name")}</Label>
@@ -907,8 +664,9 @@ function ProfileSheet({
           </div>
 
           <ProfileRetryFields value={retry} onChange={setRetry} />
-        </div>
+        </fieldset>
 
+        {canAdmin && (
         <div className="flex gap-2 border-t px-4 py-3">
           <Button variant="outline" onClick={testConnection} disabled={testing}>
             {testing ? <Loader2Icon className="animate-spin" /> : <PlugZapIcon />}
@@ -920,6 +678,7 @@ function ProfileSheet({
             {isNew ? t("Create") : t("Save")}
           </Button>
         </div>
+        )}
       </SheetContent>
     </Sheet>
   );
@@ -928,6 +687,7 @@ function ProfileSheet({
 // ─────────────────────────────────────────────────────────────────────────────
 
 export default function LLMPage() {
+  const canAdmin = useCan("admin");
   const [profiles, setProfiles] = React.useState<LLMProfile[]>([]);
   const [pool, setPool] = React.useState<LLMPoolStatus | null>(null);
   const [poolOpen, setPoolOpen] = React.useState(false);
@@ -974,7 +734,7 @@ export default function LLMPage() {
       toast.success(t("Activated: {name}", { name }));
       await load();
     } catch (e) {
-      toast.error(t("Activation failed: {error}", { error: (e as Error).message }));
+      toast.error(t("Activation failed: {error}", { error: errorText(e) }));
     }
   }
 
@@ -988,7 +748,7 @@ export default function LLMPage() {
       toast.success(t("Deleted: {name}", { name: p.name }));
       await load();
     } catch (e) {
-      toast.error(t("Delete failed: {error}", { error: (e as Error).message }));
+      toast.error(t("Delete failed: {error}", { error: errorText(e) }));
     }
   }
 
@@ -1014,9 +774,11 @@ export default function LLMPage() {
               </Badge>
             )}
           </Button>
-          <Button size="sm" variant="outline" onClick={() => openEditor(null)}>
-            <PlusIcon /> {t("Create")}
-          </Button>
+          {canAdmin && (
+            <Button size="sm" variant="outline" onClick={() => openEditor(null)}>
+              <PlusIcon /> {t("Create")}
+            </Button>
+          )}
         </div>
       </div>
 
@@ -1093,31 +855,33 @@ export default function LLMPage() {
                         ))}
                     </div>
 
-                    <div className="mt-1 flex gap-2">
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        className="flex-1"
-                        disabled={p.is_default}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          void activate(p.id, p.name);
-                        }}
-                      >
-                        {p.is_default ? t("Active") : t("Set as active")}
-                      </Button>
-                      <Button
-                        size="icon"
-                        variant="outline"
-                        aria-label={t("Delete profile")}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          void remove(p);
-                        }}
-                      >
-                        <Trash2Icon className="text-destructive" />
-                      </Button>
-                    </div>
+                    {canAdmin && (
+                      <div className="mt-1 flex gap-2">
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="flex-1"
+                          disabled={p.is_default}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            void activate(p.id, p.name);
+                          }}
+                        >
+                          {p.is_default ? t("Active") : t("Set as active")}
+                        </Button>
+                        <Button
+                          size="icon"
+                          variant="outline"
+                          aria-label={t("Delete profile")}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            void remove(p);
+                          }}
+                        >
+                          <Trash2Icon className="text-destructive" />
+                        </Button>
+                      </div>
+                    )}
                   </CardContent>
                 </Card>
               );

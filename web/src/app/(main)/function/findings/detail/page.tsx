@@ -21,7 +21,9 @@ import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger } from "@
 import { Separator } from "@/components/ui/separator";
 import { SidebarTrigger } from "@/components/ui/sidebar";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { useCan } from "@/hooks/use-session";
 import { api } from "@/lib/api";
+import { errorText } from "@/lib/api-errors";
 import { statusMeta } from "@/lib/status";
 import type { Finding, FindingReportState, FindingStatus, Severity } from "@/lib/types";
 import { intlLocale, t } from "@/i18n";
@@ -68,6 +70,8 @@ function FindingDetailInner() {
   const [finding, setFinding] = React.useState<Finding | null>(null);
   const [loaded, setLoaded] = React.useState(false);
   const [tab, setTab] = React.useState("overview");
+  const canReview = useCan("review");
+  const canOperate = useCan("operate"); // retest and evidence link/edit need operate // severity/status/report stage are PATCH triage
 
   const load = React.useCallback(() => {
     if (!id) {
@@ -95,7 +99,7 @@ function FindingDetailInner() {
         toast.success(t('Severity changed to "{label}"', { label: statusMeta("severity", next).label }));
       } catch (e) {
         setFinding((cur) => (cur ? { ...cur, severity: prev } : cur));
-        toast.error(t("Update failed: {error}", { error: (e as Error).message }));
+        toast.error(t("Update failed: {error}", { error: errorText(e) }));
       }
     },
     [finding, id],
@@ -112,7 +116,7 @@ function FindingDetailInner() {
         toast.success(t('Status changed to "{label}"', { label: statusMeta("finding", next).label }));
       } catch (e) {
         setFinding((cur) => (cur ? { ...cur, status: prev } : cur));
-        toast.error(t("Update failed: {error}", { error: (e as Error).message }));
+        toast.error(t("Update failed: {error}", { error: errorText(e) }));
       }
     },
     [finding, id],
@@ -129,7 +133,7 @@ function FindingDetailInner() {
         toast.success(t('Report stage changed to "{label}"', { label: REPORT_STATE_META[next].label }));
       } catch (e) {
         setFinding((cur) => (cur ? { ...cur, report_state: prev } : cur));
-        toast.error(t("Update failed: {error}", { error: (e as Error).message }));
+        toast.error(t("Update failed: {error}", { error: errorText(e) }));
       }
     },
     [finding, id],
@@ -198,7 +202,7 @@ function FindingDetailInner() {
                   <p className="text-sm leading-relaxed whitespace-pre-wrap">{finding.summary || t("(no digest)")}</p>
                 </CardContent>
               </Card>
-              <FindingRetestPanel key={id} findingId={id} readOnly={finding.inherited} onCompleted={load} />
+              <FindingRetestPanel key={id} findingId={id} readOnly={finding.inherited || !canOperate} onCompleted={load} />
               <Card>
                 <CardHeader>
                   <CardTitle className="text-sm">{t("Evidence / PoC")}</CardTitle>
@@ -237,7 +241,7 @@ function FindingDetailInner() {
                 key={id}
                 findingId={id}
                 contextTask={contextTaskId || undefined}
-                readOnly={finding.inherited}
+                readOnly={finding.inherited || !canOperate}
                 onChanged={load}
               />
               {/* Below evidence: detailed report (rendered Markdown) */}
@@ -278,7 +282,7 @@ function FindingDetailInner() {
 
                 {/* Severity */}
                 <FieldRow label={t("Severity")}>
-                  {finding.inherited ? (
+                  {finding.inherited || !canReview ? (
                     <StatusBadge domain="severity" value={finding.severity} dot />
                   ) : (
                     <Select value={finding.severity} onValueChange={(v) => changeSeverity(v as Severity)}>
@@ -300,7 +304,7 @@ function FindingDetailInner() {
 
                 {/* Triage status */}
                 <FieldRow label={t("Triage status")}>
-                  {finding.inherited ? (
+                  {finding.inherited || !canReview ? (
                     <StatusBadge domain="finding" value={finding.status} dot />
                   ) : (
                     <Select value={finding.status} onValueChange={(v) => changeStatus(v as FindingStatus)}>
@@ -321,7 +325,7 @@ function FindingDetailInner() {
                 </FieldRow>
 
                 <FieldRow label={t("Report stage")}>
-                  {finding.inherited ? (
+                  {finding.inherited || !canReview ? (
                     <ReportStateBadge state={finding.report_state} />
                   ) : (
                     <Select

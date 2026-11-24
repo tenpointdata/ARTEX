@@ -41,7 +41,9 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
+import { useCan } from "@/hooks/use-session";
 import { api } from "@/lib/api";
+import { errorText } from "@/lib/api-errors";
 import type { WorkspaceEntry, WorkspaceFile } from "@/lib/types";
 import { intlLocale, t } from "@/i18n";
 
@@ -69,6 +71,8 @@ type EditState = {
 };
 
 export default function WorkspacePage() {
+  // Reading/downloading files and every write need `operate`; the listing needs only `read`.
+  const canOperate = useCan("operate");
   const [path, setPath] = React.useState("");
   const [entries, setEntries] = React.useState<WorkspaceEntry[]>([]);
   const [loading, setLoading] = React.useState(true);
@@ -77,20 +81,17 @@ export default function WorkspacePage() {
   const [mkdirName, setMkdirName] = React.useState("");
   const uploadRef = React.useRef<HTMLInputElement>(null);
 
-  const load = React.useCallback(
-    (p: string) => {
-      setLoading(true);
-      api
-        .workspaceList(p)
-        .then((r) => {
-          setEntries(r.entries);
-          setPath(r.path);
-        })
-        .catch((e) => toast.error(t("Failed to read directory: {error}", { error: (e as Error).message })))
-        .finally(() => setLoading(false));
-    },
-    [],
-  );
+  const load = React.useCallback((p: string) => {
+    setLoading(true);
+    api
+      .workspaceList(p)
+      .then((r) => {
+        setEntries(r.entries);
+        setPath(r.path);
+      })
+      .catch((e) => toast.error(t("Failed to read directory: {error}", { error: errorText(e) })))
+      .finally(() => setLoading(false));
+  }, []);
 
   React.useEffect(() => {
     load("");
@@ -111,7 +112,7 @@ export default function WorkspacePage() {
     api
       .workspaceRead(e.path)
       .then((f) => setEdit({ file: f, content: f.content ?? "", dirty: false, saving: false }))
-      .catch((err) => toast.error(t("Failed to open file: {error}", { error: (err as Error).message })));
+      .catch((err) => toast.error(t("Failed to open file: {error}", { error: errorText(err) })));
   };
 
   const saveFile = () => {
@@ -125,7 +126,7 @@ export default function WorkspacePage() {
         load(path);
       })
       .catch((err) => {
-        toast.error(t("Save failed: {error}", { error: (err as Error).message }));
+        toast.error(t("Save failed: {error}", { error: errorText(err) }));
         setEdit((cur) => (cur ? { ...cur, saving: false } : cur));
       });
   };
@@ -141,7 +142,7 @@ export default function WorkspacePage() {
         toast.success(t("Deleted"));
         load(path);
       })
-      .catch((err) => toast.error(t("Delete failed: {error}", { error: (err as Error).message })));
+      .catch((err) => toast.error(t("Delete failed: {error}", { error: errorText(err) })));
   };
 
   const doUpload = (files: FileList | null) => {
@@ -152,7 +153,7 @@ export default function WorkspacePage() {
         toast.success(t("Uploaded {count} files", { count: r.uploaded }));
         load(path);
       })
-      .catch((err) => toast.error(t("Upload failed: {error}", { error: (err as Error).message })))
+      .catch((err) => toast.error(t("Upload failed: {error}", { error: errorText(err) })))
       .finally(() => {
         if (uploadRef.current) uploadRef.current.value = "";
       });
@@ -170,7 +171,7 @@ export default function WorkspacePage() {
         setMkdirName("");
         load(path);
       })
-      .catch((err) => toast.error(t("Create failed: {error}", { error: (err as Error).message })));
+      .catch((err) => toast.error(t("Create failed: {error}", { error: errorText(err) })));
   };
 
   return (
@@ -196,12 +197,16 @@ export default function WorkspacePage() {
           ))}
         </div>
         <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm" onClick={() => setMkdirOpen(true)}>
-            <FolderPlusIcon /> {t("New folder")}
-          </Button>
-          <Button variant="outline" size="sm" onClick={() => uploadRef.current?.click()}>
-            <UploadIcon /> {t("Upload")}
-          </Button>
+          {canOperate && (
+            <>
+              <Button variant="outline" size="sm" onClick={() => setMkdirOpen(true)}>
+                <FolderPlusIcon /> {t("New folder")}
+              </Button>
+              <Button variant="outline" size="sm" onClick={() => uploadRef.current?.click()}>
+                <UploadIcon /> {t("Upload")}
+              </Button>
+            </>
+          )}
           <Button variant="ghost" size="icon" className="size-8" onClick={() => load(path)} title={t("Refresh")}>
             <RefreshCwIcon className={cn("size-4", loading && "animate-spin")} />
           </Button>
@@ -239,8 +244,9 @@ export default function WorkspacePage() {
                   <TableCell>
                     <button
                       type="button"
+                      disabled={!e.dir && !canOperate}
                       onClick={() => (e.dir ? load(e.path) : openFile(e))}
-                      className="flex items-center gap-2 text-left hover:underline"
+                      className="flex items-center gap-2 text-left enabled:hover:underline"
                     >
                       {e.dir ? (
                         <FolderIcon className="size-4 shrink-0 text-blue-500" />
@@ -256,7 +262,7 @@ export default function WorkspacePage() {
                   <TableCell className="text-muted-foreground text-xs">{fmtTime(e.mtime)}</TableCell>
                   <TableCell>
                     <div className="flex items-center justify-end gap-1">
-                      {!e.dir && (
+                      {canOperate && !e.dir && (
                         <Button
                           variant="ghost"
                           size="icon"
@@ -265,23 +271,23 @@ export default function WorkspacePage() {
                           onClick={() =>
                             api
                               .workspaceDownload(e.path)
-                              .catch((err) =>
-                                toast.error(t("Download failed: {error}", { error: (err as Error).message })),
-                              )
+                              .catch((err) => toast.error(t("Download failed: {error}", { error: errorText(err) })))
                           }
                         >
                           <DownloadIcon className="size-3.5" />
                         </Button>
                       )}
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="text-destructive size-7"
-                        title={t("Delete")}
-                        onClick={() => del(e)}
-                      >
-                        <Trash2Icon className="size-3.5" />
-                      </Button>
+                      {canOperate && (
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="text-destructive size-7"
+                          title={t("Delete")}
+                          onClick={() => del(e)}
+                        >
+                          <Trash2Icon className="size-3.5" />
+                        </Button>
+                      )}
                     </div>
                   </TableCell>
                 </TableRow>

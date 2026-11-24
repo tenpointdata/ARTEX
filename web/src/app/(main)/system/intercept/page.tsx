@@ -3,7 +3,6 @@
 import * as React from "react";
 import { toast } from "sonner";
 import {
-  BotIcon,
   ListFilterIcon,
   PencilIcon,
   PlusIcon,
@@ -50,66 +49,18 @@ import {
 } from "@/components/ui/table";
 import { Card, CardContent } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { intlLocale, t } from "@/i18n";
+import { t } from "@/i18n";
+import { useCan } from "@/hooks/use-session";
 import { api } from "@/lib/api";
+import { errorText } from "@/lib/api-errors";
 import type {
   InterceptAction,
   InterceptRule,
-  JudgeConfig,
-  JudgeDayUsage,
-  JudgeUsage,
-  LLMProfile,
   Tool,
 } from "@/lib/types";
 
-// fmtTokens compacts token counts (1.2k / 3.4M) for approval usage stats.
-function fmtTokens(n: number): string {
-  if (n >= 1_000_000) return (n / 1_000_000).toFixed(1) + "M";
-  if (n >= 1000) return (n / 1000).toFixed(1) + "k";
-  return String(n);
-}
-
-// tRich translates a sentence whose {placeholders} are rendered as React nodes (e.g. emphasised spans or code).
-function tRich(key: string, nodes: Record<string, React.ReactNode>): React.ReactNode[] {
-  return t(key)
-    .split(/(\{\w+\})/)
-    .map((part, i) => {
-      const name = /^\{(\w+)\}$/.exec(part)?.[1];
-      // biome-ignore lint/suspicious/noArrayIndexKey: static sentence fragments
-      return name && name in nodes ? <React.Fragment key={i}>{nodes[name]}</React.Fragment> : part;
-    });
-}
-
-// JudgeStat is one stat tile (label + value).
-function JudgeStat({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="rounded-lg border bg-muted/20 px-3 py-2">
-      <div className="text-[10px] text-muted-foreground">{label}</div>
-      <div className="mt-0.5 text-lg font-semibold tabular-nums">{value}</div>
-    </div>
-  );
-}
-
-// JudgeSparkbars draws a mini bar chart of daily consumption (input+output) over the last N days with plain divs, avoiding a chart library dependency.
-function JudgeSparkbars({ daily }: { daily: JudgeDayUsage[] }) {
-  const max = Math.max(1, ...daily.map((d) => d.input_tokens + d.output_tokens));
-  return (
-    <div className="flex h-16 items-end gap-0.5">
-      {daily.map((d) => {
-        const total = d.input_tokens + d.output_tokens;
-        const h = Math.max(2, Math.round((total / max) * 100));
-        return (
-          <div
-            key={d.date}
-            title={t("{date} · {calls} calls · {tokens} tokens", { date: d.date, calls: d.calls, tokens: fmtTokens(total) })}
-            className="min-w-[2px] flex-1 rounded-sm bg-violet-500/60 hover:bg-violet-500"
-            style={{ height: `${h}%` }}
-          />
-        );
-      })}
-    </div>
-  );
-}
+import { JudgeCard } from "./_components/judge-card";
+import { Field, tRich } from "./_components/shared";
 
 // ---- tool scope ----
 
@@ -203,284 +154,14 @@ function ActionBadge({ action }: { action: InterceptAction }) {
   return <Badge variant="outline" className="border-amber-400 text-amber-600">{t("Ask")}</Badge>;
 }
 
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <div className="space-y-1.5">
-      <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
-        {label}
-      </Label>
-      {children}
-    </div>
-  );
-}
-
-// ---- LLM fallback judge card ----
-
-const FOLLOW_ACTIVE = "0"; // profile_id 0 = follow the active/default profile
-
-const defaultJudge = (): JudgeConfig => ({
-  enabled: false,
-  mode: "closed",
-  profile_id: 0,
-  prompt: "",
-  timeout_seconds: 15,
-  fail_action: "ask",
-  ask_timeout_seconds: 300,
-  ask_timeout_action: "deny",
-});
-
-function JudgeCard() {
-  const [cfg, setCfg] = React.useState<JudgeConfig>(defaultJudge());
-  const [profiles, setProfiles] = React.useState<LLMProfile[]>([]);
-  const [loading, setLoading] = React.useState(true);
-  const [saving, setSaving] = React.useState(false);
-  const [usage, setUsage] = React.useState<JudgeUsage | null>(null);
-
-  // Approval usage stats: failures must not break the config page; fetched only when enabled.
-  const loadUsage = React.useCallback(async () => {
-    try {
-      setUsage(await api.interceptJudgeUsage(30));
-    } catch {
-      // Ignore: stats being unavailable must not affect config editing
-    }
-  }, []);
-
-  const load = React.useCallback(async () => {
-    setLoading(true);
-    try {
-      const [j, ps] = await Promise.all([api.interceptGetJudgeConfig(), api.llmProfiles()]);
-      setCfg(j);
-      setProfiles(ps);
-    } catch (e) {
-      toast.error(t("Failed to load model fallback config: {error}", { error: (e as Error).message }));
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  React.useEffect(() => {
-    load();
-  }, [load]);
-
-  // Once enabled (including when the first load reads the switch as true), fetch approval usage stats.
-  React.useEffect(() => {
-    if (cfg.enabled) loadUsage();
-  }, [cfg.enabled, loadUsage]);
-
-  function patch(p: Partial<JudgeConfig>) {
-    setCfg((c) => ({ ...c, ...p }));
-  }
-
-  async function save() {
-    setSaving(true);
-    try {
-      await api.interceptSetJudgeConfig(cfg);
-      toast.success(t("Model fallback config saved"));
-      await load(); // read back: if the prompt was cleared, the built-in template is refilled
-    } catch (e) {
-      toast.error(t("Save failed: {error}", { error: (e as Error).message }));
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  async function restorePrompt() {
-    // Clear the prompt and save → the server then returns the full built-in template, refilled into the input.
-    setSaving(true);
-    try {
-      await api.interceptSetJudgeConfig({ ...cfg, prompt: "" });
-      const j = await api.interceptGetJudgeConfig();
-      setCfg(j);
-      toast.success(t("Built-in default template restored"));
-    } catch (e) {
-      toast.error(t("Restore failed: {error}", { error: (e as Error).message }));
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  return (
-    <div className="space-y-4">
-      {/* Enable switch — standalone highlighted bar */}
-      <div
-        className={`flex items-center justify-between gap-3 rounded-lg border px-4 py-3 ${
-          cfg.enabled ? "border-violet-400/50 bg-violet-50/40 dark:bg-violet-950/20" : "bg-muted/40"
-        }`}
-      >
-        <div className="flex items-center gap-2.5">
-          <BotIcon className={`h-5 w-5 shrink-0 ${cfg.enabled ? "text-violet-600" : "text-muted-foreground"}`} />
-          <div>
-            <p className="text-sm font-semibold leading-tight">{t("Model fallback approval")}</p>
-            <p className="text-xs text-muted-foreground mt-0.5">
-              {tRich("Only commands inside the {scope} that {norule} are semantically judged by the model (allow / escalate to human / block)", {
-                scope: <span className="font-medium text-foreground">{t("interception scope")}</span>,
-                norule: <span className="font-medium text-foreground">{t("match no interception rule")}</span>,
-              })}
-            </p>
-          </div>
-        </div>
-        <div className="flex shrink-0 items-center gap-2">
-          <span className="text-xs text-muted-foreground">{cfg.enabled ? t("Enabled") : t("Disabled")}</span>
-          <Switch checked={cfg.enabled} disabled={loading} onCheckedChange={(v) => patch({ enabled: v })} />
-        </div>
-      </div>
-
-      {/* Approval token usage stats (global cumulative, independent of per-model configs) */}
-      {cfg.enabled && usage && (
-        <Card>
-          <CardContent className="p-4">
-            <div className="mb-3 flex items-center justify-between">
-              <div>
-                <p className="text-sm font-medium">{t("Approval token consumption")}</p>
-                <p className="text-xs text-muted-foreground">
-                  {t("Cumulative model fallback approval usage, metered separately (worker=judge), not mixed with per-model config stats")}
-                </p>
-              </div>
-              <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={loadUsage}>
-                {t("Refresh")}
-              </Button>
-            </div>
-            <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
-              <JudgeStat label={t("Approval calls")} value={usage.calls.toLocaleString(intlLocale)} />
-              <JudgeStat label={t("Input tokens")} value={fmtTokens(usage.input_tokens)} />
-              <JudgeStat label={t("Output tokens")} value={fmtTokens(usage.output_tokens)} />
-              <JudgeStat label={t("Cache read")} value={fmtTokens(usage.cache_read_tokens)} />
-              <JudgeStat label={t("Cache write")} value={fmtTokens(usage.cache_write_tokens)} />
-            </div>
-            {usage.daily.length > 0 && (
-              <div className="mt-4">
-                <p className="mb-2 text-[10px] uppercase tracking-wider text-muted-foreground">
-                  {t("Daily consumption over the last 30 days (input + output)")}
-                </p>
-                <JudgeSparkbars daily={usage.daily} />
-              </div>
-            )}
-          </CardContent>
-        </Card>
-      )}
-
-      {cfg.enabled && (
-        <div className="grid gap-4 lg:grid-cols-5">
-          {/* Left: prompt editor (expanded inline, main area) */}
-          <Card className="lg:col-span-3">
-            <CardContent className="flex h-full flex-col gap-2 p-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm font-medium">{t("Approval prompt")}</p>
-                  <p className="text-xs text-muted-foreground">{t("The model decides ALLOW / ASK / DENY based on this; directly editable")}</p>
-                </div>
-                <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={restorePrompt} disabled={saving}>
-                  {t("Restore default template")}
-                </Button>
-              </div>
-              <Textarea
-                className="min-h-[22rem] flex-1 resize-none font-mono text-xs leading-relaxed"
-                value={cfg.prompt}
-                onChange={(e) => patch({ prompt: e.target.value })}
-                placeholder={t("Leave empty to use the built-in template")}
-                spellCheck={false}
-              />
-              <p className="text-right text-[11px] text-muted-foreground">{t("{count} chars", { count: cfg.prompt.length })}</p>
-            </CardContent>
-          </Card>
-
-          {/* Right: decision parameters (settings column) */}
-          <Card className="lg:col-span-2">
-            <CardContent className="space-y-5 p-4">
-              <div className="space-y-4">
-                <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">{t("Judge model and policy")}</p>
-                <Field label={t("Approval model")}>
-                  <Select value={String(cfg.profile_id || 0)} onValueChange={(v) => patch({ profile_id: Number(v) })}>
-                    <SelectTrigger><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value={FOLLOW_ACTIVE}>{t("Follow active profile")}</SelectItem>
-                      {profiles.map((p) => (
-                        <SelectItem key={p.id} value={p.id}>
-                          {p.name} ({p.model})
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </Field>
-                <Field label={t("Judge mode")}>
-                  <Select value={cfg.mode ?? "closed"} onValueChange={(v) => patch({ mode: v as JudgeConfig["mode"] })}>
-                    <SelectTrigger><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="closed">{t("Closed questions (code decides; prompt is the operator policy; failure asks)")}</SelectItem>
-                      <SelectItem value="freeform">{t("Free-form prompt (model decides)")}</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </Field>
-                <Field label={t("Model judge timeout (seconds)")}>
-                  <Input
-                    type="number"
-                    min={1}
-                    value={cfg.timeout_seconds}
-                    onChange={(e) => {
-                      const n = parseInt(e.target.value, 10);
-                      if (n > 0) patch({ timeout_seconds: n });
-                    }}
-                  />
-                </Field>
-                <Field label={t("When the model fails (error / timeout / unparsable)")}>
-                  <Select value={cfg.fail_action} onValueChange={(v) => patch({ fail_action: v as JudgeConfig["fail_action"] })}>
-                    <SelectTrigger><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="allow">{t("Allow")}</SelectItem>
-                      <SelectItem value="ask">{t("Escalate to human approval")}</SelectItem>
-                      <SelectItem value="deny">{t("Block")}</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </Field>
-              </div>
-
-              <Separator />
-
-              <div className="space-y-4">
-                <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">{t("Human approval (when the model decides \"ask\")")}</p>
-                <Field label={t("Approval wait timeout (seconds)")}>
-                  <Input
-                    type="number"
-                    min={5}
-                    value={cfg.ask_timeout_seconds}
-                    onChange={(e) => {
-                      const n = parseInt(e.target.value, 10);
-                      if (n > 0) patch({ ask_timeout_seconds: n });
-                    }}
-                  />
-                </Field>
-                <Field label={t("Default action after timeout")}>
-                  <Select value={cfg.ask_timeout_action} onValueChange={(v) => patch({ ask_timeout_action: v as JudgeConfig["ask_timeout_action"] })}>
-                    <SelectTrigger><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="deny">{t("Block")}</SelectItem>
-                      <SelectItem value="allow">{t("Allow")}</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </Field>
-              </div>
-            </CardContent>
-          </Card>
-        </div>
-      )}
-
-      <div className="flex justify-end">
-        <Button size="sm" onClick={save} disabled={saving || loading}>
-          {saving ? t("Saving…") : t("Save config")}
-        </Button>
-      </div>
-    </div>
-  );
-}
-
-// ---- page ----
-
 export default function InterceptPage() {
   const [rules, setRules]     = React.useState<InterceptRule[]>([]);
   const [loading, setLoading] = React.useState(true);
   const [open, setOpen]       = React.useState(false);
   const [editing, setEditing] = React.useState<InterceptRule | null>(null);
   const [form, setForm]       = React.useState<RuleForm>(defaultForm());
+  // Rules, scope and the judge are admin-only to change (server/rbac_policy.go); other roles read them.
+  const canAdmin = useCan("admin");
   const [saving, setSaving]   = React.useState(false);
   const [regexErr, setRegexErr] = React.useState("");
   const [regexWarn, setRegexWarn] = React.useState(false); // true = JS cannot parse it but it may be valid Go syntax
@@ -571,7 +252,7 @@ export default function InterceptPage() {
       setOpen(false);
       load();
     } catch (e) {
-      toast.error((e as Error).message);
+      toast.error(errorText(e));
     } finally {
       setSaving(false);
     }
@@ -583,7 +264,7 @@ export default function InterceptPage() {
       toast.success(t("Rule deleted"));
       load();
     } catch (e) {
-      toast.error((e as Error).message);
+      toast.error(errorText(e));
     }
   }
 
@@ -592,7 +273,7 @@ export default function InterceptPage() {
       await api.toggleInterceptRule(rule.id, !rule.enabled);
       load();
     } catch (e) {
-      toast.error((e as Error).message);
+      toast.error(errorText(e));
     }
   }
 
@@ -606,7 +287,7 @@ export default function InterceptPage() {
       setAllTools(tools);
       setEnabledTools(new Set(cfg.enabled_tools));
     } catch (e) {
-      toast.error(t("Load failed: {error}", { error: (e as Error).message }));
+      toast.error(t("Load failed: {error}", { error: errorText(e) }));
     } finally {
       setScopeLoading(false);
     }
@@ -628,7 +309,7 @@ export default function InterceptPage() {
       setScopeTools([...enabledTools]);
       setScopeOpen(false);
     } catch (e) {
-      toast.error(t("Save failed: {error}", { error: (e as Error).message }));
+      toast.error(t("Save failed: {error}", { error: errorText(e) }));
     } finally {
       setScopeSaving(false);
     }
@@ -699,10 +380,12 @@ export default function InterceptPage() {
             <p className="text-xs text-muted-foreground">
               {t("Rules are matched one by one in priority order (higher numbers first); the first match wins")}
             </p>
-            <Button onClick={openNew} size="sm" className="shrink-0">
-              <PlusIcon className="h-4 w-4" />
-              {t("Create rule")}
-            </Button>
+            {canAdmin && (
+              <Button onClick={openNew} size="sm" className="shrink-0">
+                <PlusIcon className="h-4 w-4" />
+                {t("Create rule")}
+              </Button>
+            )}
           </div>
 
           <Card>
@@ -713,10 +396,12 @@ export default function InterceptPage() {
             <div className="flex flex-col items-center justify-center gap-2 py-16 text-center">
               <ShieldAlertIcon className="h-8 w-8 text-muted-foreground/40" />
               <p className="text-sm text-muted-foreground">{t("No rules yet")}</p>
-              <Button size="sm" variant="outline" onClick={openNew}>
-                <PlusIcon className="h-4 w-4" />
-                {t("Create the first rule")}
-              </Button>
+              {canAdmin && (
+                <Button size="sm" variant="outline" onClick={openNew}>
+                  <PlusIcon className="h-4 w-4" />
+                  {t("Create the first rule")}
+                </Button>
+              )}
             </div>
           ) : (
             <Table>
@@ -760,6 +445,7 @@ export default function InterceptPage() {
                     <TableCell className="text-center">
                       <Switch
                         checked={rule.enabled}
+                        disabled={!canAdmin}
                         onCheckedChange={() => handleToggle(rule)}
                       />
                     </TableCell>
@@ -771,13 +457,15 @@ export default function InterceptPage() {
                         >
                           <PencilIcon className="h-3.5 w-3.5" />
                         </Button>
-                        <Button
-                          size="icon" variant="ghost"
-                          className="h-7 w-7 text-destructive hover:text-destructive"
-                          onClick={() => handleDelete(rule.id)}
-                        >
-                          <Trash2Icon className="h-3.5 w-3.5" />
-                        </Button>
+                        {canAdmin && (
+                          <Button
+                            size="icon" variant="ghost"
+                            className="h-7 w-7 text-destructive hover:text-destructive"
+                            onClick={() => handleDelete(rule.id)}
+                          >
+                            <Trash2Icon className="h-3.5 w-3.5" />
+                          </Button>
+                        )}
                       </div>
                     </TableCell>
                   </TableRow>
@@ -805,7 +493,7 @@ export default function InterceptPage() {
             </SheetDescription>
           </SheetHeader>
 
-          <div className="flex-1 min-h-0 overflow-y-auto px-6 py-5 space-y-5">
+          <fieldset disabled={!canAdmin} className="flex-1 min-h-0 min-w-0 overflow-y-auto px-6 py-5 space-y-5">
             <Field label={t("Name")}>
               <Input
                 placeholder={t("Give the rule a name")}
@@ -968,14 +656,16 @@ export default function InterceptPage() {
               />
               <Label htmlFor="rule-enabled" className="cursor-pointer">{t("Enable this rule")}</Label>
             </div>
-          </div>
+          </fieldset>
 
-          <SheetFooter className="border-t px-6 py-4 flex-row justify-end gap-2">
-            <Button variant="outline" onClick={() => setOpen(false)}>{t("Cancel")}</Button>
-            <Button onClick={handleSave} disabled={saving || !!regexErr}>
-              {saving ? t("Saving…") : t("Save")}
-            </Button>
-          </SheetFooter>
+          {canAdmin && (
+            <SheetFooter className="border-t px-6 py-4 flex-row justify-end gap-2">
+              <Button variant="outline" onClick={() => setOpen(false)}>{t("Cancel")}</Button>
+              <Button onClick={handleSave} disabled={saving || !!regexErr}>
+                {saving ? t("Saving…") : t("Save")}
+              </Button>
+            </SheetFooter>
+          )}
         </SheetContent>
       </Sheet>
 
@@ -1008,6 +698,7 @@ export default function InterceptPage() {
                         <Switch
                           id={`scope-${tool.key}`}
                           checked={enabledTools.has(tool.key)}
+                          disabled={!canAdmin}
                           onCheckedChange={(v) => toggleTool(tool.key, v)}
                         />
                         <label htmlFor={`scope-${tool.key}`} className="flex-1 min-w-0 cursor-pointer">
@@ -1031,9 +722,11 @@ export default function InterceptPage() {
 
           <div className="shrink-0 border-t px-6 py-3 flex justify-end gap-2">
             <Button variant="outline" size="sm" onClick={() => setScopeOpen(false)}>{t("Cancel")}</Button>
-            <Button size="sm" onClick={saveScope} disabled={scopeSaving || scopeLoading}>
-              {scopeSaving ? t("Saving…") : t("Save")}
-            </Button>
+            {canAdmin && (
+              <Button size="sm" onClick={saveScope} disabled={scopeSaving || scopeLoading}>
+                {scopeSaving ? t("Saving…") : t("Save")}
+              </Button>
+            )}
           </div>
         </DialogContent>
       </Dialog>

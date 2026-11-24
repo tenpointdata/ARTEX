@@ -13,7 +13,9 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { useCan } from "@/hooks/use-session";
 import { api } from "@/lib/api";
+import { errorText } from "@/lib/api-errors";
 import type { SSProject, SSTask } from "@/lib/types";
 import { t } from "@/i18n";
 
@@ -62,7 +64,7 @@ function ScopeSentryPanel() {
     api
       .ssStatus()
       .then(setStatus)
-      .catch((e) => toast.error(t("Failed to read data source status: {error}", { error: e.message })))
+      .catch((e) => toast.error(t("Failed to read data source status: {error}", { error: errorText(e) })))
       .finally(() => setLoadingStatus(false));
   }, []);
 
@@ -102,6 +104,7 @@ function DataSourceCard({
   const [url, setUrl] = React.useState("");
   const [apiKey, setApiKey] = React.useState("");
   const [busy, setBusy] = React.useState(false);
+  const canAdmin = useCan("admin"); // /api/sync/scopesentry/datasource mutations
 
   React.useEffect(() => {
     if (status?.url) setUrl(status.url);
@@ -114,7 +117,7 @@ function DataSourceCard({
       toast.success(t("ScopeSentry data source created; fill in the URL and key"));
       onChanged();
     } catch (e) {
-      toast.error(t("Create failed: {error}", { error: (e as Error).message }));
+      toast.error(t("Create failed: {error}", { error: errorText(e) }));
     } finally {
       setBusy(false);
     }
@@ -129,7 +132,7 @@ function DataSourceCard({
       setApiKey("");
       onChanged();
     } catch (e) {
-      toast.error(t("Save failed: {error}", { error: (e as Error).message }));
+      toast.error(t("Save failed: {error}", { error: errorText(e) }));
     } finally {
       setBusy(false);
     }
@@ -152,9 +155,11 @@ function DataSourceCard({
             <p className="text-muted-foreground text-sm">
               {t("No ScopeSentry data source yet. Creating one adds a placeholder MCP (empty URL/key, disabled).")}
             </p>
-            <Button onClick={create} disabled={busy}>
-              {t("Create data source")}
-            </Button>
+            {canAdmin && (
+              <Button onClick={create} disabled={busy}>
+                {t("Create data source")}
+              </Button>
+            )}
           </div>
         ) : (
           <>
@@ -171,22 +176,31 @@ function DataSourceCard({
             <div className="grid gap-3 md:grid-cols-2">
               <div className="space-y-1.5">
                 <Label>MCP URL</Label>
-                <Input placeholder="http://<host>:8082/mcp" value={url} onChange={(e) => setUrl(e.target.value)} />
-              </div>
-              <div className="space-y-1.5">
-                <Label>{t("API Key (X-API-Key; leave empty to keep the current value)")}</Label>
                 <Input
-                  type="password"
-                  placeholder="ssk_..."
-                  value={apiKey}
-                  onChange={(e) => setApiKey(e.target.value)}
+                  placeholder="http://<host>:8082/mcp"
+                  value={url}
+                  disabled={!canAdmin}
+                  onChange={(e) => setUrl(e.target.value)}
                 />
               </div>
+              {canAdmin && (
+                <div className="space-y-1.5">
+                  <Label>{t("API Key (X-API-Key; leave empty to keep the current value)")}</Label>
+                  <Input
+                    type="password"
+                    placeholder="ssk_..."
+                    value={apiKey}
+                    onChange={(e) => setApiKey(e.target.value)}
+                  />
+                </div>
+              )}
             </div>
             <div className="flex items-center gap-2">
-              <Button onClick={save} disabled={busy}>
-                {t("Save & enable")}
-              </Button>
+              {canAdmin && (
+                <Button onClick={save} disabled={busy}>
+                  {t("Save & enable")}
+                </Button>
+              )}
               {status.enabled && status.tools.length > 0 && (
                 <span className="text-muted-foreground text-xs">
                   {t("{count} tools discovered", { count: status.tools.length })}
@@ -236,6 +250,7 @@ function SyncWorkbench() {
   const [page, setPage] = React.useState(1);
   const [selected, setSelected] = React.useState<Set<string>>(new Set());
 
+  const canOperate = useCan("operate");
   const [syncing, setSyncing] = React.useState(false);
   const [result, setResult] = React.useState<Awaited<ReturnType<typeof api.ssSync>> | null>(null);
 
@@ -246,7 +261,7 @@ function SyncWorkbench() {
       dimension === "project"
         ? api.ssProjects(page, 50, search).then((r) => setProjects(r.projects))
         : api.ssTasks(page, 50, search).then(setTasks);
-    fn.catch((e) => toast.error(t("Failed to load the list: {error}", { error: e.message }))).finally(() =>
+    fn.catch((e) => toast.error(t("Failed to load the list: {error}", { error: errorText(e) }))).finally(() =>
       setLoading(false),
     );
   }, [dimension, page, search]);
@@ -289,7 +304,7 @@ function SyncWorkbench() {
       const total = Object.values(r.synced ?? {}).reduce((a, b) => a + b, 0);
       toast.success(t("Sync finished; {count} assets ingested in total", { count: total }));
     } catch (e) {
-      toast.error(t("Sync failed: {error}", { error: (e as Error).message }));
+      toast.error(t("Sync failed: {error}", { error: errorText(e) }));
     } finally {
       setSyncing(false);
     }
@@ -405,9 +420,11 @@ function SyncWorkbench() {
           </Button>
           <div className="flex-1" />
           <span className="text-muted-foreground text-xs">{t("{count} selected", { count: selected.size })}</span>
-          <Button onClick={runSync} disabled={syncing || selected.size === 0}>
-            <DownloadIcon className={syncing ? "size-4 animate-pulse" : "size-4"} /> {t("Sync selected")}
-          </Button>
+          {canOperate && (
+            <Button onClick={runSync} disabled={syncing || selected.size === 0}>
+              <DownloadIcon className={syncing ? "size-4 animate-pulse" : "size-4"} /> {t("Sync selected")}
+            </Button>
+          )}
         </div>
 
         {/* List */}

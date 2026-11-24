@@ -18,7 +18,9 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { t } from "@/i18n";
+import { useCan } from "@/hooks/use-session";
 import { api } from "@/lib/api";
+import { errorText } from "@/lib/api-errors";
 import type { LLMRetryOverride, LLMRetryPolicy, LLMRetryRule } from "@/lib/types";
 
 export const ZERO_RULE: LLMRetryRule = { attempts: 0, interval_ms: 0 };
@@ -263,6 +265,7 @@ export function ProfileRetryFields({
 
 /** The "Retry & backoff" tab: global defaults for the five layers. */
 export function RetryPolicyPanel() {
+  const canAdmin = useCan("admin"); // PUT /api/llm/retry-policy
   const [policy, setPolicy] = React.useState<LLMRetryPolicy>(ZERO_POLICY);
   const [loading, setLoading] = React.useState(true);
   const [saving, setSaving] = React.useState(false);
@@ -273,7 +276,7 @@ export function RetryPolicyPanel() {
       const p = await api.llmRetryPolicy();
       setPolicy({ ...ZERO_POLICY, ...p });
     } catch (e) {
-      toast.error(t("Failed to load retry policy: {error}", { error: (e as Error).message }));
+      toast.error(t("Failed to load retry policy: {error}", { error: errorText(e) }));
     } finally {
       setLoading(false);
     }
@@ -292,7 +295,7 @@ export function RetryPolicyPanel() {
       setPolicy({ ...ZERO_POLICY, ...saved });
       toast.success(t("Saved; takes effect immediately (calls already in flight still use the old parameters)"));
     } catch (e) {
-      toast.error(t("Save failed: {error}", { error: (e as Error).message }));
+      toast.error(t("Save failed: {error}", { error: errorText(e) }));
     } finally {
       setSaving(false);
     }
@@ -327,13 +330,13 @@ export function RetryPolicyPanel() {
           )}
       </div>
 
-      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+      <fieldset disabled={!canAdmin} className="grid min-w-0 gap-3 md:grid-cols-2 xl:grid-cols-3">
         {(Object.keys(RETRY_LAYERS) as LayerKey[]).map((k) => (
           <RetryRuleFields key={k} layer={k} idPrefix="gl" value={policy[k]} onChange={set(k)} />
         ))}
-      </div>
+      </fieldset>
 
-      <div className="flex gap-2">
+      {canAdmin && <div className="flex gap-2">
         <Button onClick={save} disabled={saving}>
           {saving ? <Loader2Icon className="animate-spin" /> : <SaveIcon />}
           {t("Save")}
@@ -341,7 +344,7 @@ export function RetryPolicyPanel() {
         <Button variant="outline" onClick={() => setPolicy(ZERO_POLICY)} disabled={saving}>
           {t("Reset all to defaults")}
         </Button>
-      </div>
+      </div>}
     </div>
   );
 }

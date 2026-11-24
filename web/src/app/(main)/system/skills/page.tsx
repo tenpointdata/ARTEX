@@ -43,18 +43,12 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils";
 import { api } from "@/lib/api";
-import { intlLocale, t } from "@/i18n";
+import { errorText } from "@/lib/api-errors";
+import { useCan } from "@/hooks/use-session";
+import { t } from "@/i18n";
 import type { Agent, SkillItem, MCPServer, SkillCall, MissingSkill } from "@/lib/types";
 
-function fmtTime(ts?: string) {
-  if (!ts) return t("Never called");
-  return new Date(ts).toLocaleString(intlLocale, {
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
-}
+import { fmtTime, SkillsOverview } from "./_components/skills-overview";
 
 // ── Tree node ──────────────────────────────────────────────────────────────
 interface TreeNode {
@@ -141,168 +135,11 @@ type PendingDelete =
   | { kind: "dir"; skill: string; path: string }
   | null;
 
-// ── Overview (empty-state) ──────────────────────────────────────────────────
-// Shown when nothing is selected: a library-wide snapshot from data already loaded
-// (the skill list carries per-skill usage; missing is fetched alongside). No extra
-// requests — this is pure aggregation over props.
-function SkillsOverview({
-  skills,
-  missing,
-  onSelect,
-}: {
-  skills: SkillItem[];
-  missing: MissingSkill[];
-  onSelect: (name: string) => void;
-}) {
-  const agg = React.useMemo(() => {
-    const totalCalls = skills.reduce((n, s) => n + s.calls, 0);
-    const used = skills.filter((s) => s.calls > 0);
-    const ranked = [...used].sort((a, b) => b.calls - a.calls);
-    const neverUsed = skills.filter((s) => s.calls === 0);
-    const recent = skills
-      .filter((s) => s.last_used)
-      .sort((a, b) => (a.last_used! < b.last_used! ? 1 : -1))
-      .slice(0, 6);
-    const missingCalls = missing.reduce((n, m) => n + m.calls, 0);
-    return {
-      totalCalls,
-      usedCount: used.length,
-      ranked,
-      topCalls: ranked[0]?.calls ?? 0,
-      neverUsed,
-      recent,
-      missingCalls,
-    };
-  }, [skills, missing]);
-
-  if (skills.length === 0) {
-    return (
-      <div className="flex h-full items-center justify-center">
-        <p className="text-sm text-muted-foreground">{t("No skills yet — click \"Create\" or \"Upload archive\" on the left to get started")}</p>
-      </div>
-    );
-  }
-
-  const stats: { label: string; value: React.ReactNode; hint?: string }[] = [
-    { label: t("Total skills"), value: skills.length, hint: t("{count} have been called", { count: agg.usedCount }) },
-    { label: t("Total calls"), value: agg.totalCalls },
-    {
-      label: t("Unused"),
-      value: agg.neverUsed.length,
-      hint: agg.neverUsed.length > 0 ? t("never loaded by any agent") : t("all used"),
-    },
-    {
-      label: t("Missed calls"),
-      value: agg.missingCalls,
-      hint: missing.length > 0 ? t("{count} missing skills", { count: missing.length }) : t("none"),
-    },
-  ];
-
-  return (
-    <div className="mx-auto w-full max-w-3xl space-y-6">
-      <div>
-        <h2 className="text-base font-semibold">{t("Skill library overview")}</h2>
-        <p className="text-muted-foreground text-sm">{t("Select a skill on the left to view details and call history, or get a quick picture of overall usage here.")}</p>
-      </div>
-
-      {/* stat cards */}
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-        {stats.map((s) => (
-          <div key={s.label} className="rounded-lg border p-3">
-            <p className="text-2xl font-semibold tabular-nums">{s.value}</p>
-            <p className="text-xs font-medium">{s.label}</p>
-            {s.hint && <p className="text-muted-foreground mt-0.5 text-[11px]">{s.hint}</p>}
-          </div>
-        ))}
-      </div>
-
-      {/* call ranking */}
-      <div className="space-y-2">
-        <Label className="text-xs text-muted-foreground">{t("Call ranking")}</Label>
-        {agg.ranked.length === 0 ? (
-          <p className="text-muted-foreground rounded-lg border border-dashed p-4 text-center text-xs">
-            {t("No skill call records yet.")}
-          </p>
-        ) : (
-          <div className="space-y-1.5">
-            {agg.ranked.slice(0, 8).map((s) => (
-              <button
-                key={s.name}
-                type="button"
-                onClick={() => onSelect(s.name)}
-                className="group flex w-full items-center gap-3 rounded-md px-2 py-1.5 text-left hover:bg-muted"
-              >
-                <span className="w-40 shrink-0 truncate font-mono text-xs" title={s.name}>{s.name}</span>
-                <span className="relative h-2 flex-1 overflow-hidden rounded-full bg-muted">
-                  <span
-                    className="absolute inset-y-0 left-0 rounded-full bg-primary/70"
-                    style={{ width: `${agg.topCalls > 0 ? (s.calls / agg.topCalls) * 100 : 0}%` }}
-                  />
-                </span>
-                <span className="w-16 shrink-0 text-right text-xs tabular-nums text-muted-foreground">
-                  {t("{count} calls", { count: s.calls })}
-                </span>
-              </button>
-            ))}
-          </div>
-        )}
-      </div>
-
-      <div className="grid gap-6 sm:grid-cols-2">
-        {/* recent calls */}
-        <div className="space-y-2">
-          <Label className="text-xs text-muted-foreground">{t("Recent calls")}</Label>
-          {agg.recent.length === 0 ? (
-            <p className="text-muted-foreground text-xs">{t("No records yet.")}</p>
-          ) : (
-            <div className="space-y-1">
-              {agg.recent.map((s) => (
-                <button
-                  key={s.name}
-                  type="button"
-                  onClick={() => onSelect(s.name)}
-                  className="flex w-full items-center gap-2 rounded px-1.5 py-1 text-left hover:bg-muted"
-                >
-                  <span className="min-w-0 flex-1 truncate font-mono text-xs" title={s.name}>{s.name}</span>
-                  <span className="shrink-0 text-[11px] tabular-nums text-muted-foreground">{fmtTime(s.last_used)}</span>
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
-
-        {/* unused (candidates for cleanup / exposure) */}
-        <div className="space-y-2">
-          <Label className="text-xs text-muted-foreground">
-            {t("Unused skills")}
-            {agg.neverUsed.length > 0 && <span className="ml-1 font-normal"> ({agg.neverUsed.length})</span>}
-          </Label>
-          {agg.neverUsed.length === 0 ? (
-            <p className="text-muted-foreground text-xs">{t("All skills have been called.")}</p>
-          ) : (
-            <div className="flex flex-wrap gap-1.5">
-              {agg.neverUsed.map((s) => (
-                <button
-                  key={s.name}
-                  type="button"
-                  onClick={() => onSelect(s.name)}
-                  title={s.name}
-                >
-                  <Badge variant="outline" className="max-w-[12rem] cursor-pointer truncate font-mono text-xs font-normal hover:bg-muted">
-                    {s.name}
-                  </Badge>
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-}
-
 // ── Page ──────────────────────────────────────────────────────────────────
 export default function SkillsPage() {
+  // Skill files, create/delete and MCP metadata are /api/skills (operate); per-agent visibility is /api/visibility (admin).
+  const canOperate = useCan("operate");
+  const canAdmin = useCan("admin");
   const [skills, setSkills] = React.useState<SkillItem[]>([]);
   const [agents, setAgents] = React.useState<Agent[]>([]);
   const [selected, setSelected] = React.useState<Selected | null>(null);
@@ -374,7 +211,7 @@ export default function SkillsPage() {
       toast.success(t("Skill installed: {name} ({count} files)", { name: r.name, count: r.files }));
       load();
     } catch (e) {
-      const msg = (e as Error).message;
+      const msg = errorText(e);
       // offer overwrite when the skill already exists
       if (!overwrite && msg.includes("already exists")) {
         if (window.confirm(`${msg}\n\n${t("Overwrite the skill with the same name?")}`)) {
@@ -488,7 +325,7 @@ export default function SkillsPage() {
       }
       load();
     } catch (e) {
-      toast.error(t("Create failed: {error}", { error: (e as Error).message }));
+      toast.error(t("Create failed: {error}", { error: errorText(e) }));
     }
   }
 
@@ -505,7 +342,7 @@ export default function SkillsPage() {
       if (selected?.skill === skill && selected.path === path) setSelected(null);
       load();
     } catch (e) {
-      toast.error(t("Delete failed: {error}", { error: (e as Error).message }));
+      toast.error(t("Delete failed: {error}", { error: errorText(e) }));
     }
   }
 
@@ -516,7 +353,7 @@ export default function SkillsPage() {
       if (selected?.skill === name) setSelected(null);
       load();
     } catch (e) {
-      toast.error(t("Delete failed: {error}", { error: (e as Error).message }));
+      toast.error(t("Delete failed: {error}", { error: errorText(e) }));
     }
   }
 
@@ -541,7 +378,7 @@ export default function SkillsPage() {
       toast.success(t("Saved"));
       setDirty(false);
     } catch (e) {
-      toast.error(t("Save failed: {error}", { error: (e as Error).message }));
+      toast.error(t("Save failed: {error}", { error: errorText(e) }));
     } finally { setSaving(false); }
   }
 
@@ -557,7 +394,7 @@ export default function SkillsPage() {
     } catch (e) {
       // roll back on error
       setDetailMcps(detailMcps);
-      toast.error(t("Operation failed: {error}", { error: (e as Error).message }));
+      toast.error(t("Operation failed: {error}", { error: errorText(e) }));
     }
   }
 
@@ -573,7 +410,7 @@ export default function SkillsPage() {
       const ids = await api.skillVisibility(skillName);
       setVisibility((v) => ({ ...v, [skillName]: ids }));
     } catch (e) {
-      toast.error(t("Operation failed: {error}", { error: (e as Error).message }));
+      toast.error(t("Operation failed: {error}", { error: errorText(e) }));
     }
   }
 
@@ -598,7 +435,7 @@ export default function SkillsPage() {
       setNewMcps([]); setNewVisibility([]);
       load();
     } catch (e) {
-      toast.error(t("Create failed: {error}", { error: (e as Error).message }));
+      toast.error(t("Create failed: {error}", { error: errorText(e) }));
     } finally { setCreatingSkill(false); }
   }
 
@@ -654,7 +491,7 @@ export default function SkillsPage() {
               }
               <span className="min-w-0 flex-1 truncate" title={node.path}>{node.name}</span>
               {/* Absolute so a long name can never push the actions out of view */}
-              <span className="absolute inset-y-0 right-1 hidden items-center gap-0.5 rounded bg-muted pl-1 group-hover:flex">
+              {canOperate && <span className="absolute inset-y-0 right-1 hidden items-center gap-0.5 rounded bg-muted pl-1 group-hover:flex">
                 <Button size="icon" variant="ghost" className="size-5" title={t("New file")}
                   onClick={(e) => { e.stopPropagation(); startCreate(skill, node.path, "file"); }}>
                   <FilePlusIcon className="size-3 text-muted-foreground" />
@@ -667,7 +504,7 @@ export default function SkillsPage() {
                   onClick={(e) => { e.stopPropagation(); setPendingDelete({ kind: "dir", skill, path: node.path }); }}>
                   <Trash2Icon className="size-3 text-destructive" />
                 </Button>
-              </span>
+              </span>}
             </div>
             {open && (
               <>
@@ -694,7 +531,7 @@ export default function SkillsPage() {
         >
           <FileTextIcon className="size-3.5 shrink-0 text-muted-foreground" />
           <span className="min-w-0 flex-1 truncate font-mono text-xs" title={node.path}>{node.name}</span>
-          <span className={cn(
+          {canOperate && <span className={cn(
             "absolute inset-y-0 right-1 hidden items-center rounded pl-1 group-hover:flex",
             isSelected ? "bg-accent" : "bg-muted",
           )}>
@@ -703,7 +540,7 @@ export default function SkillsPage() {
               onClick={(e) => { e.stopPropagation(); setPendingDelete({ kind: "file", skill, path: node.path }); }}>
               <Trash2Icon className="size-3 text-destructive" />
             </Button>
-          </span>
+          </span>}
         </div>
       );
     });
@@ -749,7 +586,7 @@ export default function SkillsPage() {
       <div className="flex flex-1 overflow-hidden">
         {/* ── left file tree ── */}
         <div className="flex w-64 shrink-0 flex-col border-r">
-          <div className="flex flex-col gap-2 border-b p-2">
+          {canOperate && <div className="flex flex-col gap-2 border-b p-2">
             <Button size="sm" variant="outline" className="w-full" onClick={() => setNewOpen(true)}>
               <PlusIcon className="size-3.5" />
               {t("Create skill")}
@@ -772,7 +609,7 @@ export default function SkillsPage() {
               <UploadIcon className="size-3.5" />
               {uploading ? t("Uploading…") : t("Upload archive")}
             </Button>
-          </div>
+          </div>}
           {/* Radix viewport wraps children in a display:table div that grows with
               content — force it to block so long names truncate instead of
               widening the rows past the sidebar. */}
@@ -809,7 +646,7 @@ export default function SkillsPage() {
                           {s.calls}
                         </span>
                       )}
-                      <span className={cn(
+                      {canOperate && <span className={cn(
                         "absolute inset-y-0 right-1 hidden items-center gap-0.5 rounded pl-1 group-hover:flex",
                         isSkillSelected ? "bg-accent" : "bg-muted",
                       )}>
@@ -825,7 +662,7 @@ export default function SkillsPage() {
                           onClick={(e) => { e.stopPropagation(); setPendingDelete({ kind: "skill", skill: s.name }); }}>
                           <Trash2Icon className="size-3 text-destructive" />
                         </Button>
-                      </span>
+                      </span>}
                     </div>
 
                     {/* expanded: recursive file tree */}
@@ -946,6 +783,7 @@ export default function SkillsPage() {
                           <label key={m.id} className="flex cursor-pointer items-center gap-2 text-sm">
                             <Checkbox
                               checked={detailMcps.includes(m.name)}
+                              disabled={!canOperate}
                               onCheckedChange={(on) => toggleSkillMcp(selectedSkill.name, m.name, !!on)}
                             />
                             {m.name}
@@ -962,6 +800,7 @@ export default function SkillsPage() {
                         <label key={a.key} className="flex cursor-pointer items-center gap-2 text-sm">
                           <Checkbox
                             checked={(visibility[selectedSkill.name] ?? []).includes(a.id)}
+                            disabled={!canAdmin}
                             onCheckedChange={() => toggleVisibility(selectedSkill.name, a.id, a.name)}
                           />
                           {a.name}
@@ -983,9 +822,11 @@ export default function SkillsPage() {
                 <span className="font-medium text-foreground">{selected.skill}</span>
                 <span>/</span>
                 <span className="font-mono">{selected.path}</span>
-                <Button size="sm" className="ml-auto" onClick={saveFile} disabled={!dirty || saving}>
-                  {saving ? t("Saving…") : t("Save")}
-                </Button>
+                {canOperate && (
+                  <Button size="sm" className="ml-auto" onClick={saveFile} disabled={!dirty || saving}>
+                    {saving ? t("Saving…") : t("Save")}
+                  </Button>
+                )}
               </div>
               {fileLoading ? (
                 <p className="text-xs text-muted-foreground">{t("Loading…")}</p>
@@ -993,6 +834,7 @@ export default function SkillsPage() {
                 <Textarea
                   className="flex-1 resize-none font-mono text-xs"
                   value={fileContent}
+                  readOnly={!canOperate}
                   onChange={(e) => { setFileContent(e.target.value); setDirty(true); }}
                 />
               )}
@@ -1127,6 +969,7 @@ export default function SkillsPage() {
                     <label key={a.key} className="flex cursor-pointer items-center gap-2 text-sm">
                       <Checkbox
                         checked={newVisibility.includes(a.id)}
+                        disabled={!canAdmin}
                         onCheckedChange={(on) =>
                           setNewVisibility((cur) => on ? [...cur, a.id] : cur.filter((id) => id !== a.id))
                         }

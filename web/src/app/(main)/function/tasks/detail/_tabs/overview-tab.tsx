@@ -27,8 +27,11 @@ import { Input } from "@/components/ui/input";
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
 import { Progress } from "@/components/ui/progress";
 import { Switch } from "@/components/ui/switch";
-import { MethodologyCoverage } from "./methodology-coverage";
+import { useCan } from "@/hooks/use-session";
+import { intlLocale, t } from "@/i18n";
 import { api } from "@/lib/api";
+import { errorText } from "@/lib/api-errors";
+import { setVisibleInterval } from "@/lib/polling";
 import { taskAssetTypeLabel } from "@/lib/task-assets";
 import type {
   AssetInterceptKind,
@@ -39,13 +42,14 @@ import type {
   Stats,
   Task,
   TaskConstraint,
+  TaskCoverage,
   TaskGoal,
   TaskNode,
-  TaskCoverage,
   TaskScopeRow,
 } from "@/lib/types";
-import { setVisibleInterval } from "@/lib/polling";
-import { intlLocale, t } from "@/i18n";
+
+import { TaskInterceptRulesCard } from "../_components/task-intercept-rules-card";
+import { MethodologyCoverage } from "./methodology-coverage";
 
 // Compact token count formatting (12345 → 12.3k, 2000000 → 2M).
 function fmtTokens(n: number): string {
@@ -110,6 +114,7 @@ function StatCard({
 }
 
 export function OverviewTab({ taskId }: { taskId: string }) {
+  const canOperate = useCan("operate");
   const [task, setTask] = React.useState<Task | null>(null);
   const [stats, setStats] = React.useState<Stats | null>(null);
   const [intents, setIntents] = React.useState<TaskNode[]>([]);
@@ -182,7 +187,7 @@ export function OverviewTab({ taskId }: { taskId: string }) {
       setGoalVuln("");
       await loadGoals();
     } catch (e) {
-      setGoalErr(e instanceof Error ? e.message : t("Failed to add"));
+      setGoalErr(errorText(e));
     } finally {
       setGoalBusy(false);
     }
@@ -210,7 +215,7 @@ export function OverviewTab({ taskId }: { taskId: string }) {
       cancelEditGoal();
       await loadGoals();
     } catch (e) {
-      setGoalErr(e instanceof Error ? e.message : t("Failed to save"));
+      setGoalErr(errorText(e));
     } finally {
       setGoalBusy(false);
     }
@@ -244,7 +249,7 @@ export function OverviewTab({ taskId }: { taskId: string }) {
       setConText("");
       await loadConstraints();
     } catch (e) {
-      setConErr(e instanceof Error ? e.message : t("Failed to add"));
+      setConErr(errorText(e));
     } finally {
       setConBusy(false);
     }
@@ -272,7 +277,7 @@ export function OverviewTab({ taskId }: { taskId: string }) {
       cancelEditConstraint();
       await loadConstraints();
     } catch (e) {
-      setConErr(e instanceof Error ? e.message : t("Failed to save"));
+      setConErr(errorText(e));
     } finally {
       setConBusy(false);
     }
@@ -297,7 +302,7 @@ export function OverviewTab({ taskId }: { taskId: string }) {
       setScopeValueInput("");
       await loadScope();
     } catch (e) {
-      setScopeErr(e instanceof Error ? e.message : t("Failed to add"));
+      setScopeErr(errorText(e));
     } finally {
       setScopeBusy(false);
     }
@@ -464,32 +469,39 @@ export function OverviewTab({ taskId }: { taskId: string }) {
         </CardHeader>
         <CardContent className="flex flex-col gap-3">
           {/* Add form */}
-          <div className="flex flex-wrap items-center gap-2">
-            <Input
-              className="h-7 min-w-56 flex-1 text-sm"
-              placeholder={t("Add a goal, e.g. 'gain unauthorized access with an admin account'")}
-              value={goalText}
-              onChange={(e) => setGoalText(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") void addGoal();
-              }}
-              disabled={goalBusy}
-            />
-            <Input
-              className="h-7 w-32 text-sm"
-              placeholder={t("Vulnerability class (optional)")}
-              value={goalVuln}
-              onChange={(e) => setGoalVuln(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") void addGoal();
-              }}
-              disabled={goalBusy}
-            />
-            <Button size="sm" variant="outline" disabled={goalBusy || !goalText.trim()} onClick={() => void addGoal()}>
-              <PlusIcon className="size-3.5" /> {t("Add")}
-            </Button>
-            {goalErr && <span className="text-xs text-red-500">{goalErr}</span>}
-          </div>
+          {canOperate && (
+            <div className="flex flex-wrap items-center gap-2">
+              <Input
+                className="h-7 min-w-56 flex-1 text-sm"
+                placeholder={t("Add a goal, e.g. 'gain unauthorized access with an admin account'")}
+                value={goalText}
+                onChange={(e) => setGoalText(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") void addGoal();
+                }}
+                disabled={goalBusy}
+              />
+              <Input
+                className="h-7 w-32 text-sm"
+                placeholder={t("Vulnerability class (optional)")}
+                value={goalVuln}
+                onChange={(e) => setGoalVuln(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") void addGoal();
+                }}
+                disabled={goalBusy}
+              />
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={goalBusy || !goalText.trim()}
+                onClick={() => void addGoal()}
+              >
+                <PlusIcon className="size-3.5" /> {t("Add")}
+              </Button>
+              {goalErr && <span className="text-xs text-red-500">{goalErr}</span>}
+            </div>
+          )}
           {/* Goal list */}
           {goals.length > 0 ? (
             <div className="flex flex-col gap-1.5">
@@ -546,31 +558,37 @@ export function OverviewTab({ taskId }: { taskId: string }) {
                         {g.vulnclass}
                       </span>
                     )}
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      className="h-6 shrink-0 px-1.5"
-                      disabled={goalBusy}
-                      onClick={() => startEditGoal(g)}
-                    >
-                      <PencilIcon className="size-3.5" />
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      className="h-6 shrink-0 px-1.5"
-                      disabled={goalBusy}
-                      onClick={() => void removeGoal(g)}
-                    >
-                      <Trash2Icon className="size-3.5 text-red-500" />
-                    </Button>
+                    {canOperate && (
+                      <>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="h-6 shrink-0 px-1.5"
+                          disabled={goalBusy}
+                          onClick={() => startEditGoal(g)}
+                        >
+                          <PencilIcon className="size-3.5" />
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="h-6 shrink-0 px-1.5"
+                          disabled={goalBusy}
+                          onClick={() => void removeGoal(g)}
+                        >
+                          <Trash2Icon className="size-3.5 text-red-500" />
+                        </Button>
+                      </>
+                    )}
                   </div>
                 ),
               )}
             </div>
           ) : (
             <p className="text-muted-foreground text-sm">
-              {t("No goals yet. Once added, the planner dispatches exploration intents from them and judges completion.")}
+              {t(
+                "No goals yet. Once added, the planner dispatches exploration intents from them and judges completion.",
+              )}
             </p>
           )}
         </CardContent>
@@ -592,35 +610,37 @@ export function OverviewTab({ taskId }: { taskId: string }) {
         </CardHeader>
         <CardContent className="flex flex-col gap-3">
           {/* Add form */}
-          <div className="flex flex-wrap items-center gap-2">
-            <NativeSelect
-              size="sm"
-              value={conKind}
-              onChange={(e) => setConKind(e.target.value as TaskConstraint["kind"])}
-            >
-              <NativeSelectOption value="deny">{t("Deny")}</NativeSelectOption>
-              <NativeSelectOption value="allow">{t("Allow")}</NativeSelectOption>
-            </NativeSelect>
-            <Input
-              className="h-7 min-w-56 flex-1 text-sm"
-              placeholder={t("One operation constraint, e.g. 'test only the current port, do not scan other ports'")}
-              value={conText}
-              onChange={(e) => setConText(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") void addConstraint();
-              }}
-              disabled={conBusy}
-            />
-            <Button
-              size="sm"
-              variant="outline"
-              disabled={conBusy || !conText.trim()}
-              onClick={() => void addConstraint()}
-            >
-              <PlusIcon className="size-3.5" /> {t("Add")}
-            </Button>
-            {conErr && <span className="text-xs text-red-500">{conErr}</span>}
-          </div>
+          {canOperate && (
+            <div className="flex flex-wrap items-center gap-2">
+              <NativeSelect
+                size="sm"
+                value={conKind}
+                onChange={(e) => setConKind(e.target.value as TaskConstraint["kind"])}
+              >
+                <NativeSelectOption value="deny">{t("Deny")}</NativeSelectOption>
+                <NativeSelectOption value="allow">{t("Allow")}</NativeSelectOption>
+              </NativeSelect>
+              <Input
+                className="h-7 min-w-56 flex-1 text-sm"
+                placeholder={t("One operation constraint, e.g. 'test only the current port, do not scan other ports'")}
+                value={conText}
+                onChange={(e) => setConText(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") void addConstraint();
+                }}
+                disabled={conBusy}
+              />
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={conBusy || !conText.trim()}
+                onClick={() => void addConstraint()}
+              >
+                <PlusIcon className="size-3.5" /> {t("Add")}
+              </Button>
+              {conErr && <span className="text-xs text-red-500">{conErr}</span>}
+            </div>
+          )}
           {/* Constraint list */}
           {constraints.length > 0 ? (
             <div className="flex flex-col gap-1.5">
@@ -677,24 +697,28 @@ export function OverviewTab({ taskId }: { taskId: string }) {
                       {c.kind === "allow" ? t("Allow") : t("Deny")}
                     </span>
                     <span className="min-w-0 flex-1 break-words">{c.text}</span>
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      className="h-6 shrink-0 px-1.5"
-                      disabled={conBusy}
-                      onClick={() => startEditConstraint(c)}
-                    >
-                      <PencilIcon className="size-3.5" />
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      className="h-6 shrink-0 px-1.5"
-                      disabled={conBusy}
-                      onClick={() => void removeConstraint(c)}
-                    >
-                      <Trash2Icon className="size-3.5 text-red-500" />
-                    </Button>
+                    {canOperate && (
+                      <>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="h-6 shrink-0 px-1.5"
+                          disabled={conBusy}
+                          onClick={() => startEditConstraint(c)}
+                        >
+                          <PencilIcon className="size-3.5" />
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="h-6 shrink-0 px-1.5"
+                          disabled={conBusy}
+                          onClick={() => void removeConstraint(c)}
+                        >
+                          <Trash2Icon className="size-3.5 text-red-500" />
+                        </Button>
+                      </>
+                    )}
                   </div>
                 ),
               )}
@@ -709,59 +733,63 @@ export function OverviewTab({ taskId }: { taskId: string }) {
         </CardContent>
       </Card>
       <TaskInterceptRulesCard taskId={taskId} />
-      {coverage && coverage.enabled && (coverage.scope_rows > 0 || (coverage.gaps?.length ?? 0) > 0 || !!coverage.methodologies?.length) && (
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2 text-base">
-              <TargetIcon className="size-4 text-emerald-500" /> {t("Asset test coverage")}
-              <span className="text-muted-foreground text-xs font-normal">{t("(rough estimate, for reference only)")}</span>
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="flex flex-col gap-3">
-            <div className="flex items-baseline gap-3">
-              <span className="text-2xl font-semibold tabular-nums">
-                {coverage.pct != null ? Math.round(coverage.pct * 100) + "%" : "—"}
-              </span>
-              <span className="text-muted-foreground text-sm">
-                {t("Tested {tested} / in scope {total}", { tested: coverage.tested, total: coverage.denominator })}
-              </span>
-            </div>
-            {coverage.pct != null && <Progress value={Math.round(coverage.pct * 100)} />}
-            {coverage.by_type.length > 0 && (
-              <div className="flex flex-wrap gap-1.5 text-xs">
-                {coverage.by_type.map((b) => (
-                  <span key={b.type} className="bg-muted rounded px-1.5 py-0.5">
-                    <span className="text-muted-foreground">
-                      {(taskAssetTypeLabel as (x: NewAssetType) => string | undefined)(b.type as NewAssetType) ||
-                        b.type}
-                    </span>{" "}
-                    <span className="tabular-nums font-medium">
-                      {b.tested}/{b.total}
+      {coverage &&
+        coverage.enabled &&
+        (coverage.scope_rows > 0 || (coverage.gaps?.length ?? 0) > 0 || !!coverage.methodologies?.length) && (
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2 text-base">
+                <TargetIcon className="size-4 text-emerald-500" /> {t("Asset test coverage")}
+                <span className="text-muted-foreground text-xs font-normal">
+                  {t("(rough estimate, for reference only)")}
+                </span>
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="flex flex-col gap-3">
+              <div className="flex items-baseline gap-3">
+                <span className="text-2xl font-semibold tabular-nums">
+                  {coverage.pct != null ? Math.round(coverage.pct * 100) + "%" : "—"}
+                </span>
+                <span className="text-muted-foreground text-sm">
+                  {t("Tested {tested} / in scope {total}", { tested: coverage.tested, total: coverage.denominator })}
+                </span>
+              </div>
+              {coverage.pct != null && <Progress value={Math.round(coverage.pct * 100)} />}
+              {coverage.by_type.length > 0 && (
+                <div className="flex flex-wrap gap-1.5 text-xs">
+                  {coverage.by_type.map((b) => (
+                    <span key={b.type} className="bg-muted rounded px-1.5 py-0.5">
+                      <span className="text-muted-foreground">
+                        {(taskAssetTypeLabel as (x: NewAssetType) => string | undefined)(b.type as NewAssetType) ||
+                          b.type}
+                      </span>{" "}
+                      <span className="tabular-nums font-medium">
+                        {b.tested}/{b.total}
+                      </span>
                     </span>
-                  </span>
-                ))}
-              </div>
-            )}
-            {coverage.completeness && !coverage.completeness.complete && (
-              <p className="text-muted-foreground text-xs">{coverage.completeness.caveat}</p>
-            )}
-            {coverage.gaps && (
-              <div className="text-xs">
-                <span className="font-medium">{t("Coverage gaps: {count}", { count: coverage.gaps.length })}</span>
-                <ul className="text-muted-foreground mt-1 list-disc pl-4">
-                  {coverage.gaps.map((g, i) => (
-                    <li key={i}>
-                      {t(g.kind)} {g.surface ? g.surface + " " : ""}
-                      {g.risk_area}
-                    </li>
                   ))}
-                </ul>
-              </div>
-            )}
-            {!!coverage.methodologies?.length && <MethodologyCoverage scores={coverage.methodologies} />}
-          </CardContent>
-        </Card>
-      )}
+                </div>
+              )}
+              {coverage.completeness && !coverage.completeness.complete && (
+                <p className="text-muted-foreground text-xs">{coverage.completeness.caveat}</p>
+              )}
+              {coverage.gaps && (
+                <div className="text-xs">
+                  <span className="font-medium">{t("Coverage gaps: {count}", { count: coverage.gaps.length })}</span>
+                  <ul className="text-muted-foreground mt-1 list-disc pl-4">
+                    {coverage.gaps.map((g, i) => (
+                      <li key={i}>
+                        {t(g.kind)} {g.surface ? g.surface + " " : ""}
+                        {g.risk_area}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+              {!!coverage.methodologies?.length && <MethodologyCoverage scores={coverage.methodologies} />}
+            </CardContent>
+          </Card>
+        )}
       {/* LLM token usage: grouped by model, data from llm_records (requires LLM recording enabled). */}
       <Card>
         <CardHeader>
@@ -849,50 +877,52 @@ export function OverviewTab({ taskId }: { taskId: string }) {
         </CardHeader>
         <CardContent className="flex flex-col gap-3">
           {/* Add form */}
-          <div className="flex flex-wrap items-center gap-2">
-            <NativeSelect
-              size="sm"
-              value={scopeKind}
-              onChange={(e) => setScopeKind(e.target.value as TaskScopeRow["kind"])}
-            >
-              <NativeSelectOption value="root_domain">{t("Root domain")}</NativeSelectOption>
-              <NativeSelectOption value="subdomain">{t("Subdomain")}</NativeSelectOption>
-              <NativeSelectOption value="ip">IP</NativeSelectOption>
-              <NativeSelectOption value="cidr">CIDR</NativeSelectOption>
-              <NativeSelectOption value="icp">ICP</NativeSelectOption>
-              <NativeSelectOption value="keyword">{t("Keyword")}</NativeSelectOption>
-              <NativeSelectOption value="company">{t("Company")}</NativeSelectOption>
-            </NativeSelect>
-            <Input
-              className="h-7 w-56 text-sm"
-              placeholder={
-                scopeKind === "company"
-                  ? t("Company name or id")
-                  : scopeKind === "ip" || scopeKind === "cidr"
-                    ? t("e.g. 10.0.0.1 or 10.0.0.0/24")
-                    : scopeKind === "icp"
-                      ? t("e.g. Beijing ICP No.12345678-1")
-                      : scopeKind === "keyword"
-                        ? t("e.g. a company-name keyword")
-                        : t("e.g. example.com")
-              }
-              value={scopeValueInput}
-              onChange={(e) => setScopeValueInput(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") void addScope();
-              }}
-              disabled={scopeBusy}
-            />
-            <Button
-              size="sm"
-              variant="outline"
-              disabled={scopeBusy || !scopeValueInput.trim()}
-              onClick={() => void addScope()}
-            >
-              <PlusIcon className="size-3.5" /> {t("Add")}
-            </Button>
-            {scopeErr && <span className="text-xs text-red-500">{scopeErr}</span>}
-          </div>
+          {canOperate && (
+            <div className="flex flex-wrap items-center gap-2">
+              <NativeSelect
+                size="sm"
+                value={scopeKind}
+                onChange={(e) => setScopeKind(e.target.value as TaskScopeRow["kind"])}
+              >
+                <NativeSelectOption value="root_domain">{t("Root domain")}</NativeSelectOption>
+                <NativeSelectOption value="subdomain">{t("Subdomain")}</NativeSelectOption>
+                <NativeSelectOption value="ip">IP</NativeSelectOption>
+                <NativeSelectOption value="cidr">CIDR</NativeSelectOption>
+                <NativeSelectOption value="icp">ICP</NativeSelectOption>
+                <NativeSelectOption value="keyword">{t("Keyword")}</NativeSelectOption>
+                <NativeSelectOption value="company">{t("Company")}</NativeSelectOption>
+              </NativeSelect>
+              <Input
+                className="h-7 w-56 text-sm"
+                placeholder={
+                  scopeKind === "company"
+                    ? t("Company name or id")
+                    : scopeKind === "ip" || scopeKind === "cidr"
+                      ? t("e.g. 10.0.0.1 or 10.0.0.0/24")
+                      : scopeKind === "icp"
+                        ? t("e.g. Beijing ICP No.12345678-1")
+                        : scopeKind === "keyword"
+                          ? t("e.g. a company-name keyword")
+                          : t("e.g. example.com")
+                }
+                value={scopeValueInput}
+                onChange={(e) => setScopeValueInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") void addScope();
+                }}
+                disabled={scopeBusy}
+              />
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={scopeBusy || !scopeValueInput.trim()}
+                onClick={() => void addScope()}
+              >
+                <PlusIcon className="size-3.5" /> {t("Add")}
+              </Button>
+              {scopeErr && <span className="text-xs text-red-500">{scopeErr}</span>}
+            </div>
+          )}
           {/* Scope list */}
           {scope.length > 0 ? (
             <div className="flex flex-col gap-1.5">
@@ -904,14 +934,16 @@ export function OverviewTab({ taskId }: { taskId: string }) {
                   <span className="min-w-0 flex-1 truncate font-mono text-xs">{scopeValue(row)}</span>
                   <span className="text-muted-foreground shrink-0 text-xs">{SCOPE_SOURCE_LABELS[row.source]}</span>
                   {row.task_id.toString() === taskId ? (
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      className="h-6 shrink-0 px-1.5"
-                      onClick={() => void removeScope(row)}
-                    >
-                      <Trash2Icon className="size-3.5 text-red-500" />
-                    </Button>
+                    canOperate && (
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="h-6 shrink-0 px-1.5"
+                        onClick={() => void removeScope(row)}
+                      >
+                        <Trash2Icon className="size-3.5 text-red-500" />
+                      </Button>
+                    )
                   ) : (
                     <span className="text-muted-foreground shrink-0 text-xs">{t("Inherited")}</span>
                   )}
@@ -1045,26 +1077,30 @@ export function OverviewTab({ taskId }: { taskId: string }) {
                 {t("({count} in total, re-runnable)", { count: blocked.length })}
               </span>
             </CardTitle>
-            <Button size="sm" variant="outline" disabled={rerunning.has("__all__")} onClick={() => void rerunAll()}>
-              <RefreshCwIcon className={`size-3.5 ${rerunning.has("__all__") ? "animate-spin" : ""}`} />
-              {t("Re-run all")}
-            </Button>
+            {canOperate && (
+              <Button size="sm" variant="outline" disabled={rerunning.has("__all__")} onClick={() => void rerunAll()}>
+                <RefreshCwIcon className={`size-3.5 ${rerunning.has("__all__") ? "animate-spin" : ""}`} />
+                {t("Re-run all")}
+              </Button>
+            )}
           </CardHeader>
           <CardContent className="flex flex-col gap-2">
             {blocked.slice(0, 20).map((i) => (
               <div key={i.id} className="flex items-center gap-2 text-sm">
                 <StatusBadge domain="intent" value={i.state} />
                 <span className="min-w-0 flex-1 truncate">{i.payload}</span>
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  className="h-7 shrink-0 px-2 text-xs"
-                  disabled={rerunning.has(i.id)}
-                  onClick={() => void rerunOne(i.id)}
-                >
-                  <RefreshCwIcon className={`size-3 ${rerunning.has(i.id) ? "animate-spin" : ""}`} />
-                  {t("Re-run")}
-                </Button>
+                {canOperate && (
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="h-7 shrink-0 px-2 text-xs"
+                    disabled={rerunning.has(i.id)}
+                    onClick={() => void rerunOne(i.id)}
+                  >
+                    <RefreshCwIcon className={`size-3 ${rerunning.has(i.id) ? "animate-spin" : ""}`} />
+                    {t("Re-run")}
+                  </Button>
+                )}
               </div>
             ))}
             {blocked.length > 20 && (
@@ -1090,280 +1126,5 @@ export function OverviewTab({ taskId }: { taskId: string }) {
         />
       </div>
     </div>
-  );
-}
-
-const TASK_RULE_KIND_OPTIONS: { value: AssetInterceptKind; label: string; placeholder: string }[] = [
-  { value: "exact_domain", label: t("Domain (exact)"), placeholder: "example.gov.cn" },
-  { value: "exact_ip", label: t("IP (exact)"), placeholder: "203.0.113.10" },
-  { value: "exact_url", label: t("URL (exact)"), placeholder: "https://example.com/login" },
-  { value: "fuzzy_domain", label: t("Domain (fuzzy)"), placeholder: ".gov.cn" },
-  { value: "fuzzy_ip", label: t("IP (fuzzy)"), placeholder: "203.0.113." },
-  { value: "fuzzy_url", label: t("URL (fuzzy)"), placeholder: "/admin" },
-  { value: "cidr", label: "CIDR", placeholder: "192.168.0.0/16" },
-];
-
-const TASK_RULE_KIND_LABEL: Record<AssetInterceptKind, string> = Object.fromEntries(
-  TASK_RULE_KIND_OPTIONS.map((o) => [o.value, o.label]),
-) as Record<AssetInterceptKind, string>;
-
-// TaskInterceptRulesCard manages "task-level asset intercept / allow rules" on the task detail overview:
-// list + add + inline edit + delete + enable toggle. Rules apply to this task only and never enter the global table.
-function TaskInterceptRulesCard({ taskId }: { taskId: string }) {
-  const [rules, setRules] = React.useState<AssetInterceptRule[]>([]);
-  const [busy, setBusy] = React.useState(false);
-  const [err, setErr] = React.useState("");
-  const [newAction, setNewAction] = React.useState<"block" | "allow">("block");
-  const [newKind, setNewKind] = React.useState<AssetInterceptKind>("fuzzy_domain");
-  const [newPattern, setNewPattern] = React.useState("");
-  const [newNote, setNewNote] = React.useState("");
-  const [editId, setEditId] = React.useState<number | null>(null);
-  const [editAction, setEditAction] = React.useState<"block" | "allow">("block");
-  const [editKind, setEditKind] = React.useState<AssetInterceptKind>("fuzzy_domain");
-  const [editPattern, setEditPattern] = React.useState("");
-  const [editNote, setEditNote] = React.useState("");
-
-  const load = React.useCallback(async () => {
-    try {
-      setRules(await api.taskInterceptRules(taskId));
-    } catch {
-      // Ignore transient errors
-    }
-  }, [taskId]);
-
-  React.useEffect(() => {
-    void load();
-  }, [load]);
-
-  async function add() {
-    if (!newPattern.trim()) return;
-    setBusy(true);
-    setErr("");
-    try {
-      await api.createTaskInterceptRule(taskId, {
-        action: newAction,
-        kind: newKind,
-        pattern: newPattern.trim(),
-        note: newNote.trim(),
-        enabled: true,
-      });
-      setNewPattern("");
-      setNewNote("");
-      await load();
-    } catch (e) {
-      setErr((e as Error).message);
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  function startEdit(r: AssetInterceptRule) {
-    setEditId(r.id);
-    setEditAction(r.action ?? "block");
-    setEditKind(r.kind);
-    setEditPattern(r.pattern);
-    setEditNote(r.note);
-    setErr("");
-  }
-
-  async function saveEdit(r: AssetInterceptRule) {
-    if (!editPattern.trim()) return;
-    setBusy(true);
-    setErr("");
-    try {
-      await api.updateTaskInterceptRule(taskId, r.id, {
-        action: editAction,
-        kind: editKind,
-        pattern: editPattern.trim(),
-        note: editNote.trim(),
-        enabled: r.enabled,
-      });
-      setEditId(null);
-      await load();
-    } catch (e) {
-      setErr((e as Error).message);
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function remove(r: AssetInterceptRule) {
-    setRules((prev) => prev.filter((x) => x.id !== r.id));
-    try {
-      await api.deleteTaskInterceptRule(taskId, r.id);
-    } catch {
-      await load();
-    }
-  }
-
-  async function toggle(r: AssetInterceptRule) {
-    setRules((prev) => prev.map((x) => (x.id === r.id ? { ...x, enabled: !x.enabled } : x)));
-    try {
-      await api.toggleTaskInterceptRule(taskId, r.id, !r.enabled);
-    } catch {
-      await load();
-    }
-  }
-
-  const placeholder = TASK_RULE_KIND_OPTIONS.find((o) => o.value === newKind)?.placeholder ?? "";
-
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2 text-base">
-          <ShieldCheckIcon className="size-4 text-sky-500" /> {t("Task-level asset intercept / allow")}
-          <span className="text-muted-foreground text-xs font-normal">
-            {t("(this task only, never global; block rules evaluate before allow rules, {count} in total)", {
-              count: rules.length,
-            })}
-          </span>
-        </CardTitle>
-      </CardHeader>
-      <CardContent className="flex flex-col gap-3">
-        {/* Add form */}
-        <div className="flex flex-wrap items-center gap-2">
-          <NativeSelect size="sm" value={newAction} onChange={(e) => setNewAction(e.target.value as "block" | "allow")}>
-            <NativeSelectOption value="block">{t("Block")}</NativeSelectOption>
-            <NativeSelectOption value="allow">{t("Allow")}</NativeSelectOption>
-          </NativeSelect>
-          <NativeSelect size="sm" value={newKind} onChange={(e) => setNewKind(e.target.value as AssetInterceptKind)}>
-            {TASK_RULE_KIND_OPTIONS.map((o) => (
-              <NativeSelectOption key={o.value} value={o.value}>
-                {o.label}
-              </NativeSelectOption>
-            ))}
-          </NativeSelect>
-          <Input
-            className="h-7 min-w-56 flex-1 text-sm"
-            placeholder={placeholder}
-            value={newPattern}
-            onChange={(e) => setNewPattern(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") void add();
-            }}
-            disabled={busy}
-          />
-          <Input
-            className="h-7 w-36 text-sm"
-            placeholder={t("Note (optional)")}
-            value={newNote}
-            onChange={(e) => setNewNote(e.target.value)}
-            disabled={busy}
-          />
-          <Button size="sm" variant="outline" disabled={busy || !newPattern.trim()} onClick={() => void add()}>
-            <PlusIcon className="size-3.5" /> {t("Add")}
-          </Button>
-          {err && <span className="text-xs text-red-500">{err}</span>}
-        </div>
-        {/* Rule list */}
-        {rules.length > 0 ? (
-          <div className="flex flex-col gap-1.5">
-            {rules.map((r) =>
-              editId === r.id ? (
-                <div key={r.id} className="flex flex-wrap items-center gap-2 rounded-md border px-2.5 py-1.5">
-                  <NativeSelect
-                    size="sm"
-                    value={editAction}
-                    onChange={(e) => setEditAction(e.target.value as "block" | "allow")}
-                  >
-                    <NativeSelectOption value="block">{t("Block")}</NativeSelectOption>
-                    <NativeSelectOption value="allow">{t("Allow")}</NativeSelectOption>
-                  </NativeSelect>
-                  <NativeSelect
-                    size="sm"
-                    value={editKind}
-                    onChange={(e) => setEditKind(e.target.value as AssetInterceptKind)}
-                  >
-                    {TASK_RULE_KIND_OPTIONS.map((o) => (
-                      <NativeSelectOption key={o.value} value={o.value}>
-                        {o.label}
-                      </NativeSelectOption>
-                    ))}
-                  </NativeSelect>
-                  <Input
-                    className="h-7 min-w-56 flex-1 text-sm"
-                    value={editPattern}
-                    onChange={(e) => setEditPattern(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") void saveEdit(r);
-                      if (e.key === "Escape") setEditId(null);
-                    }}
-                    disabled={busy}
-                    autoFocus
-                  />
-                  <Input
-                    className="h-7 w-36 text-sm"
-                    placeholder={t("Note (optional)")}
-                    value={editNote}
-                    onChange={(e) => setEditNote(e.target.value)}
-                    disabled={busy}
-                  />
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    className="h-6 shrink-0 px-1.5"
-                    disabled={busy || !editPattern.trim()}
-                    onClick={() => void saveEdit(r)}
-                  >
-                    <CheckIcon className="size-3.5 text-emerald-500" />
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    className="h-6 shrink-0 px-1.5"
-                    disabled={busy}
-                    onClick={() => setEditId(null)}
-                  >
-                    <XIcon className="size-3.5" />
-                  </Button>
-                </div>
-              ) : (
-                <div key={r.id} className="flex items-center gap-2 rounded-md border px-2.5 py-1.5 text-sm">
-                  <span
-                    className={`shrink-0 rounded px-1.5 py-0.5 text-xs ${
-                      r.action === "allow"
-                        ? "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400"
-                        : "bg-red-500/15 text-red-600 dark:text-red-400"
-                    }`}
-                  >
-                    {r.action === "allow" ? t("Allow") : t("Block")}
-                  </span>
-                  <span className="text-muted-foreground shrink-0 text-xs">{TASK_RULE_KIND_LABEL[r.kind]}</span>
-                  <code className="bg-muted min-w-0 flex-1 truncate rounded px-1.5 py-0.5 text-xs">{r.pattern}</code>
-                  {r.note && (
-                    <span className="text-muted-foreground max-w-[120px] shrink-0 truncate text-xs">{r.note}</span>
-                  )}
-                  <Switch checked={r.enabled} onCheckedChange={() => void toggle(r)} />
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    className="h-6 shrink-0 px-1.5"
-                    disabled={busy}
-                    onClick={() => startEdit(r)}
-                  >
-                    <PencilIcon className="size-3.5" />
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    className="h-6 shrink-0 px-1.5"
-                    disabled={busy}
-                    onClick={() => void remove(r)}
-                  >
-                    <Trash2Icon className="size-3.5 text-red-500" />
-                  </Button>
-                </div>
-              ),
-            )}
-          </div>
-        ) : (
-          <p className="text-muted-foreground text-sm">
-            {t(
-              'No task-level rules. A "Block" hit forbids testing; "Allow" is a whitelist — once configured, this task only permits assets that match an allow rule (no whitelist when unconfigured).',
-            )}
-          </p>
-        )}
-      </CardContent>
-    </Card>
   );
 }

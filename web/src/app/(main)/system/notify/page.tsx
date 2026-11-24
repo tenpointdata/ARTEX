@@ -16,7 +16,9 @@ import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { t } from "@/i18n";
+import { useCan } from "@/hooks/use-session";
 import { api } from "@/lib/api";
+import { errorText } from "@/lib/api-errors";
 import type { NotificationChannel, NotificationFilter, NotificationMeta } from "@/lib/types";
 
 import {
@@ -30,26 +32,17 @@ import {
   SEVERITY_OPTIONS,
 } from "./_components/channel-fields";
 import { ConfigField, FilterSummary } from "./_components/channel-form";
+import { GlobalSettingsCard } from "./_components/global-settings-card";
 import { DeliveryList } from "./_components/delivery-list";
 import { formatBacklog, StatTile } from "./_components/stat-tile";
-
-// Upper bounds of the two message render limits. They mirror the backend, which answers 400 outside [0, max].
-const SUMMARY_LIMIT_MAX = 4000;
-const ASSETS_LIMIT_MAX = 50;
-
-// limitInvalid reports whether a limit input holds anything other than a whole number in [0, max].
-// Empty is valid: it is not submitted, so the stored value stays as it is.
-function limitInvalid(raw: string, max: number): boolean {
-  if (raw.trim() === "") return false;
-  const n = Number(raw);
-  return !Number.isInteger(n) || n < 0 || n > max;
-}
 
 // This page only orchestrates: loading data, holding form state, calling the API.
 // Field definitions and parsing live in _components/channel-fields.ts, controls and the filter summary in
 // _components/channel-form.tsx, and the delivery log in _components/delivery-list.tsx —
 // they are split out because each stays readable on its own, whereas crammed into one file this page neared 1100 lines.
 export default function NotifyPage() {
+  // Channels and the master switch are admin (/api/notify/channels, /api/settings).
+  const canAdmin = useCan("admin");
   const [meta, setMeta] = React.useState<NotificationMeta | null>(null);
   const [channels, setChannels] = React.useState<NotificationChannel[]>([]);
   const [tab, setTab] = React.useState<"channels" | "deliveries">("channels");
@@ -58,37 +51,23 @@ export default function NotifyPage() {
   const [editing, setEditing] = React.useState<NotificationChannel | null>(null);
   const [form, setForm] = React.useState<ChannelForm>(emptyForm("dingtalk"));
   const [saving, setSaving] = React.useState(false);
+  const [globalSaving, setGlobalSaving] = React.useState(false);
   const [testing, setTesting] = React.useState(false);
 
-  const [globalSaving, setGlobalSaving] = React.useState(false);
-  const [baseURL, setBaseURL] = React.useState("");
-  const [digestMin, setDigestMin] = React.useState("");
-  const [summaryMax, setSummaryMax] = React.useState("");
-  const [assetsMax, setAssetsMax] = React.useState("");
 
   const load = React.useCallback(() => {
     api
       .notifyMeta()
       .then((m) => {
         setMeta(m);
-        setBaseURL(m.public_base_url);
-        setDigestMin(m.digest_interval_min);
       })
-      .catch((e) => toast.error(t("Failed to load notification settings: {error}", { error: (e as Error).message })));
-    // The two render limits are not part of /notify/meta; they are only exposed through /api/settings.
-    api
-      .settings()
-      .then((s) => {
-        setSummaryMax(String(s.notify_summary_max_runes ?? ""));
-        setAssetsMax(String(s.notify_assets_max_shown ?? ""));
-      })
-      .catch((e) => toast.error(t("Failed to load message limits: {error}", { error: (e as Error).message })));
+      .catch((e) => toast.error(t("Failed to load notification settings: {error}", { error: errorText(e) })));
     // Channel-list load failures must be reported: failing silently would render as "no channels at all",
     // and users would think their config was lost — scarier than a straight-up error.
     api
       .notifyChannels()
       .then(setChannels)
-      .catch((e) => toast.error(t("Failed to load channels: {error}", { error: (e as Error).message })));
+      .catch((e) => toast.error(t("Failed to load channels: {error}", { error: errorText(e) })));
   }, []);
   React.useEffect(() => {
     load();
@@ -213,7 +192,7 @@ export default function NotifyPage() {
       }
       load();
     } catch (e) {
-      toast.error(t("Save failed: {error}", { error: (e as Error).message }));
+      toast.error(t("Save failed: {error}", { error: errorText(e) }));
     } finally {
       setSaving(false);
     }
@@ -227,7 +206,7 @@ export default function NotifyPage() {
       toast.success(t("Test message sent ({ms} ms); check the group to confirm", { ms: r.latency_ms }));
     } catch (e) {
       // The backend relays the raw error returned by the channel verbatim — the only clue for debugging the config — so show it as-is.
-      toast.error(t("Test failed: {error}", { error: (e as Error).message }), { duration: 12000 });
+      toast.error(t("Test failed: {error}", { error: errorText(e) }), { duration: 12000 });
     } finally {
       setTesting(false);
     }
@@ -240,7 +219,7 @@ export default function NotifyPage() {
       setOpen(false);
       load();
     } catch (e) {
-      toast.error(t("Delete failed: {error}", { error: (e as Error).message }));
+      toast.error(t("Delete failed: {error}", { error: errorText(e) }));
     }
   }
 
@@ -249,7 +228,7 @@ export default function NotifyPage() {
       await api.notifyUpdateChannel(ch.id, { enabled: !ch.enabled });
       load();
     } catch (e) {
-      toast.error(t("Operation failed: {error}", { error: (e as Error).message }));
+      toast.error(t("Operation failed: {error}", { error: errorText(e) }));
     }
   }
 
@@ -260,35 +239,7 @@ export default function NotifyPage() {
       setMeta((m) => (m ? { ...m, enabled: on } : m));
       toast.success(on ? t("Push enabled") : t("Push paused"));
     } catch (e) {
-      toast.error(t("Operation failed: {error}", { error: (e as Error).message }));
-    } finally {
-      setGlobalSaving(false);
-    }
-  }
-
-  async function saveGlobal() {
-    // Checked before anything is sent: the backend applies the fields of one PUT in order,
-    // so a 400 on a limit would leave the URL and digest interval already saved.
-    if (limitInvalid(summaryMax, SUMMARY_LIMIT_MAX)) {
-      toast.error(t("Summary length must be a whole number between 0 and {max}", { max: SUMMARY_LIMIT_MAX }));
-      return;
-    }
-    if (limitInvalid(assetsMax, ASSETS_LIMIT_MAX)) {
-      toast.error(t("Assets listed must be a whole number between 0 and {max}", { max: ASSETS_LIMIT_MAX }));
-      return;
-    }
-    setGlobalSaving(true);
-    try {
-      const patch: Record<string, unknown> = { notify_public_base_url: baseURL.trim() };
-      const n = Number(digestMin);
-      if (Number.isFinite(n) && n > 0) patch.notify_digest_interval_min = n;
-      if (summaryMax.trim() !== "") patch.notify_summary_max_runes = Number(summaryMax);
-      if (assetsMax.trim() !== "") patch.notify_assets_max_shown = Number(assetsMax);
-      await api.setSettings(patch);
-      toast.success(t("Saved"));
-      load();
-    } catch (e) {
-      toast.error(t("Save failed: {error}", { error: (e as Error).message }));
+      toast.error(t("Operation failed: {error}", { error: errorText(e) }));
     } finally {
       setGlobalSaving(false);
     }
@@ -314,7 +265,7 @@ export default function NotifyPage() {
             <span className="text-muted-foreground">{t("Master switch")}</span>
             <Switch
               checked={meta.enabled}
-              disabled={globalSaving}
+              disabled={globalSaving || !canAdmin}
               onCheckedChange={toggleGlobal}
               aria-label={t("Push master switch")}
             />
@@ -338,75 +289,7 @@ export default function NotifyPage() {
         </div>
       )}
 
-      <Card className="gap-3">
-        <CardHeader>
-          <CardTitle className="text-base">{t("Global settings")}</CardTitle>
-        </CardHeader>
-        <CardContent className="grid gap-4 sm:grid-cols-2">
-          <div className="grid gap-2">
-            <Label htmlFor="n-base">{t("Link-back URL")}</Label>
-            <Input
-              id="n-base"
-              placeholder="https://artex.example.com"
-              value={baseURL}
-              onChange={(e) => setBaseURL(e.target.value)}
-            />
-            <p className="text-muted-foreground text-xs">{t("The address the \"View details\" button in messages points to. Leave empty to omit the button.")}</p>
-          </div>
-          <div className="grid gap-2">
-            <Label htmlFor="n-digest">{t("Digest interval (minutes)")}</Label>
-            <Input
-              id="n-digest"
-              type="number"
-              min={1}
-              max={1440}
-              placeholder="30"
-              value={digestMin}
-              onChange={(e) => setDigestMin(e.target.value)}
-            />
-            <p className="text-muted-foreground text-xs">{t("Only applies to channels in \"digest\" mode.")}</p>
-          </div>
-          <div className="grid gap-2">
-            <Label htmlFor="n-summary-max">{t("Summary length (characters)")}</Label>
-            <Input
-              id="n-summary-max"
-              type="number"
-              min={0}
-              max={SUMMARY_LIMIT_MAX}
-              step={1}
-              placeholder="120"
-              value={summaryMax}
-              onChange={(e) => setSummaryMax(e.target.value)}
-              aria-invalid={limitInvalid(summaryMax, SUMMARY_LIMIT_MAX)}
-            />
-            <p className="text-muted-foreground text-xs">
-              {t("Longest finding summary shown in a message, 0–{max}. 0 = no truncation.", { max: SUMMARY_LIMIT_MAX })}
-            </p>
-          </div>
-          <div className="grid gap-2">
-            <Label htmlFor="n-assets-max">{t("Assets listed per finding")}</Label>
-            <Input
-              id="n-assets-max"
-              type="number"
-              min={0}
-              max={ASSETS_LIMIT_MAX}
-              step={1}
-              placeholder="3"
-              value={assetsMax}
-              onChange={(e) => setAssetsMax(e.target.value)}
-              aria-invalid={limitInvalid(assetsMax, ASSETS_LIMIT_MAX)}
-            />
-            <p className="text-muted-foreground text-xs">
-              {t("Most asset names listed for a finding, 0–{max}. 0 = no truncation (all assets listed).", { max: ASSETS_LIMIT_MAX })}
-            </p>
-          </div>
-          <div className="sm:col-span-2">
-            <Button onClick={saveGlobal} disabled={globalSaving}>
-              {t("Save global settings")}
-            </Button>
-          </div>
-        </CardContent>
-      </Card>
+      {meta && <GlobalSettingsCard meta={meta} onSaved={load} />}
 
       <Tabs value={tab} onValueChange={(v) => setTab(v as "channels" | "deliveries")} className="flex flex-col gap-4">
         <TabsList>
@@ -416,6 +299,7 @@ export default function NotifyPage() {
 
         <TabsContent value="channels">
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            {canAdmin && (
             <button
               type="button"
               onClick={openAdd}
@@ -424,6 +308,7 @@ export default function NotifyPage() {
               <PlusIcon className="size-6" />
               <span className="text-sm">{t("Add channel")}</span>
             </button>
+            )}
 
             {channels.map((ch) => (
               <Card
@@ -441,12 +326,13 @@ export default function NotifyPage() {
                         role", tripping a11y warnings and making no semantic sense either. */}
                     <div className="ml-auto flex items-center gap-2">
                       <Switch
+                        disabled={!canAdmin}
                         checked={ch.enabled}
                         onCheckedChange={() => toggleEnabled(ch)}
                         onClick={(e) => e.stopPropagation()}
                         aria-label={t("Enable")}
                       />
-                      <Button
+                      {canAdmin && <Button
                         size="icon"
                         variant="outline"
                         aria-label={t("Delete")}
@@ -458,7 +344,7 @@ export default function NotifyPage() {
                         }}
                       >
                         <Trash2Icon className="text-destructive" />
-                      </Button>
+                      </Button>}
                     </div>
                   </div>
                 </CardHeader>
@@ -492,7 +378,7 @@ export default function NotifyPage() {
           </SheetHeader>
 
           <div className="flex min-h-0 flex-1 flex-col overflow-y-auto px-4">
-            <div className="grid gap-4 py-4">
+            <fieldset disabled={!canAdmin} className="grid min-w-0 gap-4 py-4">
               <div className="grid gap-2">
                 <Label>{t("Channel type")}</Label>
                 <Select
@@ -655,9 +541,9 @@ export default function NotifyPage() {
                 <Switch checked={form.enabled} onCheckedChange={(v) => setF({ enabled: v })} aria-label={t("Enable")} />
                 {t("Enable this channel")}
               </div>
-            </div>
+            </fieldset>
 
-            <div className="flex gap-2 pt-2 pb-6">
+            {canAdmin && <div className="flex gap-2 pt-2 pb-6">
               <Button onClick={saveForm} disabled={saving}>
                 {editing ? t("Save") : t("Add")}
               </Button>
@@ -666,7 +552,7 @@ export default function NotifyPage() {
                   <SendIcon /> {t("Send test message")}
                 </Button>
               )}
-            </div>
+            </div>}
           </div>
         </SheetContent>
       </Sheet>

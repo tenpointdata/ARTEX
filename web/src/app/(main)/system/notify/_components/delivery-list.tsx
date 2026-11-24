@@ -11,12 +11,15 @@ import { Card } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { intlLocale, t } from "@/i18n";
+import { useCan } from "@/hooks/use-session";
 import { api } from "@/lib/api";
+import { errorText } from "@/lib/api-errors";
 import { statusMeta, toneClasses } from "@/lib/status";
 import type { NotificationChannel, NotificationDelivery } from "@/lib/types";
 
 // DeliveryList is the delivery records table: filterable by channel and state, with manual retry for failed items.
 export function DeliveryList({ channels }: { channels: NotificationChannel[] }) {
+  const canOperate = useCan("operate"); // POST /api/notify/deliveries/{id}/retry
   const [rows, setRows] = React.useState<NotificationDelivery[]>([]);
   const [total, setTotal] = React.useState(0);
   const [page, setPage] = React.useState(1);
@@ -33,7 +36,7 @@ export function DeliveryList({ channels }: { channels: NotificationChannel[] }) 
         setRows(r.deliveries);
         setTotal(r.total);
       })
-      .catch((e) => toast.error(t("Failed to load delivery records: {error}", { error: (e as Error).message })))
+      .catch((e) => toast.error(t("Failed to load delivery records: {error}", { error: errorText(e) })))
       .finally(() => setLoading(false));
   }, [channelID, state, page]);
   React.useEffect(() => {
@@ -46,7 +49,7 @@ export function DeliveryList({ channels }: { channels: NotificationChannel[] }) 
       toast.success(t("Re-queued"));
       load();
     } catch (e) {
-      toast.error(t("Retry failed: {error}", { error: (e as Error).message }));
+      toast.error(t("Retry failed: {error}", { error: errorText(e) }));
     }
   }
 
@@ -148,7 +151,7 @@ export function DeliveryList({ channels }: { channels: NotificationChannel[] }) 
                   <TableCell className="text-muted-foreground max-w-md text-xs break-all">{d.last_error}</TableCell>
                   <TableCell>
                     {/* Only failed/skipped items get a retry button: re-sending a delivered one would duplicate the push. */}
-                    {(d.state === "failed" || d.state === "skipped") && (
+                    {canOperate && (d.state === "failed" || d.state === "skipped") && (
                       <Button size="sm" variant="outline" onClick={() => retry(d.id)}>
                         <RotateCcwIcon /> {t("Retry")}
                       </Button>

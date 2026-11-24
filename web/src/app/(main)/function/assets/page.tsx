@@ -58,7 +58,10 @@ import {
 } from "@/components/ui/sheet";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { RowDeleteButton } from "./_components/row-delete-button";
+import { useCan } from "@/hooks/use-session";
 import { api } from "@/lib/api";
+import { errorText } from "@/lib/api-errors";
 import { parseCompanyScopeText } from "@/lib/company-scope";
 import { httpHref } from "@/lib/http-href";
 import type { Asset, Company, CompanyScopeRule } from "@/lib/types";
@@ -111,6 +114,7 @@ const TABS: { key: string; label: string; icon: LucideIcon }[] = [
 ];
 
 export default function AssetsPage() {
+  const canOperate = useCan("operate"); // asset/company edits and deletes
   // The sidebar's company switcher narrows the data tabs to that company.
   const companyId = useActiveCompanyID();
   const [rows, setRows] = React.useState<Asset[]>([]);
@@ -201,7 +205,7 @@ export default function AssetsPage() {
       setSelected(new Set());
       refresh();
     } catch (e) {
-      toast.error(t("Delete failed: {error}", { error: String((e as Error)?.message ?? e) }));
+      toast.error(t("Delete failed: {error}", { error: errorText(e) }));
     } finally {
       setDeleting(false);
       setDeleteOpen(false);
@@ -220,7 +224,7 @@ export default function AssetsPage() {
       toast.success(msg);
       refresh();
     } catch (e) {
-      toast.error(t("Delete failed: {error}", { error: String((e as Error)?.message ?? e) }));
+      toast.error(t("Delete failed: {error}", { error: errorText(e) }));
     } finally {
       setCompanyDeleting(false);
       setCompanyDeleteTarget(null);
@@ -269,7 +273,7 @@ export default function AssetsPage() {
         setDslError("");
       } catch (e) {
         if (assetsRequestRef.current !== request) return;
-        setDslError(String((e as Error)?.message ?? e));
+        setDslError(errorText(e));
         setRows([]);
         setRowsTab(tab);
         setTotal(0);
@@ -329,7 +333,7 @@ export default function AssetsPage() {
           <span className="text-sm text-muted-foreground tabular-nums">
             {t("{count} assets in total", { count: totalAssets })}
           </span>
-          {selected.size > 0 && (
+          {canOperate && selected.size > 0 && (
             <Button variant="destructive" size="sm" onClick={() => openDelete(Array.from(selected) as number[])}>
               <Trash2Icon className="size-3.5" /> {t("Delete selected ({count})", { count: selected.size })}
             </Button>
@@ -337,7 +341,7 @@ export default function AssetsPage() {
           <Button variant="outline" size="sm" onClick={refresh} disabled={loading}>
             <RefreshCwIcon className={cn("size-4", loading && "animate-spin")} /> {t("Refresh")}
           </Button>
-          <CompanyDialog onSaved={refresh} />
+          {canOperate && <CompanyDialog onSaved={refresh} />}
         </div>
       </div>
 
@@ -392,20 +396,15 @@ export default function AssetsPage() {
                       </TableCell>
                       <TableCell className="text-right">
                         <div className="flex items-center justify-end gap-1.5">
-                          <EditScopeDialog company={c} onSaved={refresh} />
-                          <AppendScopeDialog company={c} onSaved={refresh} />
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="size-7 text-muted-foreground hover:text-destructive"
+                          {canOperate && <EditScopeDialog company={c} onSaved={refresh} />}
+                          {canOperate && <AppendScopeDialog company={c} onSaved={refresh} />}
+                          <RowDeleteButton
+                            label={t("Delete company {name}", { name: c.name })}
                             onClick={() => {
                               setCompanyDeleteTarget(c);
                               setCompanyDeleteAssets(false);
                             }}
-                            aria-label={t("Delete company {name}", { name: c.name })}
-                          >
-                            <Trash2Icon className="size-3.5" />
-                          </Button>
+                          />
                         </div>
                       </TableCell>
                     </TableRow>
@@ -451,15 +450,10 @@ export default function AssetsPage() {
                   {companyName(a.company_id) || <span className="text-muted-foreground">{t("Unassigned")}</span>}
                 </TableCell>
                 <TableCell className="w-8 pl-0">
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="size-7 text-muted-foreground hover:text-destructive"
+                  <RowDeleteButton
+                    label={t("Delete asset {name}", { name: a.domain || a.id })}
                     onClick={() => openDelete([a.id])}
-                    aria-label={t("Delete asset {name}", { name: a.domain || a.id })}
-                  >
-                    <Trash2Icon className="size-3.5" />
-                  </Button>
+                  />
                 </TableCell>
               </TableRow>
             ))}
@@ -498,15 +492,10 @@ export default function AssetsPage() {
                   />
                 </TableCell>
                 <TableCell className="w-8 pl-0">
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="size-7 text-muted-foreground hover:text-destructive"
+                  <RowDeleteButton
+                    label={t("Delete asset {name}", { name: a.ip || a.id })}
                     onClick={() => openDelete([a.id])}
-                    aria-label={t("Delete asset {name}", { name: a.ip || a.id })}
-                  >
-                    <Trash2Icon className="size-3.5" />
-                  </Button>
+                  />
                 </TableCell>
               </TableRow>
             ))}
@@ -540,15 +529,10 @@ export default function AssetsPage() {
                   {(Array.isArray(a.record_value) ? a.record_value.join(", ") : a.record_value) || "—"}
                 </TableCell>
                 <TableCell className="w-8 pl-0">
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="size-7 text-muted-foreground hover:text-destructive"
+                  <RowDeleteButton
+                    label={t("Delete asset {name}", { name: a.domain || a.id })}
                     onClick={() => openDelete([a.id])}
-                    aria-label={t("Delete asset {name}", { name: a.domain || a.id })}
-                  >
-                    <Trash2Icon className="size-3.5" />
-                  </Button>
+                  />
                 </TableCell>
               </TableRow>
             ))}
@@ -580,15 +564,10 @@ export default function AssetsPage() {
                 <TableCell className="text-xs">{a.category || "—"}</TableCell>
                 <TableCell className="text-xs">{a.app_icp || "—"}</TableCell>
                 <TableCell className="w-8 pl-0">
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="size-7 text-muted-foreground hover:text-destructive"
+                  <RowDeleteButton
+                    label={t("Delete asset {name}", { name: a.app_name || a.id })}
                     onClick={() => openDelete([a.id])}
-                    aria-label={t("Delete asset {name}", { name: a.app_name || a.id })}
-                  >
-                    <Trash2Icon className="size-3.5" />
-                  </Button>
+                  />
                 </TableCell>
               </TableRow>
             ))}
@@ -676,15 +655,10 @@ export default function AssetsPage() {
                     )}
                   </TableCell>
                   <TableCell className="w-8 pl-0">
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="size-7 text-muted-foreground hover:text-destructive"
+                    <RowDeleteButton
+                      label={t("Delete asset {name}", { name: a.url || a.id })}
                       onClick={() => openDelete([a.id])}
-                      aria-label={t("Delete asset {name}", { name: a.url || a.id })}
-                    >
-                      <Trash2Icon className="size-3.5" />
-                    </Button>
+                    />
                   </TableCell>
                 </TableRow>
               );
@@ -728,15 +702,10 @@ export default function AssetsPage() {
                   />
                 </TableCell>
                 <TableCell className="w-8 pl-0">
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="size-7 text-muted-foreground hover:text-destructive"
+                  <RowDeleteButton
+                    label={t("Delete asset {name}", { name: a.url || a.id })}
                     onClick={() => openDelete([a.id])}
-                    aria-label={t("Delete asset {name}", { name: a.url || a.id })}
-                  >
-                    <Trash2Icon className="size-3.5" />
-                  </Button>
+                  />
                 </TableCell>
               </TableRow>
             ))}
@@ -1024,7 +993,7 @@ function CompanyDialog({ onSaved }: { onSaved: () => void }) {
       setOpen(false);
       onSaved();
     } catch (e) {
-      const msg = String((e as Error)?.message ?? e);
+      const msg = errorText(e);
       if (/:\s*409$/.test(msg)) toast.error(t("Company already exists; try a different name"));
       else toast.error(t("Save failed: {error}", { error: msg }));
     } finally {
@@ -1108,7 +1077,7 @@ function EditScopeDialog({ company, onSaved }: { company: Company; onSaved: () =
       setOpen(false);
       onSaved();
     } catch (e) {
-      toast.error(t("Save failed: {error}", { error: String((e as Error)?.message ?? e) }));
+      toast.error(t("Save failed: {error}", { error: errorText(e) }));
     } finally {
       setBusy(false);
     }
@@ -1193,7 +1162,7 @@ function AppendScopeDialog({ company, onSaved }: { company: Company; onSaved: ()
       setOpen(false);
       onSaved();
     } catch (e) {
-      toast.error(t("Save failed: {error}", { error: String((e as Error)?.message ?? e) }));
+      toast.error(t("Save failed: {error}", { error: errorText(e) }));
     } finally {
       setBusy(false);
     }

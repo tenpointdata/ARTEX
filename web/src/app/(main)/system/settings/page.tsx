@@ -2,7 +2,7 @@
 
 import * as React from "react";
 
-import { CpuIcon, FlaskConicalIcon, KeyboardIcon, RadioTowerIcon, SearchIcon, ShieldAlertIcon } from "lucide-react";
+import { FlaskConicalIcon, RadioTowerIcon, SearchIcon, ShieldAlertIcon } from "lucide-react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
@@ -12,22 +12,14 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { t } from "@/i18n";
+import { useCan } from "@/hooks/use-session";
 import { api } from "@/lib/api";
-import { CHAT_SEND_MODE_OPTIONS, type ChatSendMode, setChatSendMode, useChatSendMode } from "@/lib/chat-send-mode";
+import { errorText } from "@/lib/api-errors";
 import type { Settings } from "@/lib/types";
 
+import { ChatSendModeCard, PythonInterpreterCard, WorkersCard } from "./_components/runtime-cards";
+import { rich } from "@/lib/rich-text";
 import { NoiseProfileCard } from "./noise-profile-card";
-
-// Renders a translated string, turning <b>…</b> and <code>…</code> spans into elements, so a sentence with emphasis stays one key.
-function rich(s: string): React.ReactNode[] {
-  return s.split(/(<b>.*?<\/b>|<code>.*?<\/code>)/).map((part, i) => {
-    const b = /^<b>(.*)<\/b>$/.exec(part);
-    if (b) return <b key={i}>{b[1]}</b>;
-    const c = /^<code>(.*)<\/code>$/.exec(part);
-    if (c) return <code key={i}>{c[1]}</code>;
-    return part;
-  });
-}
 
 export default function SystemSettingsPage() {
   const [trafficCapture, setTrafficCapture] = React.useState(false);
@@ -50,16 +42,14 @@ export default function SystemSettingsPage() {
   const [loaded, setLoaded] = React.useState(false);
   const [saving, setSaving] = React.useState(false);
   const [savingKey, setSavingKey] = React.useState(false);
-  const [pyInterp, setPyInterp] = React.useState("");
-  const [workers, setWorkers] = React.useState("3");
-  const [savingWorkers, setSavingWorkers] = React.useState(false);
+  const [settings, setSettings] = React.useState<Settings | null>(null);
+  // Every save here is PUT /api/settings, which is admin-only (server/rbac_policy.go).
+  const canAdmin = useCan("admin");
   // Operation constraint injection scope (both on by default).
   const [injectPlanner, setInjectPlanner] = React.useState(true);
   const [injectWorker, setInjectWorker] = React.useState(true);
   // Experimental: noa context compaction (off by default).
   const [noaCompaction, setNoaCompaction] = React.useState(false);
-  // Pure frontend preference: bypasses /api/settings, reads and writes localStorage directly.
-  const sendMode = useChatSendMode();
 
   const apply = React.useCallback((s: Settings) => {
     setTrafficCapture(!!s.traffic_capture);
@@ -71,49 +61,11 @@ export default function SystemSettingsPage() {
     setKeenableKeySet(!!s.keenable_key_set);
     setProxyInput(s.web_search_proxy ?? "");
     setGlobalProxyInput(s.global_proxy ?? "");
-    setPyInterp(s.python_interpreter ?? "");
-    setWorkers(String(s.workers ?? 3));
+    setSettings(s);
     setInjectPlanner(s.constraints_inject_planner !== false);
     setInjectWorker(s.constraints_inject_worker !== false);
     setNoaCompaction(!!s.noa_compaction);
   }, []);
-
-  const saveWorkers = () => {
-    const n = Number(workers);
-    if (!Number.isInteger(n) || n <= 0) {
-      toast.error(t("Concurrency must be an integer greater than 0"));
-      return;
-    }
-    setSavingWorkers(true);
-    api
-      .setSettings({ workers: n })
-      .then((s) => {
-        apply(s);
-        toast.success(t("Saved the concurrent worker agent count (applies to tasks started afterwards)"));
-      })
-      .catch((e) => toast.error(t("Save failed: {error}", { error: (e as Error).message })))
-      .finally(() => setSavingWorkers(false));
-  };
-
-  const savePython = () => {
-    setSaving(true);
-    api
-      .setSettings({ python_interpreter: pyInterp.trim() })
-      .then((s) => {
-        apply(s);
-        toast.success(t("Saved Python interpreter config"));
-      })
-      .catch((e) => toast.error(t("Save failed: {error}", { error: (e as Error).message })))
-      .finally(() => setSaving(false));
-  };
-  const detectPython = () => {
-    setSaving(true);
-    api
-      .detectPython()
-      .then((r) => setPyInterp(r.python_interpreter))
-      .catch(() => undefined)
-      .finally(() => setSaving(false));
-  };
 
   React.useEffect(() => {
     api
@@ -152,7 +104,7 @@ export default function SystemSettingsPage() {
       })
       .catch((e) => {
         setAgentTrafficBinding(!v);
-        toast.error(t("Save failed: {error}", { error: (e as Error).message }));
+        toast.error(t("Save failed: {error}", { error: errorText(e) }));
       })
       .finally(() => setSaving(false));
   };
@@ -179,7 +131,7 @@ export default function SystemSettingsPage() {
       })
       .catch((e) => {
         setNoaCompaction(!v); // revert on failure
-        toast.error(t("Save failed: {error}", { error: (e as Error).message }));
+        toast.error(t("Save failed: {error}", { error: errorText(e) }));
       });
   };
 
@@ -193,7 +145,7 @@ export default function SystemSettingsPage() {
         toast.success(t("Saved web search config"));
       })
       .catch((e) => {
-        toast.error(t("Save failed: {error}", { error: (e as Error).message }));
+        toast.error(t("Save failed: {error}", { error: errorText(e) }));
         api
           .settings()
           .then(apply)
@@ -211,7 +163,7 @@ export default function SystemSettingsPage() {
         setBraveKeyInput("");
         toast.success(t("Saved Brave API Key"));
       })
-      .catch((e) => toast.error(t("Save failed: {error}", { error: (e as Error).message })))
+      .catch((e) => toast.error(t("Save failed: {error}", { error: errorText(e) })))
       .finally(() => setSavingKey(false));
   };
 
@@ -224,7 +176,7 @@ export default function SystemSettingsPage() {
         setTavilyKeyInput("");
         toast.success(t("Saved Tavily API Key"));
       })
-      .catch((e) => toast.error(t("Save failed: {error}", { error: (e as Error).message })))
+      .catch((e) => toast.error(t("Save failed: {error}", { error: errorText(e) })))
       .finally(() => setSavingTavilyKey(false));
   };
 
@@ -237,7 +189,7 @@ export default function SystemSettingsPage() {
         setKeenableKeyInput("");
         toast.success(t("Saved Keenable API Key"));
       })
-      .catch((e) => toast.error(t("Save failed: {error}", { error: (e as Error).message })))
+      .catch((e) => toast.error(t("Save failed: {error}", { error: errorText(e) })))
       .finally(() => setSavingKeenableKey(false));
   };
 
@@ -249,7 +201,7 @@ export default function SystemSettingsPage() {
         apply(s);
         toast.success(proxyInput.trim() ? t("Saved egress proxy") : t("Cleared egress proxy (direct connection)"));
       })
-      .catch((e) => toast.error(t("Save failed: {error}", { error: (e as Error).message })))
+      .catch((e) => toast.error(t("Save failed: {error}", { error: errorText(e) })))
       .finally(() => setSavingProxy(false));
   };
 
@@ -261,7 +213,7 @@ export default function SystemSettingsPage() {
         apply(s);
         toast.success(globalProxyInput.trim() ? t("Saved global proxy") : t("Cleared global proxy (direct connection)"));
       })
-      .catch((e) => toast.error(t("Save failed: {error}", { error: (e as Error).message })))
+      .catch((e) => toast.error(t("Save failed: {error}", { error: errorText(e) })))
       .finally(() => setSavingGlobalProxy(false));
   };
 
@@ -282,9 +234,11 @@ export default function SystemSettingsPage() {
           toast.success(t("Search test succeeded · {backend} returned {count} results", { backend: r.backend ?? "", count: r.count ?? 0 }));
         else toast.error(t("Search test failed: {error}", { error: r.error || t("unknown error") }));
       })
-      .catch((e) => toast.error(t("Search test failed: {error}", { error: (e as Error).message })))
+      .catch((e) => toast.error(t("Search test failed: {error}", { error: errorText(e) })))
       .finally(() => setTesting(false));
   };
+
+  const editable = loaded && canAdmin;
 
   // brave-free selected but no key stored and none being entered → tool stays off.
   const braveNeedsKey = webSearch && backend === "brave-free" && !braveKeySet;
@@ -328,7 +282,7 @@ export default function SystemSettingsPage() {
               <Switch
                 id="traffic-capture"
                 checked={trafficCapture}
-                disabled={!loaded || saving}
+                disabled={!editable || saving}
                 onCheckedChange={toggleTraffic}
               />
             </div>
@@ -368,7 +322,7 @@ export default function SystemSettingsPage() {
               id="agent-traffic-binding"
               aria-describedby="agent-traffic-binding-description"
               checked={agentTrafficBinding}
-              disabled={!loaded || saving}
+              disabled={!editable || saving}
               onCheckedChange={toggleAgentTrafficBinding}
             />
           </CardContent>
@@ -410,12 +364,14 @@ export default function SystemSettingsPage() {
                 autoComplete="off"
                 placeholder={t("socks5://user:pass@host:1080 or http://host:port (empty = direct)")}
                 value={globalProxyInput}
-                disabled={!loaded || savingGlobalProxy}
+                disabled={!editable || savingGlobalProxy}
                 onChange={(e) => setGlobalProxyInput(e.target.value)}
               />
-              <Button type="button" onClick={saveGlobalProxy} disabled={!loaded || savingGlobalProxy}>
-                {t("Save")}
-              </Button>
+              {canAdmin && (
+                <Button type="button" onClick={saveGlobalProxy} disabled={!editable || savingGlobalProxy}>
+                  {t("Save")}
+                </Button>
+              )}
             </div>
             <p className="text-muted-foreground text-xs">
               {globalProxyInput.trim()
@@ -453,7 +409,7 @@ export default function SystemSettingsPage() {
               <Switch
                 id="inject-planner"
                 checked={injectPlanner}
-                disabled={!loaded}
+                disabled={!editable}
                 onCheckedChange={toggleInjectPlanner}
               />
             </div>
@@ -464,7 +420,7 @@ export default function SystemSettingsPage() {
               <Switch
                 id="inject-worker"
                 checked={injectWorker}
-                disabled={!loaded}
+                disabled={!editable}
                 onCheckedChange={toggleInjectWorker}
               />
             </div>
@@ -496,7 +452,7 @@ export default function SystemSettingsPage() {
             <Switch
               id="noa-compaction"
               checked={noaCompaction}
-              disabled={!loaded}
+              disabled={!editable}
               onCheckedChange={toggleNoaCompaction}
             />
           </CardContent>
@@ -532,7 +488,7 @@ export default function SystemSettingsPage() {
               <Switch
                 id="web-search"
                 checked={webSearch}
-                disabled={!loaded || saving}
+                disabled={!editable || saving}
                 onCheckedChange={(v) => {
                   setWebSearch(v); // optimistic
                   saveWebSearch({ web_search_enabled: v });
@@ -545,7 +501,7 @@ export default function SystemSettingsPage() {
                 <Label className="text-sm font-normal text-muted-foreground">{t("Search source")}</Label>
                 <Select
                   value={backend}
-                  disabled={!loaded || saving}
+                  disabled={!editable || saving}
                   onValueChange={(v) => {
                     setBackend(v); // optimistic
                     saveWebSearch({ web_search_backend: v });
@@ -603,16 +559,18 @@ export default function SystemSettingsPage() {
                     autoComplete="off"
                     placeholder={braveKeySet ? t("Configured (leave empty to keep)") : t("Enter Brave API Key")}
                     value={braveKeyInput}
-                    disabled={!loaded || savingKey}
+                    disabled={!editable || savingKey}
                     onChange={(e) => setBraveKeyInput(e.target.value)}
                   />
-                  <Button
-                    type="button"
-                    onClick={saveBraveKey}
-                    disabled={!loaded || savingKey || braveKeyInput.trim() === ""}
-                  >
-                    {t("Save")}
-                  </Button>
+                  {canAdmin && (
+                    <Button
+                      type="button"
+                      onClick={saveBraveKey}
+                      disabled={!editable || savingKey || braveKeyInput.trim() === ""}
+                    >
+                      {t("Save")}
+                    </Button>
+                  )}
                 </div>
                 {braveNeedsKey && (
                   <p className="text-xs text-amber-500">
@@ -638,16 +596,18 @@ export default function SystemSettingsPage() {
                     autoComplete="off"
                     placeholder={tavilyKeySet ? t("Configured (leave empty to keep)") : t("Enter Tavily API Key (tvly-…)")}
                     value={tavilyKeyInput}
-                    disabled={!loaded || savingTavilyKey}
+                    disabled={!editable || savingTavilyKey}
                     onChange={(e) => setTavilyKeyInput(e.target.value)}
                   />
-                  <Button
-                    type="button"
-                    onClick={saveTavilyKey}
-                    disabled={!loaded || savingTavilyKey || tavilyKeyInput.trim() === ""}
-                  >
-                    {t("Save")}
-                  </Button>
+                  {canAdmin && (
+                    <Button
+                      type="button"
+                      onClick={saveTavilyKey}
+                      disabled={!editable || savingTavilyKey || tavilyKeyInput.trim() === ""}
+                    >
+                      {t("Save")}
+                    </Button>
+                  )}
                 </div>
                 {webSearch && backend === "tavily" && !tavilyKeySet && (
                   <p className="text-xs text-amber-500">
@@ -675,16 +635,18 @@ export default function SystemSettingsPage() {
                         : t("Optional: leave empty for the keyless endpoint")
                     }
                     value={keenableKeyInput}
-                    disabled={!loaded || savingKeenableKey}
+                    disabled={!editable || savingKeenableKey}
                     onChange={(e) => setKeenableKeyInput(e.target.value)}
                   />
-                  <Button
-                    type="button"
-                    onClick={saveKeenableKey}
-                    disabled={!loaded || savingKeenableKey || keenableKeyInput.trim() === ""}
-                  >
-                    {t("Save")}
-                  </Button>
+                  {canAdmin && (
+                    <Button
+                      type="button"
+                      onClick={saveKeenableKey}
+                      disabled={!editable || savingKeenableKey || keenableKeyInput.trim() === ""}
+                    >
+                      {t("Save")}
+                    </Button>
+                  )}
                 </div>
                 <p className="text-muted-foreground text-xs leading-relaxed">
                   {rich(
@@ -707,12 +669,14 @@ export default function SystemSettingsPage() {
                     autoComplete="off"
                     placeholder={t("http://host:port or socks5://host:port (empty = direct)")}
                     value={proxyInput}
-                    disabled={!loaded || savingProxy}
+                    disabled={!editable || savingProxy}
                     onChange={(e) => setProxyInput(e.target.value)}
                   />
-                  <Button type="button" onClick={saveProxy} disabled={!loaded || savingProxy}>
-                    {t("Save")}
-                  </Button>
+                  {canAdmin && (
+                    <Button type="button" onClick={saveProxy} disabled={!editable || savingProxy}>
+                      {t("Save")}
+                    </Button>
+                  )}
                 </div>
                 <p className="text-muted-foreground text-xs">
                   {t(
@@ -727,121 +691,27 @@ export default function SystemSettingsPage() {
                 <p className="text-muted-foreground text-xs">
                   {t('Run a real "test" search with the current config (source + proxy + key) to verify it works.')}
                 </p>
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={runTest}
-                  disabled={!loaded || testing}
-                  className="shrink-0"
-                >
-                  {testing ? t("Testing…") : t("Test search")}
-                </Button>
+                {canAdmin && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={runTest}
+                    disabled={!editable || testing}
+                    className="shrink-0"
+                  >
+                    {testing ? t("Testing…") : t("Test search")}
+                  </Button>
+                )}
               </div>
             )}
           </CardContent>
         </Card>
 
-        <Card className="mb-4 break-inside-avoid md:mb-6">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2 text-base">
-              <RadioTowerIcon className="size-4" />
-              {t("Custom scripts · Python interpreter")}
-            </CardTitle>
-            <CardDescription>
-              {rich(
-                t(
-                  "Custom <b>script</b> tools run Python with it. Auto-detected at startup (python3 first); you can enter an absolute path to a venv / specific version here; leave empty to auto-detect at runtime.",
-                ),
-              )}
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="flex flex-col gap-3">
-            <div className="flex items-center gap-2">
-              <Input
-                className="font-mono text-sm"
-                placeholder={t("/usr/bin/python3 (empty = auto-detect)")}
-                value={pyInterp}
-                disabled={!loaded || saving}
-                onChange={(e) => setPyInterp(e.target.value)}
-              />
-              <Button variant="outline" onClick={detectPython} disabled={!loaded || saving}>
-                {t("Re-detect")}
-              </Button>
-              <Button onClick={savePython} disabled={!loaded || saving}>
-                {t("Save")}
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
+        <PythonInterpreterCard settings={settings} onSaved={apply} />
 
-        <Card className="mb-4 break-inside-avoid md:mb-6">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2 text-base">
-              <CpuIcon className="size-4" />
-              {t("Work concurrency · worker agent count")}
-            </CardTitle>
-            <CardDescription>
-              {rich(
-                t(
-                  "The number of worker agents running concurrently per task (default 3). Higher values mean more parallel probing and higher consumption. Changes <b>apply to tasks started afterwards</b>; running tasks are unaffected.",
-                ),
-              )}
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="flex flex-col gap-3">
-            <div className="flex items-center gap-2">
-              <Input
-                type="number"
-                min={1}
-                className="w-32 font-mono text-sm"
-                placeholder="3"
-                value={workers}
-                disabled={!loaded || savingWorkers}
-                onChange={(e) => setWorkers(e.target.value)}
-              />
-              <Button onClick={saveWorkers} disabled={!loaded || savingWorkers}>
-                {t("Save")}
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
+        <WorkersCard settings={settings} onSaved={apply} />
 
-        <Card className="mb-4 break-inside-avoid md:mb-6">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2 text-base">
-              <KeyboardIcon className="size-4" />
-              {t("Chat input send key binding")}
-            </CardTitle>
-            <CardDescription>
-              {t(
-                "Shared by the main-agent chat inputs on the chat page and task details; takes effect immediately on selection, no saving needed.",
-              )}
-              <br />
-              {rich(
-                t(
-                  "This preference <b>lives only in this browser</b>, does not sync with the account, and must be set again after switching browsers or clearing site data.",
-                ),
-              )}
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="flex items-center justify-between gap-4">
-            <Label htmlFor="chat-send-mode" className="text-sm font-normal text-muted-foreground">
-              {t("Send mode")}
-            </Label>
-            <Select value={sendMode} onValueChange={(v) => setChatSendMode(v as ChatSendMode)}>
-              <SelectTrigger id="chat-send-mode" className="w-72">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {CHAT_SEND_MODE_OPTIONS.map((option) => (
-                  <SelectItem key={option.value} value={option.value}>
-                    {option.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </CardContent>
-        </Card>
+        <ChatSendModeCard />
       </div>
     </div>
   );
