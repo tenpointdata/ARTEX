@@ -41,6 +41,7 @@ import { api } from "@/lib/api";
 import type { LLMProfile, Task } from "@/lib/types";
 
 import { AssetsTab } from "./_tabs/assets-tab";
+import { AuthorizationTab } from "./_tabs/authorization-tab";
 import { BroadcastTab } from "./_tabs/broadcast-tab";
 import { CoverageGraphTab } from "./_tabs/coverage-graph-tab";
 import { CredentialsTab } from "./_tabs/credentials-tab";
@@ -64,6 +65,7 @@ const TABS = [
   { value: "credentials", label: t("Credentials") },
   { value: "coverage", label: t("Asset coverage") },
   { value: "intercept", label: t("Interception approval") },
+  { value: "authorization", label: t("Authorization") },
   { value: "report", label: t("Report") },
 ];
 
@@ -466,6 +468,9 @@ function TaskDetailInner() {
         </TabsContent>
         <TabsContent value="intercept" className="mt-0">
           <InterceptTab taskId={id} />
+        </TabsContent>
+        <TabsContent value="authorization" className="mt-0">
+          <AuthorizationTab taskId={id} />
         </TabsContent>
         <TabsContent value="report" className="mt-0">
           <ReportTab taskId={id} />

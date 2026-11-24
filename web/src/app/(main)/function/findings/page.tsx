@@ -75,6 +75,7 @@ import {
 } from "./_components/findings-table";
 import { setVisibleInterval } from "@/lib/polling";
 import { t } from "@/i18n";
+import { useCan } from "@/hooks/use-session";
 
 const FINDING_LIST_PREFERENCE_KEY = "artex_finding_list_preferences";
 
@@ -195,8 +196,11 @@ export default function FindingsPage() {
   const activeFilterFingerprint = React.useRef(filterFingerprint);
   activeFilterFingerprint.current = filterFingerprint;
 
+  // Live retests span every client, so a client_read session (no "read") does not poll them.
+  const canReadRetests = useCan("read");
   // One lightweight request covers all rows/views, avoiding per-row fetches of full retest history; wait for the previous round to finish before polling again.
   React.useEffect(() => {
+    if (!canReadRetests) return;
     let disposed = false;
     let failed = false;
     let timer: ReturnType<typeof setTimeout>;
@@ -220,7 +224,7 @@ export default function FindingsPage() {
       disposed = true;
       clearTimeout(timer);
     };
-  }, []);
+  }, [canReadRetests]);
 
   React.useEffect(() => {
     const raw = getLocalStorageValue(FINDING_LIST_PREFERENCE_KEY);

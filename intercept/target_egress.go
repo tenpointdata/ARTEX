@@ -136,6 +136,10 @@ func (c *targetCheck) ungated(targets []Target) TargetResult {
 	if c.ref, err = c.scope.ref(); err != nil {
 		return TargetResult{Code: TargetGateUnavailable, Host: targets[0].Host, Port: targets[0].Port, Reason: err.Error()}
 	}
+	// The engagement authorization applies with the gate off too.
+	if res := c.authorize(targets); res.Code != "" {
+		return res
+	}
 	var rules []db.AssetInterceptRule
 	if c.i.targets != nil {
 		if rules, err = c.i.targets.BlockRules(c.ref); err != nil {
@@ -177,7 +181,7 @@ func (i *Interceptor) CheckUngated(ctx context.Context, scope TargetScope, toolN
 	}
 	declared := extractDeclared(toolName, input)
 	if len(declared.targets) == 0 {
-		return TargetResult{}
+		return i.authorizeCall(ctx, scope, toolName, input)
 	}
 	c := &targetCheck{i: i, ctx: WithCall(ctx, toolName, input), scope: scope, tool: toolName, input: input,
 		urls: declared.urls, connect: connectTool(toolName)}

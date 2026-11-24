@@ -276,6 +276,14 @@ var targetGuidance = map[string]string{
 	intercept.TargetTooMany: "The call was not executed and no approval was requested. Name fewer new targets per call.",
 	intercept.TargetGateUnavailable: "The call was not executed. This is a failure on the platform side, not a block by the target. " +
 		"Retry the same call later, or report the failure.",
+	intercept.AuthorizationOutOfWindow: "The call was not executed. The engagement's authorization window does not cover now: " +
+		"do not retry it and do not reach any target another way. Stop active testing and report what you have.",
+	intercept.AuthorizationRevoked: "The call was not executed. The engagement's authorization is revoked: " +
+		"do not retry it and do not reach any target another way. Stop active testing and report what you have.",
+	intercept.AuthorizationOutOfScope: "The call was not executed. The target is outside the engagement's authorized scope: " +
+		"do not retry it, do not substitute another name or address for it and do not reach it another way.",
+	intercept.AuthorizationTechniqueDenied: "The call was not executed. The engagement does not authorize this class of technique: " +
+		"do not retry it with another tool of the same class; continue only with authorized techniques.",
 }
 
 // TargetBlockMessage is systemBlockMessage for the target gate: the block code,

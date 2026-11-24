@@ -14,9 +14,12 @@ import { Label } from "@/components/ui/label";
 import { t } from "@/i18n";
 import { api } from "@/lib/api";
 import { auth } from "@/lib/auth";
+import { landingPath } from "@/lib/governance";
 
 export default function LoginPage() {
   const router = useRouter();
+  // The bootstrap admin is ARTEX; console users (admin-managed) sign in with their own name.
+  const [username, setUsername] = useState("ARTEX");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
@@ -44,10 +47,10 @@ export default function LoginPage() {
   useEffect(() => {
     // Already signed in — go straight to the main UI (static export has no middleware to do this redirect).
     let cancelled = false;
-    void auth.isAuthenticated().then((ok) => {
+    void auth.session().then((s) => {
       if (cancelled) return;
-      if (ok) {
-        window.location.replace("/function/tasks");
+      if (s.authenticated) {
+        window.location.replace(landingPath(s));
         return;
       }
       api
@@ -72,8 +75,8 @@ export default function LoginPage() {
     setLoading(true);
     setError("");
     try {
-      await api.login("ARTEX", password);
-      window.location.replace("/function/tasks");
+      await api.login(username.trim(), password);
+      window.location.replace(landingPath(await auth.session()));
     } catch {
       setError(t("Incorrect username or password"));
     } finally {
@@ -115,13 +118,20 @@ export default function LoginPage() {
           <div className="space-y-4 text-center">
             <h2 className="text-2xl font-medium tracking-tight">{t("Sign in")}</h2>
             <p className="mx-auto max-w-xl text-muted-foreground">
-              {t("Welcome back — enter your password to continue using ARTEX")}
+              {t("Welcome back — enter your username and password to continue using ARTEX")}
             </p>
           </div>
           <form onSubmit={handleSubmit} className="flex flex-col gap-4">
             <div className="space-y-1.5">
               <Label htmlFor="username">{t("Username")}</Label>
-              <Input id="username" value="ARTEX" readOnly className="bg-muted text-muted-foreground" />
+              <Input
+                id="username"
+                value={username}
+                onChange={(e) => setUsername(e.target.value)}
+                autoComplete="username"
+                autoCapitalize="none"
+                spellCheck={false}
+              />
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="password">{t("Password")}</Label>
@@ -155,7 +165,7 @@ export default function LoginPage() {
               </Label>
             </div>
             {error && <p className="text-sm text-destructive">{error}</p>}
-            <Button type="submit" className="w-full" disabled={loading || !password || !agreed}>
+            <Button type="submit" className="w-full" disabled={loading || !username.trim() || !password || !agreed}>
               {loading ? t("Signing in...") : t("Sign in")}
             </Button>
           </form>
