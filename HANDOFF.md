@@ -179,6 +179,24 @@ Verified 2026-11-23 (card `c-dadc14`, done):
   isolation self-test fails closed (also on main; `c-775dc2`). Use named volumes there.
 
 Operator-facing changes:
+
+**2026-11-24** — **E2 integrations** (card `c-6def05`) are on branch `ej/20261124-055326-6bcfa9`.
+This is backend and API only; there is no web UI yet (card `c-597eb6`). See `docs/integrations.md`.
+- **Findings out:** package `ticketing` has GitHub Issues, Jira and DefectDojo adapters. All of
+  them go through `notify.Do`, which carries the notify SSRF guard and redaction. Tracker configs
+  are sealed at rest and masked on readback, and a destination change requires the credentials
+  again. Routes are under `/api/integrations/trackers` (CRUD, `push`, `sync`). Finding status
+  round-trips in both directions; when both sides changed, the tracker wins. A ticket's status never
+  touches the finding's verification.
+- **Scanner data in:** package `scanimport` parses Nmap XML, Nuclei JSONL, ZAP JSON, Burp XML and
+  SARIF. `POST /api/integrations/imports` writes assets with provenance (`scan_import_assets`) and
+  unverified POE-0 findings (`finding_import_sources`). A re-import never edits or promotes a finding.
+- Migration `0015_integrations.sql` is new and has not been released.
+- Verified on macOS against a local Postgres: `go test` for `db`, `ticketing`, `scanimport`,
+  `notify` and `agent`, the new server tests, and `scripts/verify.sh`. `./server` still has three
+  failures that also fail at base `1abe24f`, because of the local environment: a trust-auth
+  Postgres, no `127.0.0.2` loopback alias, and DNS lookups.
+
 - Native (non-Linux-root) starts now refuse unless `ARTEX_ALLOW_UNSANDBOXED=1` is set; `dev.sh` sets it.
 - A non-loopback `-addr` without TLS is refused. Use `-tls-cert`/`-tls-key` (or
   `ARTEX_TLS_CERT`/`ARTEX_TLS_KEY`), or set `ARTEX_ALLOW_INSECURE_BIND=1`; the Dockerfile sets that env.
@@ -334,7 +352,6 @@ Composite ARTEX board, not as GitHub issues, because the repo is public (decisio
 Card ids in brackets:
 
 - **E1** [`c-8f9cca`] Client-grade reporting & deliverables (scoring, remediation, framework mappings, branded export).
-- **E2** [`c-6def05`] Finding/ticketing integrations out (Jira, GitHub issues, DefectDojo) and more ingest in (Nuclei, Nmap, ZAP/Burp, Semgrep).
 - **E3** [`c-d25ff9`] — gate built (in review). Follow-ups: hardening `c-0d277f`, UI `c-936308`, first live run `c-772190`, proposer/critic `c-c89f5b`.
 - **E4** [`c-c0bb07`] Methodology-driven coverage: landed 2026-11-24 (see Current state). Follow-ups:
   [`c-ca2bd0`] an operator-chosen methodology per task (landed, in review; gaps `c-aed5fd`); [`c-ed937d`] checklist completion in the report export (after E1).
@@ -342,6 +359,9 @@ Card ids in brackets:
   `c-5b5421` (client binding), `c-869050` (UI, in review), `c-f4115c` (lifecycle gaps), `c-92bb52`
   (role-aware controls on existing pages), `c-7c4715` (client_read console), `c-601ec6` (chain paging).
 - **TEST** [`c-3157b4`] `TestGateOffTaskIsUnchanged` fails on main with Postgres (also fails before E5).
+- **E2** [`c-6def05`] Backend done 2026-11-24 (see Current state). Follow-ups: [`c-597eb6`] UI;
+  [`c-da9198`] scheduled sync plus a per-tracker lock; [`c-ea60a0`] move agent `scan_ingest` onto
+  `scanimport`, normalize default ports, and settle two dedup edge cases.
 - **E6** [`c-cb0093`] Cost/observability dashboard + OpenTelemetry export, building on existing context telemetry.
 - **E7** [`c-d60149`] Distributed/remote workers (queue-backed intents) for larger engagements; Helm chart.
 - **E8** [`c-5487e8`] Planner/worker evaluation suite (regression targets, prompt-version A/B via the benchmark gate).
@@ -469,6 +489,17 @@ Card ids in brackets:
   because the deny-list, operation-name and introspection middlewares only run in Expert mode (moved to
   notes). Added GT-012, stack traces on `/graphiql` (`format_custom_error`). The notes now say that
   difficulty is server-wide DB state, switched by `X-DVGA-MODE` or `/difficulty/<level>`, not chosen per request.
+- **2026-11-24 E2:**
+  - Imported findings are scanner claims: `unverified`, POE 0, `worker=import:<tool>`. A known dedup
+    key leaves the existing finding untouched.
+  - Imports register no notification events, so bulk uploads do not flood the channels.
+  - Scanner free text goes only into quoted evidence; summary and name come from typed tokens.
+  - When both sides changed, the ticket sync lets the tracker win, because remediation is tracked
+    there.
+  - A tracker destination change drops its ticket links.
+  - Evidence goes into a ticket only when `include_evidence` is on, and then with credentials
+    redacted.
+  - Migration 0015 was edited in place before any release, because it was never on main.
 
 - **2026-11-23** — Stood ARTEX up locally and registered it as a Composite project rather than
   forking/renaming; it stays an AGPL-3.0 fork under `tenpointdata`. Backend verified building; web

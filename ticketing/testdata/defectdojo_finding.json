@@ -1,0 +1,16 @@
+{
+  "id": %d,
+  "test": 7,
+  "title": %s,
+  "severity": %s,
+  "numerical_severity": %s,
+  "description": %s,
+  "active": %t,
+  "verified": %t,
+  "false_p": %t,
+  "risk_accepted": %t,
+  "is_mitigated": %t,
+  "duplicate": %t,
+  "unique_id_from_tool": %s,
+  "found_by": [3]
+}
