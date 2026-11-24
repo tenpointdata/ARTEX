@@ -107,9 +107,21 @@ The recording proxy (go-mitmproxy) has no dial hook, so its upstream is a loopba
   `curl`) gets the global rules only. The SOCKS5 listener takes the same token as its RFC 1929
   password. The token only adds rules; it is not a credential to protect. Code:
   `traffic/scope.go`, `egress/proxycred.go`, `Manager.TaskProxyAddr`.
-- **Not scoped yet:** the transparent TCP listener (it has no credential to carry), the chat and
-  conversation agents, and custom HTTP tools that use the recording proxy. These get the global
-  rules only.
+- **Conversation rules.** A conversation's chat agent gets a URL with the conversation's own token,
+  resolved per turn from the turn's target scope (`Manager.ScopedProxyAddr`), so its WebFetch and
+  Bash dials apply the conversation's block rules and, with its gate on, its pins and approvals,
+  without waiting. The token is dropped when the conversation is deleted.
+- **Custom HTTP tools** with `use_recording_proxy` use the URL of the calling task or conversation
+  (`ScopedProxyAddr` on the call's context). A call whose task is no longer loaded gets a URL
+  whose dials are all refused, never the global-only one. A call with no run scope (an editor
+  test) gets the global rules.
+- **Global rules only, by decision:** the transparent TCP listener. A redirected connection has no
+  credential to carry a token, and mapping it to a run would need per-run uids or cgroups plus
+  netfilter owner matching set up by the operator. The listener is opt-in and operator-configured;
+  treat it as a global-rules path and do not point a run's tools at it when that run's own block
+  rules or gate must hold.
+- **Not scoped yet:** the seeded Playwright browser MCP. It is one process shared by every run,
+  started with the plain proxy URL (`syncBrowserMCPProxy`), so its dials get the global rules only.
 - **Global egress proxy.** When one is set, go-mitmproxy forwards through it and the gate is not on
   the path. Neither global nor task rules then apply to the proxy's dials: the operator's proxy
   reaches the target. That is the intended behaviour for a remote egress proxy. **Do not run that

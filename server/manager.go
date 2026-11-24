@@ -911,10 +911,15 @@ func (m *Manager) ProxyAddr() string {
 // block rules and, when its gate is on, its pins and approvals, as well as the
 // global rules. A dial never waits for a decision (intercept dialTarget); an
 // unpinned target opens its approval request and is refused until approved.
-// The token is dropped with the task (forgetTask).
+// The token is dropped with the task (forgetTask). A task that is no longer
+// loaded gets a URL whose dials are refused: minting it a token again would
+// leave one that nothing frees.
 func (m *Manager) TaskProxyAddr(t *Task) string {
 	if t == nil || m.traffic == nil || !m.TrafficEnabled() {
 		return m.ProxyAddr()
+	}
+	if _, loaded := m.Task(t.ID); !loaded {
+		return m.traffic.EndedScopeURL()
 	}
 	return m.traffic.ScopedProxyURL(t.ID, func(ctx context.Context) context.Context {
 		return intercept.WithTargetScope(ctx, t.targetScope(0))

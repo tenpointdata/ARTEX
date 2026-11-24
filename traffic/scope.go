@@ -93,6 +93,18 @@ func (t *Traffic) ScopedProxyURL(key string, fn ScopeFunc) string {
 // ForgetScope drops key's token. A client still using it is refused from then.
 func (t *Traffic) ForgetScope(key string) { t.scopes.forget(key) }
 
+// EndedScopeURL returns the recording proxy's URL carrying a fresh token that
+// names no scope, so every upstream dial of a client that uses it is refused.
+// It is the URL for a run whose scope has ended: handing it the plain URL
+// would downgrade it to the global rules.
+func (t *Traffic) EndedScopeURL() string {
+	raw := make([]byte, 16)
+	if _, err := rand.Read(raw); err != nil {
+		raw = []byte("ended")
+	}
+	return egress.ScopedProxyURL(t.ProxyAddr(), egress.ScopeTokenPrefix+"ended-"+hex.EncodeToString(raw))
+}
+
 // scopeBinding is the scope token a client connection presented.
 type scopeBinding struct {
 	conn  any // ClientConn.Id, so a stale disconnect never drops a newer binding

@@ -225,6 +225,7 @@ func (s *Server) pgDeleteConversation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.removeConversationSpill(c.ID)
+	s.m.forgetConversationScope(c.ID) // a proxy client still naming it is refused
 	writeJSON(w, 200, map[string]any{"deleted": c.ID})
 }
 
@@ -299,6 +300,7 @@ func (s *Server) pgDeleteConversationsBatch(w http.ResponseWriter, r *http.Reque
 	for _, id := range deleted {
 		deletedSet[id] = struct{}{}
 		s.removeConversationSpill(id)
+		s.m.forgetConversationScope(id)
 	}
 	items := make([]conversationDeleteItem, 0, len(ids))
 	for _, id := range ids {
