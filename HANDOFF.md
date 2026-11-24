@@ -68,7 +68,20 @@ carried through archive/restore and echoed on the task DTO. This branch merges t
 (`ej/20261124-123222-d3dc8a`). Verified against Postgres 16: `TestTaskMethodologiesOperatorChoice`,
 the archive round-trip, `TestCreateTaskMethodologies` (server), the full `go test -p 1 ./...` (only the
 known macOS 127.0.0.2 SOCKS5 test fails), web `tsc` and i18n. Not checked: the form in a browser.
-Gaps carded as `c-aed5fd`: no "none" choice, and the choice is fixed at creation.
+
+**2026-11-24 (c-aed5fd, follow-up to c-ca2bd0, in review)** on `ej/20261124-142815-0670af` (merges the
+c-ca2bd0 branch `ej/20261124-141028-5cc420`). The choice can now be **"none"** and **edited after
+creation**. `methodology.None` (`"none"`) is a reserved id that must stand alone; `["none"]` = no checklist
+whatever the goal says (`methodology.Choose`: `[]` automatic, `[none]` nothing, else `Pick`). It lives in the
+same `tasks.methodologies` column, so there is no migration. `PATCH /api/tasks/{id}` takes `methodologies`
+(`db.TaskPatch.Methodologies *[]string`, nil = unchanged, resolved like at creation, a bad choice = 400 and
+no change). The planner block reads the stored choice every round, so the next round follows a PATCH. UI: a
+"No checklist" row in `methodology-picker.tsx` and a Testing methodologies card on the task overview
+(`detail/_tabs/methodology-choice-card.tsx`) that saves each tick at once. Verified on Postgres 17:
+`TestTaskMethodologiesNoneAndPatch` (db), `TestMethodologyBlockFollowsPatch` (agent),
+`TestPatchTaskMethodologies` (server), `TestNoneChoice`, and `scripts/verify.sh` (only the two known env
+failures: trust-auth `TestConnectWithoutPasswordRealPG`, the 127.0.0.2 SOCKS5 test). Not checked: the
+picker and card in a browser.
 
 **2026-11-24 — E5 web UI (`c-869050`, in review)** on `ej/20261124-132958-94f4bf` (carries E5 + client_read).
 `/system/users`, task **Authorization** tab, Approval Records **Chain** tab with Verify; sidebar filtered by
@@ -337,7 +350,7 @@ Card ids in brackets:
 - **E2** [`c-6def05`] Finding/ticketing integrations out (Jira, GitHub issues, DefectDojo) and more ingest in (Nuclei, Nmap, ZAP/Burp, Semgrep).
 - **E3** [`c-d25ff9`] — gate built (in review). Follow-ups: hardening `c-0d277f`, UI `c-936308`, first live run `c-772190`, proposer/critic `c-c89f5b`.
 - **E4** [`c-c0bb07`] Methodology-driven coverage: landed 2026-11-24 (see Current state). Follow-ups:
-  [`c-ca2bd0`] an operator-chosen methodology per task (landed, in review; gaps `c-aed5fd`); [`c-ed937d`] checklist completion in the report export (after E1).
+  [`c-ca2bd0`] an operator-chosen methodology per task (landed, in review; "none" + edit after creation `c-aed5fd`, in review); [`c-ed937d`] checklist completion in the report export (after E1).
 - **E5** [`c-669406`] Engagement governance. The backend is done on `ej/20261124-055929-bd2253`. Follow-ups:
   `c-5b5421` (client binding), `c-869050` (UI, in review), `c-f4115c` (lifecycle gaps), `c-92bb52`
   (role-aware controls on existing pages), `c-7c4715` (client_read console), `c-601ec6` (chain paging).
@@ -410,6 +423,12 @@ Card ids in brackets:
 
 ## Decisions
 
+- **2026-11-24** — c-aed5fd: "no checklist" is a sentinel id `none` in the existing list column rather
+  than a `methodology_mode` column. It needs no migration (none could be numbered safely while 0015–0022
+  sit on open branches), it rides the existing archive/restore and DTO paths unchanged, and the empty list
+  keeps meaning automatic. The id is reserved in `methodology.Validate` and must stand alone. Editing goes
+  through the existing task PATCH (a replace, not a merge); the planner already reads the choice per round,
+  so no in-memory cache had to be invalidated.
 - **2026-11-24** — c-ca2bd0: the operator's methodology choice is a list column on `tasks`, with an empty
   list meaning automatic, so existing tasks and every other create path (spawn, templates) keep the
   goal-word selection. A non-empty list replaces the automatic set rather than adding to it, which also
