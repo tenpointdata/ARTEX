@@ -193,8 +193,10 @@ func TestClientReadIsDeniedByDefault(t *testing.T) {
 	s, h := rbacTestServer(t)
 	u := seedUser(t, s, db.RoleClientRead, "client-pass-12")
 	_, tok := loginAs(t, s, u.Username, "client-pass-12")
-	if w := call(h, tok, "GET", "/api/report", ""); w.Code != 200 {
-		t.Fatalf("client report: %d", w.Code)
+	// The role admits the report route; with no company binding the user
+	// still sees nothing (client_scope_pg_test.go covers bound users).
+	if w := call(h, tok, "GET", "/api/report", ""); w.Code != 403 || !strings.Contains(w.Body.String(), "not bound") {
+		t.Fatalf("unbound client report: %d %s", w.Code, w.Body)
 	}
 	for _, p := range []string{"/api/tasks", "/api/users"} {
 		if w := call(h, tok, "GET", p, ""); w.Code != 403 {

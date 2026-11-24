@@ -27,6 +27,8 @@ func (s *Server) registerRBACRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/users", s.createUser)
 	mux.HandleFunc("PATCH /api/users/{id}", s.updateUser)
 	mux.HandleFunc("DELETE /api/users/{id}", s.deleteUser)
+	mux.HandleFunc("GET /api/users/{id}/companies", s.getUserCompanies)
+	mux.HandleFunc("PUT /api/users/{id}/companies", s.setUserCompanies)
 }
 
 // reservedActors are actor names the audit chain and the intercept history
@@ -195,4 +197,65 @@ func (s *Server) deleteUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, 200, map[string]any{"ok": true})
+}
+
+// GET /api/users/{id}/companies — the companies the user is bound to. Only a
+// client_read user is restricted by them (client_scope.go).
+func (s *Server) getUserCompanies(w http.ResponseWriter, r *http.Request) {
+	pg := s.pg(w)
+	if pg == nil {
+		return
+	}
+	id, ok := pathInt(r, "id")
+	if !ok {
+		writeErr(w, 400, "invalid user id")
+		return
+	}
+	if _, err := pg.GetUser(id); err != nil {
+		writeUserErr(w, err)
+		return
+	}
+	ids, err := pg.UserCompanies(id)
+	if err != nil {
+		writeUserErr(w, err)
+		return
+	}
+	writeJSON(w, 200, map[string]any{"company_ids": ids})
+}
+
+// PUT /api/users/{id}/companies {company_ids} — replaces the user's bindings.
+// An empty list withdraws them all, which leaves a client_read user seeing
+// nothing. Takes effect on the user's next request.
+func (s *Server) setUserCompanies(w http.ResponseWriter, r *http.Request) {
+	pg := s.pg(w)
+	if pg == nil {
+		return
+	}
+	id, ok := pathInt(r, "id")
+	if !ok {
+		writeErr(w, 400, "invalid user id")
+		return
+	}
+	var req struct {
+		CompanyIDs []int64 `json:"company_ids"`
+	}
+	if err := decode(w, r, &req); err != nil {
+		writeErr(w, 400, "Invalid request format")
+		return
+	}
+	err := pg.SetUserCompanies(actorName(r), id, req.CompanyIDs)
+	if errors.Is(err, db.ErrCompanyNotFound) {
+		writeErr(w, 400, err.Error())
+		return
+	}
+	if err != nil {
+		writeUserErr(w, err)
+		return
+	}
+	ids, err := pg.UserCompanies(id)
+	if err != nil {
+		writeUserErr(w, err)
+		return
+	}
+	writeJSON(w, 200, map[string]any{"company_ids": ids})
 }

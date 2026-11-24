@@ -83,6 +83,9 @@ func clientReadAllowed(method, path string) bool {
 	case "/api/report", "/api/stats", "/api/tasks/{id}/outcome", "/api/tasks/{id}/coverage":
 		return true
 	}
+	if path == "/api/exploration/findings/retests/active" {
+		return false // live retests across every client
+	}
 	return strings.HasPrefix(path, "/api/report/") || path == "/api/exploration/findings" ||
 		strings.HasPrefix(path, "/api/exploration/findings/")
 }

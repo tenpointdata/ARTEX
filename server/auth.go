@@ -363,6 +363,13 @@ func (s *Server) requireAuth(h http.Handler) http.Handler {
 		if !s.authorizeRole(w, r, h, who) {
 			return
 		}
+		if who.Role == db.RoleClientRead {
+			bound, ok := s.bindClient(w, r, h, who)
+			if !ok {
+				return
+			}
+			r = bound
+		}
 		h.ServeHTTP(w, r.WithContext(withPrincipal(r.Context(), who)))
 	})
 }

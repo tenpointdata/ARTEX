@@ -115,7 +115,12 @@ var rbacPolicy = []policyRule{
 	// --- read: the audit chain, for reviewers ---
 	{http.MethodGet, "/api/intercept/history/chain", true, permRead},
 
-	// --- client_read: the allowlist for the client-facing role ---
+	// --- read: live retests across every client ---
+	{http.MethodGet, "/api/exploration/findings/retests/active", false, permRead},
+
+	// --- client_read: the allowlist for the client-facing role. Each route
+	// must also have a binder in clientBinders (client_scope.go), which
+	// narrows it to the user's companies. ---
 	{http.MethodGet, "/api/report", true, permClientRead},
 	{http.MethodGet, "/api/exploration/findings", true, permClientRead},
 	{http.MethodGet, "/api/stats", false, permClientRead},

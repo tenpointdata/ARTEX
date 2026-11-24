@@ -21,10 +21,12 @@ const GenesisHash = "00000000000000000000000000000000000000000000000000000000000
 
 // Audit event kinds the application appends. Row entries use row.<table>.
 const (
-	AuditLoginOK       = "auth.login"
-	AuditLoginFailed   = "auth.login_failed"
-	AuditRoleDenied    = "rbac.denied"
-	AuditKindRowPrefix = "row."
+	AuditLoginOK     = "auth.login"
+	AuditLoginFailed = "auth.login_failed"
+	AuditRoleDenied  = "rbac.denied"
+	// AuditClientScopeDenied: a client_read user asked for a route or id outside its company binding.
+	AuditClientScopeDenied = "rbac.client_scope_denied"
+	AuditKindRowPrefix     = "row."
 )
 
 // AuditEntry is one entry of the chain.
