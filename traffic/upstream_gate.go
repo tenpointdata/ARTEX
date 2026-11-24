@@ -205,6 +205,15 @@ func (t *Traffic) SetUpstreamDialer(dial DialFunc) {
 
 // upstreamFor is go-mitmproxy's upstream proxy: the operator's global egress
 // proxy when one is set (it, not this host, reaches the target), else the gate.
+//
+// Upstream connections are not shared across client connections: go-mitmproxy
+// dials one per client connection (TestUpstreamConnectionsNotSharedAcrossClients).
+// Its one cross-client pool, the separate client's http.Transport, is used only
+// when an addon changes a request's host or scheme or sets UseSeparateClient,
+// which no ARTEX addon does, and it keys idle connections by the URL returned
+// here. So a per-client scope added later must return a distinct gate URL
+// (credential) per scope: that both tells the gate the scope and keeps the
+// pool from carrying one scope's connection into another's request.
 func (t *Traffic) upstreamFor(*http.Request) (*url.URL, error) {
 	if u := t.upstream.Load(); u != nil {
 		return u, nil

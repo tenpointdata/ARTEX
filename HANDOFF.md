@@ -124,6 +124,7 @@ Operator-facing changes:
    Done = govulncheck clean.
 2. *(unclaimed)* — **SEC: upstream-gate residuals** (M), card `c-5a6f96`: task-scoped rules on proxy
    dials, go-mitmproxy keep-alive host pinning, and the global-egress-proxy bypass. Done = a test or a decision for each.
+   Per-client scopes must use a per-scope gate URL (see `upstreamFor` and the c-3b9252 decision).
 3. *(unclaimed)* — **SEC: logout revocation** (S), card `c-a0af33`. Done = a token replayed after
    logout or a password change gets 401, by a test.
 4. *(unclaimed)* — **SEC: Docker Desktop named volumes** (S), card `c-775dc2`. Done = `docker compose up`
@@ -210,6 +211,17 @@ Card ids in brackets:
   `ARTEX_SECRET_KEY`) loses stored secrets.
 
 ## Decisions
+
+- **2026-11-24** — c-3b9252 (capture-proxy upstream reuse across scopes): closed by a test and a
+  decision, no code change. go-mitmproxy v1.9.2 dials one upstream connection per client connection
+  (`ConnContext.ServerConn` via `getUpstreamConn`, through the gate); its only cross-client pool is the
+  attacker's separate client (`http.Transport` with keep-alive/HTTP/2), used only when an addon changes a
+  request's host or scheme or sets `Flow.UseSeparateClient`, which no ARTEX addon does. Today the proxy
+  path also carries no per-task scope (global rules only, `c-5a6f96`), so two scopes cannot meet on one
+  upstream. `TestUpstreamConnectionsNotSharedAcrossClients` pins this (mutation-checked: forcing
+  `UseSeparateClient` fails it). Constraint recorded at `Traffic.upstreamFor`: when `c-5a6f96` adds
+  per-client scopes, it must return a distinct gate URL/credential per scope, which also keys the
+  separate client's pool by scope.
 
 - **2026-11-23** — c-dadc14: the security branch's always-on metadata check resolves each name the
   platform dials (gate on or off); `TestGateOffTaskIsUnchanged` now asserts one lookup per platform
