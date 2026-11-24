@@ -1,7 +1,9 @@
 # Recursive self-improvement in ARTEX
 
-Status: measurement and shadow memory only. There is no harness search, no
-automatic adoption, and no self-modifying code in this repository.
+Status: measurement, shadow memory, and the benchmark gate (E3). There is no
+automated harness search and no automatic adoption: edits are proposed (by a
+person or a future proposer), measured on a held-out suite, and adopted only by
+an owner action. No code in this repository modifies itself.
 
 This file defines the contract any future harness-optimization work must meet,
 so the first experiment cannot quietly become an unguarded rewrite loop.
@@ -12,7 +14,7 @@ so the first experiment cannot quietly become an unguarded rewrite loop.
 |---|---|---|
 | A. within a task | planner, worker, retester, adversarial gate | exists |
 | B. across tasks | evidence-gated lessons from closed tasks | shadow mode, PR #104 |
-| C. on the harness | prompts, skills, tool guidance | **not built**; this is its contract |
+| C. on the harness | prompts, skills, tool guidance | gate built (`rsi/`, `server/rsi_loop.go`), flag off; no proposer |
 
 Loop A produces task gain. Loop B is meant to produce retained gain: a lesson
 must survive a closed task and change a later one. Loop C is the only loop that
@@ -64,6 +66,32 @@ A future Loop C PR is acceptable only with:
   (the existing L3 runner already enforces this);
 - per-gate results with denominators, not a single aggregate score;
 - a written rollback path and the flag name.
+
+## Benchmark gate (built)
+
+The gate implements the contract above; it has no proposer (critic) of its own.
+
+| rule | where it is enforced |
+|---|---|
+| 1. live tasks propose, benchmarks adopt | `rsi.Evaluate`: split must be `held-out`; the proposal's and the arm's `proposed_from` must not be in the evaluated targets; every run's task must exist on this instance and be newer than the proposal (`db.RSIEvidenceTasksInvalid`); a task id may appear once |
+| 2. owner approval per adoption | `POST /api/rsi/proposals/{id}/adopt` needs the owner password (step-up under the login rate limit) and names the exact passing evidence id; a bearer token alone cannot adopt |
+| 3. immutable surfaces | `rsi.ValidateEdit` admits only `prompt_body` for `goals`/`planner`/`worker` and `lesson`; `rsi.ImmutableSurfaces` and git-reviewed surfaces (`skill`, `tool_description`) are refused; a body may not carry a code-owned tail marker (`rsiForbiddenMarkers`). The tails are appended by code after the body, so a body cannot remove them |
+| 4. one-step rollback | adoption appends an `agent_prompts` version and records before/after; `POST .../rollback` moves the pointer back, only while the adopted version is still active (an owner edit since is never overwritten); open with the flag off |
+| 5. flag off by default | `ARTEX_RSI_LOOP=on` is read on every request; off refuses propose, evidence and adopt. Lesson injection keeps its own flag, `ARTEX_RSI_LESSONS` |
+| 6. bounded, annealed budget | `rsi.DefaultBudget`: 4, 2, 1, 1, … proposals per round; rounds only move forward. The pruner: paired gain must appear on at least 2 distinct held-out targets |
+| 7. attribution | the server recomputes per-gate rates and paired gained/lost from the raw arm records; the candidate may differ from the baseline in exactly the proposed module (prompt sha per role, lesson set); any gate with net paired loss rejects and is reported as a regression of that module, with its targets; the baseline must not evolve (no lessons) |
+| 8. no self-approval, no silent state | status moves only through evidence (server verdict), adopt (owner) and rollback; every transition is a row in the append-only `rsi_adoption_log` (trigger refuses UPDATE/DELETE), written in the same transaction |
+
+At adoption the evidence's baseline prompt sha must equal the live prompt, so
+evidence measured against an older prompt cannot be adopted (re-run the suite).
+Workflow and commands: `scripts/benchmark/README.md`, "Benchmark gate".
+
+Known limits: the judge verdicts inside the uploaded records come from the
+harness, not the server, so the server checks their shape, binding and task
+freshness but cannot re-judge them; the owner reviews the suite's `report.md`
+before adopting. The generic prompt editor (`PUT /api/agents/{key}/prompt`)
+remains an owner path outside the gate, and the benchmark harness uses it on its
+dedicated bench instance to switch arms.
 
 ## What the current layers do
 
