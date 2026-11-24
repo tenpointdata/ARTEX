@@ -76,6 +76,11 @@ type IsolationTargets struct {
 	// DSN is the server's database DSN; only its hosts, ports, user and database
 	// name reach the probe, never its password.
 	DSN string
+	// MetadataDial are host:port addresses (MetadataProbeAddrs) an executor
+	// process must not connect to. EgressFloor is the floor's state
+	// (EgressFloorStatus.String), quoted when one of them connects.
+	MetadataDial []string
+	EgressFloor  string
 }
 
 // EnforceIsolation decides the start from the self-test result, the platform goos

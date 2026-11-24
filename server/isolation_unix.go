@@ -9,12 +9,14 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -43,6 +45,10 @@ type isolationProbeSpec struct {
 	// the real address the server connects to, never one the self-test picks. The
 	// probe connects to each without a password.
 	DB []isolationProbeDB `json:"db,omitempty"`
+	// NoDial are host:port addresses the probe must fail to connect to (the cloud
+	// instance-metadata endpoints); NoDialHint is appended to a failure.
+	NoDial     []string `json:"no_dial,omitempty"`
+	NoDialHint string   `json:"no_dial_hint,omitempty"`
 }
 
 type isolationProbeDB struct {
@@ -105,6 +111,11 @@ func isolationSpec(p ExecPrivilege, t IsolationTargets) isolationProbeSpec {
 		if dir != "" && !slices.Contains(spec.Unwritable, dir) {
 			spec.Unwritable = append(spec.Unwritable, dir)
 		}
+	}
+	if len(t.MetadataDial) > 0 {
+		spec.NoDial = t.MetadataDial
+		spec.NoDialHint = t.EgressFloor + ". Install iptables and run the server with CAP_NET_ADMIN, or set " +
+			AllowMetadataEgressEnv + "=1 to accept that agent processes reach the cloud instance-metadata service"
 	}
 	if t.DSN != "" {
 		if cfg, err := pgx.ParseConfig(t.DSN); err == nil {
@@ -355,6 +366,9 @@ func checkIsolationAsExecutor(spec isolationProbeSpec) []string {
 			fail("the variable %s reached Bash: it is not on the agent environment allowlist", name)
 		}
 	}
+	for _, addr := range dialableAddrs(spec.NoDial) {
+		fail("Bash connected to the instance-metadata address %s: %s", addr, spec.NoDialHint)
+	}
 	for i := range spec.DB {
 		db := &spec.DB[i]
 		if err := connectWithoutPassword(db); err == nil {
@@ -385,4 +399,33 @@ func connectWithoutPassword(db *isolationProbeDB) error {
 	}
 	conn.Close(context.Background())
 	return nil
+}
+
+// noDialTimeout bounds one dial of dialableAddrs. A filter that drops instead of
+// refusing makes the dial wait for it; the dials run in parallel.
+const noDialTimeout = 3 * time.Second
+
+// dialableAddrs returns the addresses of addrs that accept a TCP connection, in
+// the order given.
+func dialableAddrs(addrs []string) []string {
+	ok := make([]bool, len(addrs))
+	var wg sync.WaitGroup
+	for i, addr := range addrs {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if c, err := net.DialTimeout("tcp", addr, noDialTimeout); err == nil {
+				c.Close()
+				ok[i] = true
+			}
+		}()
+	}
+	wg.Wait()
+	var out []string
+	for i, addr := range addrs {
+		if ok[i] {
+			out = append(out, addr)
+		}
+	}
+	return out
 }

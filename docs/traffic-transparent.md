@@ -13,7 +13,7 @@ ARTEX ships an opt-in **Linux-only IPv4 transparent TCP inbound listener** in `t
 - **Requires traffic recorder**: the server only starts the transparent TCP listener when the traffic recorder is enabled (inside the traffic proxy block in `server/manager.go`). If traffic capture is disabled, setting these environment variables does not open a listener.
 - **Linux only**: on non-Linux operating systems (`windows`, `darwin`), leaving the flag off is a no-op; explicitly enabling it logs `ErrTransparentTCPNotLinux` and leaves the listener disabled.
 - **IPv4 only (IPv6 not covered)**: P4.1b recovers `SO_ORIGINAL_DST` (`SOL_IP`, `AF_INET`) for IPv4 TCP sockets only. IPv6 (`IP6T_SO_ORIGINAL_DST`) is **not covered**; IPv6 bind addresses and IPv6 sockets are refused.
-- **Firewall never touched by ARTEX**: ARTEX never installs, modifies, or deletes `iptables`/`nftables` rules. Root or `CAP_NET_ADMIN` is required **only** by the operator when installing and cleaning up the host redirect rules—never to run ARTEX itself.
+- **Redirect rules never touched by ARTEX**: ARTEX never installs, modifies, or deletes the `iptables`/`nftables` redirect rules of transparent mode. (The only rules it installs itself are the agent egress floor's `ARTEX_AGENT_FLOOR` chain, which matches agent uids only; see SECURITY.md.) Root or `CAP_NET_ADMIN` is required **only** by the operator when installing and cleaning up the host redirect rules—never to run ARTEX itself.
 
 ## Firewall Rules & Cleanup (Operator-Managed)
 

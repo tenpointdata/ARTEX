@@ -249,3 +249,28 @@ func checkUngatedHop(ctx context.Context, scope TargetScope, toolName, hop, orig
 	}
 	return nil
 }
+
+// MetadataPrefixes lists, as prefixes, every address IsMetadataAddr refuses
+// that a packet filter can match: the link-local ranges, each metadataAddrs
+// entry, and the NAT64 form of each IPv4 one. The agent egress floor
+// (server/egress_floor.go) denies them to agent processes at the dial level,
+// so the platform's dials and the agent's own share one list.
+func MetadataPrefixes() []netip.Prefix {
+	linkLocal4 := netip.MustParsePrefix("169.254.0.0/16")
+	out := []netip.Prefix{linkLocal4, netip.MustParsePrefix("fe80::/10")}
+	nat64 := func(p netip.Prefix) netip.Prefix {
+		b := nat64Prefix.Addr().As16()
+		v4 := p.Addr().As4()
+		copy(b[12:], v4[:])
+		return netip.PrefixFrom(netip.AddrFrom16(b), 96+p.Bits())
+	}
+	out = append(out, nat64(linkLocal4))
+	for _, a := range metadataAddrs {
+		p := netip.PrefixFrom(a, a.BitLen())
+		out = append(out, p)
+		if a.Is4() {
+			out = append(out, nat64(p))
+		}
+	}
+	return out
+}
