@@ -156,6 +156,23 @@ is tested against Postgres 17 on macOS; see `docs/GOVERNANCE.md`.
 - **Migration order:** 0016 (E5), 0018, 0019 (this branch), with E1 holding 0017. The loader refuses a
   pending version older than an applied one, so renumber E1 above 0019 if it lands later.
 
+**2026-11-24** — **E2 integrations** (card `c-6def05`) are on branch `ej/20261124-055326-6bcfa9`.
+This is backend and API only; there is no web UI yet (card `c-597eb6`). See `docs/integrations.md`.
+- **Findings out:** package `ticketing` has GitHub Issues, Jira and DefectDojo adapters. All of
+  them go through `notify.Do`, which carries the notify SSRF guard and redaction. Tracker configs
+  are sealed at rest and masked on readback, and a destination change requires the credentials
+  again. Routes are under `/api/integrations/trackers` (CRUD, `push`, `sync`). Finding status
+  round-trips in both directions; when both sides changed, the tracker wins. A ticket's status never
+  touches the finding's verification.
+- **Scanner data in:** package `scanimport` parses Nmap XML, Nuclei JSONL, ZAP JSON, Burp XML and
+  SARIF. `POST /api/integrations/imports` writes assets with provenance (`scan_import_assets`) and
+  unverified POE-0 findings (`finding_import_sources`). A re-import never edits or promotes a finding.
+- Migration `0015_integrations.sql` is new and has not been released.
+- Verified on macOS against a local Postgres: `go test` for `db`, `ticketing`, `scanimport`,
+  `notify` and `agent`, the new server tests, and `scripts/verify.sh`. `./server` still has three
+  failures that also fail at base `1abe24f`, because of the local environment: a trust-auth
+  Postgres, no `127.0.0.2` loopback alias, and DNS lookups.
+
 **2026-11-23** — Fixes for the High and Medium findings from the 2026-11-23 security audit are on
 `main` (PR #1, branch `ej/20261123-145205-6a3af6`); the Linux/Docker verification fixes come from
 `ej/20261123-152406-fccff3`. It covers audit findings #1–#16 except as listed under Open work.
@@ -334,7 +351,9 @@ Composite ARTEX board, not as GitHub issues, because the repo is public (decisio
 Card ids in brackets:
 
 - **E1** [`c-8f9cca`] Client-grade reporting & deliverables (scoring, remediation, framework mappings, branded export).
-- **E2** [`c-6def05`] Finding/ticketing integrations out (Jira, GitHub issues, DefectDojo) and more ingest in (Nuclei, Nmap, ZAP/Burp, Semgrep).
+- **E2** [`c-6def05`] Backend done 2026-11-24 (see Current state). Follow-ups: [`c-597eb6`] UI;
+  [`c-da9198`] scheduled sync plus a per-tracker lock; [`c-ea60a0`] move agent `scan_ingest` onto
+  `scanimport`, normalize default ports, and settle two dedup edge cases.
 - **E3** [`c-d25ff9`] — gate built (in review). Follow-ups: hardening `c-0d277f`, UI `c-936308`, first live run `c-772190`, proposer/critic `c-c89f5b`.
 - **E4** [`c-c0bb07`] Methodology-driven coverage: landed 2026-11-24 (see Current state). Follow-ups:
   [`c-ca2bd0`] an operator-chosen methodology per task (landed, in review; gaps `c-aed5fd`); [`c-ed937d`] checklist completion in the report export (after E1).
@@ -469,6 +488,17 @@ Card ids in brackets:
   because the deny-list, operation-name and introspection middlewares only run in Expert mode (moved to
   notes). Added GT-012, stack traces on `/graphiql` (`format_custom_error`). The notes now say that
   difficulty is server-wide DB state, switched by `X-DVGA-MODE` or `/difficulty/<level>`, not chosen per request.
+- **2026-11-24 E2:**
+  - Imported findings are scanner claims: `unverified`, POE 0, `worker=import:<tool>`. A known dedup
+    key leaves the existing finding untouched.
+  - Imports register no notification events, so bulk uploads do not flood the channels.
+  - Scanner free text goes only into quoted evidence; summary and name come from typed tokens.
+  - When both sides changed, the ticket sync lets the tracker win, because remediation is tracked
+    there.
+  - A tracker destination change drops its ticket links.
+  - Evidence goes into a ticket only when `include_evidence` is on, and then with credentials
+    redacted.
+  - Migration 0015 was edited in place before any release, because it was never on main.
 
 - **2026-11-23** — Stood ARTEX up locally and registered it as a Composite project rather than
   forking/renaming; it stays an AGPL-3.0 fork under `tenpointdata`. Backend verified building; web
@@ -575,6 +605,15 @@ Card ids in brackets:
 - **2026-11-24 11:51 MST** · claude-code · `h-7774a6` — c-12df03 (now in review): the single-uid start-up share walk (shareWithExecGroup) now logs and skips an entry it cannot open, such as a stale ssh ControlMaster socket, instead of failing start-up. **Next:** When branch ej/20261124-092031-1d05de (5be8c4b, c-bd9a6d) merges, keep main's egress.sh: that commit adds a looser MCP-uid rule.
 - **2026-11-24 11:39 MST** · claude-code · `h-d512ac` — c-75c593 (now in review): docker-compose.bench.yml builds from a clean clone. **Next:** c-f1518c (h-9652aa) can use this instance for the first live held-out run.
 - **2026-11-24 11:23 MST** · claude-code · `h-6a42d5` — c-5b5421 (now in review): client_read users are bound to companies. **Next:** Land PR #16 (E5) first, then this branch.
+- **2026-11-24 06:21 MST** · claude-code · `ej/20261124-055326-6bcfa9` `1abe24f`→`d883793` (5 commits) · `h-9348ac` — E2 backend landed (card c-6def05 → review): package ticketing (GitHub/Jira/DefectDojo over notify.Do with masking + SSRF guard + stable dedup key), two-way finding↔ticket status sync, package scanimport (Nmap, Nuclei, ZAP, Burp, SARIF) and an import API that writes assets with provenance and unverified, never-promoted findings. Migration 0015. Fixture tests per adapter/format; GitHub round-trip and Nuclei/Nmap import tests pass against Postgres. Follow-up cards opened: c-597eb6, c-da9198, c-ea60a0. **Next:** c-597eb6: web UI for trackers and imports. c-da9198: scheduled sync and a per-tracker lock. c-ea60a0: move agent scan_ingest onto scanimport. **Decided:** Imports are unverified, POE 0, never edited on re-import, and register no notification events. Untrusted scanner text appears only as quoted evidence. In sync the tracker wins a conflict and a ticket status never touches verification. A destination change drops the tracker's links. Evidence goes to tickets only with include_evidence, and redacted. Migration 0015 was edited in place before release because it was never on main.
+- **2026-11-24 06:17 MST** · claude-code · `ej/20261124-060053-f49eb3` `a18400e`→`ea8f17d` (1 commit) · `h-537f2b` — c-8d54d5 done: the capture proxy verifies upstream TLS per host. go-mitmproxy v1.9.2 is vendored and patched in third_party/go-mitmproxy (go.mod replace), adding Options.UpstreamInsecure(host) and UpstreamRootCAs through tls.Config.VerifyConnection. ARTEX skips verification only for hosts named by an enabled allow rule of an active task that no block rule hits, and only when both the SNI and the dialled host qualify. Registries, code hosts and OS mirrors are always verified. The policy is cached for 5 s and fails closed. An independent security review was run and its medium finding is fixed. verify.sh passes; the Postgres test was skipped locally (no PG). Card c-8d54d5 moved to review. **Next:** Run `ARTEX_PG_DSN=… go test ./db -run ActiveTaskScopeRulesPG`. Run a Docker smoke test: a self-signed in-scope target through the proxy, and pip/git through it staying verified. Residual: the shared client refuses IP https targets (fails closed), and IP-target MITM certificates lack an IP SAN (pre-existing). **Decided:** Vendored and patched go-mitmproxy rather than a double-MITM transport (keeps ALPN/h2 and TLS state). Any active task's allow rules count, because the proxy cannot attribute a request to a task. No DNS lookup, so CIDR rules cover IP-addressed targets only. Both the SNI and the dialled host must be in scope. Registries are always verified.
+- **2026-11-24 05:18 MST** · claude-code · `ej/20261124-045249-222f7a` `1abe24f`→`114c0c8` (2 commits) · `h-5a3839` — c-5a6f96 is done; follow-up cards c-eb32cc and c-9b48b7 are open. Task agents' capture-proxy URLs now carry a task scope token. Proxy upstream dials, and SOCKS5 with the token as its password, now apply the task's block rules and, when its gate is on, its pins and approvals. A token whose task has ended is refused. go-mitmproxy's keep-alive host pinning is worked around with its separate client (not inside TLS tunnels). The global-egress-proxy bypass is accepted and documented in OPS.md §6. There are tests for each fixed item. An independent review found no fail-open; two of its findings are fixed. verify.sh passes; -race is clean on traffic, egress and agent. **Next:** c-eb32cc: scope the chat and conversation agents, the custom HTTP tools and the transparent listener. It also carries two low review items: the HTTP/2 pool is shared across scopes, and a token minted after forgetTask is never freed. c-9b48b7: report the pinning bug to go-mitmproxy, after confirming with Ian. Server-level wiring (TaskProxyAddr) has no Postgres-backed test. **Decided:** Scope travels as a per-task token in the proxy URL userinfo. It only adds rules: no token falls back to the global floor, and an unknown token fails closed. Proxy dials never wait for approval. The global egress proxy is accepted rather than routed through the gate, since a name-only check is all the gate could do there; operators must not run that proxy where it can reach metadata. Pinning is fixed by UseSeparateClient rather than by closing client connections.
+- **2026-11-23 21:08 MST** · claude-code · `ej/20261123-192351-fab3f4` `5c5ac24`→`cb6d41c` (1 commit) · `h-43cc9e` — c-775dc2: docker-compose.yml and docker-compose.ghcr.yml now keep /app/data, /app/keys and /app/skills in named volumes, so the stock `docker compose up` starts on Docker Desktop with the isolation self-test passing. Added docker-compose.bind.yml, a Linux-only override for host directories. A refused isolation start now exits 78 (server.ExitIsolationRefused), and start.sh prints the remedy instead of relaunching. update.sh copies an old ./keys, ./data and ./skills into the new volumes once. scripts/backup.sh archives /app/data (and, with the new --with-keys, /app/keys) from inside the container. README, OPS and SECURITY are updated. Verified on Docker Desktop for Mac arm64: "backend listening", health 200, and uid 10001 cannot write keys or skills; the bind override exits 78 with the remedy. Opened card c-965b0e; closes card c-775dc2. **Next:** c-965b0e: Docker's `restart: unless-stopped` still restarts the container after an exit 78. Decide on the restart policy or an idle hold. Run the Linux bind-mount path on a real Linux host. Run the full image build (`docker compose build`) once; the Dockerfile is unchanged. **Decided:** Named volumes are the default for all three directories, so the stock file never needs weakened isolation. Skills became a volume, seeded from the image, because the UI writes skills; refresh them with `docker compose cp skills/. artex:/app/skills/`. The isolation refusal uses EX_CONFIG 78 so start.sh can tell it from a crash.
+- _Older hand-offs, a line each; `ej handoff log` has them whole:_
+- **2026-11-23 21:07 MST** · claude-code · `h-ee4b2b` — c-a0af33: logout now revokes the session server-side. **Next:** Re-run `ARTEX_PG_DSN=… go test ./server` once Docker is healthy. **Issues:** opened #c-8dea4d.
+- **2026-11-23 16:51 MST** · claude-code · `h-61510f` — Verified the security fixes (now on main via PR #1, plus main's c-485de0 upstream gate) on Linux as root with Postgres, in Docker with the egress iptables filter, and in a browser over the HttpOnly cookie. **Next:** c-a0af33: server-side logout revocation (token epoch).
+- **2026-11-23 15:14 MST** · claude-code · `h-04e098` — Fixed the High and Medium findings (#1–#16) from the 2026-11-23 ARTEX security audit on the local branch ej/20261123-145205-6a3af6. **Next:** c-485de0: route the MITM proxy's upstream dials through the metadata/block check. **Issues:** opened #c-485de0, #c-8d54d5, #c-bd9a6d, #c-c10f2c, #c-cc25b6, #c-dadc14.
+- **2026-11-23 13:37 MST** · claude-code · `h-e3d121` — Stood ARTEX up locally as a Composite project and produced a comprehensive expansion plan.
 <!-- /composite:deltas -->
 
 _(written by `merge_handoff`)_
