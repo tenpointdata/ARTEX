@@ -298,7 +298,10 @@ func TestAssessmentHTTPToolRecordingProxy(t *testing.T) {
 	}
 
 	ctx := assessmentTaskContext(t, "42", "FS-17", target.URL)
-	s := &Server{m: &Manager{traffic: tr, trafficOn: true}}
+	scope, _ := intercept.TargetScopeFromContext(ctx)
+	// The task is loaded: a task scope with no loaded task is refused at the proxy (ScopedProxyAddr).
+	task := &Task{ID: "42", assessmentIdentity: scope.AssessmentIdentity}
+	s := &Server{m: &Manager{traffic: tr, trafficOn: true, tasks: map[string]*Task{"42": task}}}
 	const path = "/recorded-identification"
 	runAssessmentHTTPTool(t, s, ctx, httpExec{URL: target.URL + path, UseRecordingProxy: true})
 	select {

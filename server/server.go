@@ -275,7 +275,7 @@ func New(ctx context.Context, m *Manager, skillDir string, dataDir string, keyDi
 			}
 			return a.TaskTimeoutWrapupMaxTurns, true
 		})
-		wireAgentAugment(m.pg, s.skillDir, s.hostTools, s.execPriv) // wire visible skills/MCP + traffic/orchestration host tools into the agent toolset
+		wireAgentAugment(m.pg, s.skillDir, s.hostTools, s.execPriv, m.scopeMCPProxy) // wire visible skills/MCP + traffic/orchestration host tools into the agent toolset
 		domainReg := buildDomainReg(m.Assets())
 		wireTools(m.pg, domainReg)   // built-in tools table: filter per agent + override description/schema + inject defaults
 		seedPrompts(m.pg)            // seed built-in agent default prompt bodies into agent_prompts (only when empty)
@@ -583,6 +583,7 @@ func (s *Server) applyLLM(cfg agent.Config) error {
 	// (backend/key) and gates Enabled per-conversation-agent at Chat time. Conversations always use the active profile.
 	s.chatAgent = agent.NewChatAgent(prov, cfg.Model, s.m.dir, tx, win) // chat page runner
 	s.chatAgent.SetProxy(s.m.ProxyAddr(), s.m.ProxyCACert())
+	s.chatAgent.SetProxyResolver(s.m.ScopedProxyAddr) // per conversation: its scope token (proxy_scope.go)
 	s.chatAgent.SetWebSearch(s.m.WebSearchOpts())
 	s.chatAgent.SetGuard(s.chatGuard())
 	s.chatAgent.SetNonStreaming(nonStreamingResolver(cfg))
@@ -728,6 +729,7 @@ func (s *Server) chatAgentForProfile(id int64) *agent.ChatAgent {
 	tx := transcript.NewStore(filepath.Join(s.m.dir, "transcripts"))
 	ca := agent.NewChatAgent(s.poolForBinding(id, prov, cfg), cfg.Model, s.m.dir, tx, cfg.CompactionWindow())
 	ca.SetProxy(s.m.ProxyAddr(), s.m.ProxyCACert())
+	ca.SetProxyResolver(s.m.ScopedProxyAddr) // per conversation: its scope token (proxy_scope.go)
 	ca.SetWebSearch(s.m.WebSearchOpts())
 	ca.SetGuard(s.chatGuard())
 	ca.SetNonStreaming(nonStreamingResolver(cfg))

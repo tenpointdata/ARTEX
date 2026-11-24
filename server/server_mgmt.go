@@ -275,9 +275,7 @@ func (s *Server) pgDeleteTask(w http.ResponseWriter, r *http.Request) {
 	// resolve it. Now stop and join every task-owned Engine goroutine and clear its
 	// lifecycle maps before releasing the delete barrier.
 	s.engine.StopTask(id)
-	s.taskAgentMu.Lock()
-	delete(s.taskAgents, id)
-	s.taskAgentMu.Unlock()
+	s.dropTaskAgents(id)
 	deleted = true
 	writeJSON(w, 200, result)
 }

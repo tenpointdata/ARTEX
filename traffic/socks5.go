@@ -364,18 +364,25 @@ func (s *socks5Server) handleConn(client net.Conn) {
 	// 1. Handshake (greeting + optional RFC 1929 auth + CONNECT request) under HandshakeTimeout.
 	_ = client.SetDeadline(time.Now().Add(s.cfg.HandshakeTimeout))
 
-	paced, ok := s.negotiateAuth(client)
+	cred, ok := s.negotiateAuth(client)
 	if !ok {
 		return
 	}
+	paced := cred.paced
+	scope, ok := s.connScope(cred)
 
 	cmd, atyp, host, port, rep := readSOCKS5Request(client, s.cfg.EnableUDP)
+	if rep == socks5RepSuccess && !ok {
+		// The client named a run scope that has ended: refuse, never fall
+		// back to the global rules alone.
+		rep = socks5RepNotAllowed
+	}
 	if rep != socks5RepSuccess {
 		_ = writeSOCKS5Reply(client, rep, nil)
 		return
 	}
 	if cmd == socks5CmdUDPAssociate {
-		s.handleUDPAssociate(client, atyp, host, port)
+		s.handleUDPAssociate(client, atyp, host, port, scope)
 		return
 	}
 
@@ -390,7 +397,7 @@ func (s *socks5Server) handleConn(client net.Conn) {
 
 	// 3. Apply the egress governor and target gate before dialing.
 	targetAddr := net.JoinHostPort(host, strconv.Itoa(port))
-	upstream, rep := s.dialTarget(host, port, targetAddr)
+	upstream, rep := s.dialTarget(host, port, targetAddr, scope)
 	if rep != socks5RepSuccess {
 		_ = writeSOCKS5Reply(client, rep, nil)
 		return
@@ -455,17 +462,51 @@ func (s *socks5Server) recordCapture(rec RawTCPCapture) {
 	}
 }
 
-func (s *socks5Server) negotiateAuth(conn net.Conn) (paced bool, ok bool) {
+// socks5Cred is what a client's RFC 1929 credential carries (egress/proxycred.go):
+// the pace marker in the username, a run scope token in the password.
+type socks5Cred struct {
+	paced bool
+	token string
+}
+
+// connScope resolves the run scope a credential names. ok is false when it
+// names a scope the registry does not hold; a nil ScopeFunc means no scope.
+func (s *socks5Server) connScope(cred socks5Cred) (ScopeFunc, bool) {
+	if cred.token == "" {
+		return nil, true
+	}
+	if s.t == nil {
+		return nil, false
+	}
+	return s.t.scopes.lookup(cred.token)
+}
+
+// baseContext is the context of a connection's policy checks and dials:
+// BaseContext's, then the connection's run scope.
+func (s *socks5Server) baseContext(scope ScopeFunc) context.Context {
+	ctx := context.Background()
+	if s.cfg.BaseContext != nil {
+		if c := s.cfg.BaseContext(); c != nil {
+			ctx = c
+		}
+	}
+	if scope != nil {
+		ctx = scope(ctx)
+	}
+	return ctx
+}
+
+func (s *socks5Server) negotiateAuth(conn net.Conn) (cred socks5Cred, ok bool) {
 	var hdr [2]byte
 	if _, err := io.ReadFull(conn, hdr[:]); err != nil {
-		return false, false
+		return socks5Cred{}, false
 	}
 	if hdr[0] != socks5Version || hdr[1] == 0 {
-		return false, false
+		return socks5Cred{}, false
 	}
 	methods := make([]byte, int(hdr[1]))
 	if _, err := io.ReadFull(conn, methods); err != nil {
-		return false, false
+		return socks5Cred{}, false
 	}
 
 	var hasNone, hasUserPass bool
@@ -483,50 +524,52 @@ func (s *socks5Server) negotiateAuth(conn net.Conn) (paced bool, ok bool) {
 	// Accept no-auth for loopback clients.
 	if hasUserPass {
 		if _, err := conn.Write([]byte{socks5Version, socks5AuthUserPass}); err != nil {
-			return false, false
+			return socks5Cred{}, false
 		}
 		return readSOCKS5UserPass(conn)
 	}
 	if hasNone && isLoopbackRemote(conn.RemoteAddr()) {
 		if _, err := conn.Write([]byte{socks5Version, socks5AuthNone}); err != nil {
-			return false, false
+			return socks5Cred{}, false
 		}
-		return false, true
+		return socks5Cred{}, true
 	}
 	_, _ = conn.Write([]byte{socks5Version, socks5AuthNoAccept})
-	return false, false
+	return socks5Cred{}, false
 }
 
 // readSOCKS5UserPass parses an RFC 1929 username/password subnegotiation.
 // Credentials are never required (any username/password succeeds); a username
-// equal to egress.PaceUser marks the connection as paced.
-func readSOCKS5UserPass(conn net.Conn) (paced bool, ok bool) {
+// equal to egress.PaceUser marks the connection as paced, and a password that
+// is a scope token names the connection's run scope.
+func readSOCKS5UserPass(conn net.Conn) (cred socks5Cred, ok bool) {
 	var head [2]byte
 	if _, err := io.ReadFull(conn, head[:]); err != nil {
-		return false, false
+		return socks5Cred{}, false
 	}
 	if head[0] != socks5UserPassVer {
 		_, _ = conn.Write([]byte{socks5UserPassVer, 0x01})
-		return false, false
+		return socks5Cred{}, false
 	}
 	uname := make([]byte, int(head[1]))
 	if _, err := io.ReadFull(conn, uname); err != nil {
-		return false, false
+		return socks5Cred{}, false
 	}
 	var plen [1]byte
 	if _, err := io.ReadFull(conn, plen[:]); err != nil {
-		return false, false
+		return socks5Cred{}, false
 	}
+	pass := make([]byte, int(plen[0]))
 	if plen[0] > 0 {
-		pass := make([]byte, int(plen[0]))
 		if _, err := io.ReadFull(conn, pass); err != nil {
-			return false, false
+			return socks5Cred{}, false
 		}
 	}
 	if _, err := conn.Write([]byte{socks5UserPassVer, 0x00}); err != nil {
-		return false, false
+		return socks5Cred{}, false
 	}
-	return string(uname) == egress.PaceUser, true
+	tok, _ := egress.ScopeToken(string(pass))
+	return socks5Cred{paced: string(uname) == egress.PaceUser, token: tok}, true
 }
 
 func readSOCKS5Request(conn net.Conn, enableUDP bool) (cmd byte, atyp byte, host string, port int, rep byte) {
@@ -636,13 +679,8 @@ func writeSOCKS5Reply(conn net.Conn, rep byte, bindAddr net.Addr) error {
 	return err
 }
 
-func (s *socks5Server) dialTarget(host string, port int, targetAddr string) (net.Conn, byte) {
-	baseCtx := context.Background()
-	if s.cfg.BaseContext != nil {
-		if ctx := s.cfg.BaseContext(); ctx != nil {
-			baseCtx = ctx
-		}
-	}
+func (s *socks5Server) dialTarget(host string, port int, targetAddr string, scope ScopeFunc) (net.Conn, byte) {
+	baseCtx := s.baseContext(scope)
 	stopCtx, stopCancel := context.WithCancel(baseCtx)
 	defer stopCancel()
 	go func() {

@@ -2,9 +2,7 @@ package egress
 
 import (
 	"context"
-	"encoding/base64"
 	"net/url"
-	"strings"
 )
 
 // Bash commands reach targets through the recording proxy, outside the clients
@@ -16,33 +14,34 @@ import (
 // is paced twice. Best effort, not a security boundary: a command that ignores
 // the proxy, or drops the marker, is not paced.
 
-// PaceUser is the user and password of the marker userinfo.
+// PaceUser is the user (and, unscoped, the password) of the marker userinfo.
 const PaceUser = "artex-pace"
 
-// MarkProxyURL returns raw with the marker userinfo. raw is returned unchanged
-// when it does not parse or already carries a userinfo.
+// MarkProxyURL returns raw with the marker userinfo. A scoped URL
+// (ScopedProxyURL) keeps its scope token and takes PaceUser as its user. raw is
+// returned unchanged when it does not parse or carries another userinfo.
 func MarkProxyURL(raw string) string {
 	u, err := url.Parse(raw)
-	if err != nil || u.Host == "" || u.User != nil {
+	if err != nil || u.Host == "" {
 		return raw
 	}
-	u.User = url.UserPassword(PaceUser, PaceUser)
+	switch {
+	case u.User == nil:
+		u.User = url.UserPassword(PaceUser, PaceUser)
+	case u.User.Username() == ScopeUser:
+		pass, _ := u.User.Password()
+		u.User = url.UserPassword(PaceUser, pass)
+	default:
+		return raw
+	}
 	return u.String()
 }
 
 // IsPaceMarker reports whether a Proxy-Authorization value is Basic
 // credentials for PaceUser.
 func IsPaceMarker(proxyAuthorization string) bool {
-	scheme, enc, ok := strings.Cut(strings.TrimSpace(proxyAuthorization), " ")
-	if !ok || !strings.EqualFold(scheme, "Basic") {
-		return false
-	}
-	dec, err := base64.StdEncoding.DecodeString(strings.TrimSpace(enc))
-	if err != nil {
-		return false
-	}
-	user, _, _ := strings.Cut(string(dec), ":")
-	return user == PaceUser
+	user, _, ok := ProxyCredential(proxyAuthorization)
+	return ok && user == PaceUser
 }
 
 // Wait paces one request to hostKey under the current profile. See
