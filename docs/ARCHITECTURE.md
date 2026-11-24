@@ -37,6 +37,7 @@ numbered migrations from `db/migrations/*.sql`, recording name + SHA-256 in
 | `guard` | Hook wiring | Binds `intercept` decisions into Norma's hook registry; `NewTargetOnly` for planner/mainagent |
 | `egress` | Noise governor | Per-host token bucket, jitter, concurrency caps, 429/503 backoff; default profile is strict passthrough |
 | `llmpool` / `llmrec` | Provider pool / recorder | Rotation, health, usage + raw wire capture |
+| `otlp` | OpenTelemetry exporter | Dependency-free OTLP/HTTP-JSON counters, histograms, spans; fed per LLM call (`cmd/artex/telemetry.go`, `docs/cost-and-telemetry.md`) |
 | `mcphttp` | MCP client | HTTP/SSE transport for configured MCP servers |
 | `notify` | Outbound notifications | Email, webhook, Telegram, Feishu, DingTalk with masking and SSRF guards |
 | `report` | Deliverables | Markdown, CSV and JSON rendering of findings |

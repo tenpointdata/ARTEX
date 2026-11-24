@@ -346,50 +346,18 @@ func ParseExpID(s string) int64 {
 }
 
 // applyCostEur fills CostEur on each profile bucket from the stored per-profile
-// prices (EUR per 1M tokens). Profiles without any price keep CostEur nil. The
-// join is by profile name (llm_usage records the name, not the id); the first
-// matching profile wins, and duplicate names are a configuration error the
-// operator sees as a weird number, not a crash.
+// prices (EUR per 1M tokens). Profiles without any price keep CostEur nil.
 func applyCostEur(d *DB, out []ProfileUsage) error {
-	rows, err := d.Query(`SELECT name, COALESCE(price_input_per_m,0), COALESCE(price_output_per_m,0), COALESCE(price_cache_read_per_m,0), COALESCE(price_cache_write_per_m,0) FROM llm_profiles`)
+	prices, err := d.ProfilePrices()
 	if err != nil {
 		return err
 	}
-	defer rows.Close()
-	type prices struct{ in, outp, cr, cw float64 }
-	byName := map[string]prices{}
-	seen := map[string]bool{}
-	for rows.Next() {
-		var n string
-		var pr prices
-		if err := rows.Scan(&n, &pr.in, &pr.outp, &pr.cr, &pr.cw); err != nil {
-			return err
-		}
-		if !seen[n] {
-			byName[n] = pr
-			seen[n] = true
-		}
-	}
-	if err := rows.Err(); err != nil {
-		return err
-	}
 	for i := range out {
-		pr, ok := byName[out[i].ProfileName]
-		if !ok || (pr.in == 0 && pr.outp == 0 && pr.cr == 0 && pr.cw == 0) {
+		pr, ok := prices[out[i].ProfileName]
+		if !ok || !pr.Priced() {
 			continue
 		}
-		// InputTokens already includes both cached subsets: Norma normalizes it to
-		// input + cache read + cache write (OpenAI prompt_tokens semantics). The
-		// fresh share is therefore input minus cache reads minus cache writes;
-		// charging either subset at full input price as well bills it twice.
-		// Clamped at zero for gateways that report the buckets disjointly.
-		fresh := out[i].InputTokens - out[i].CacheReadTokens - out[i].CacheWriteTokens
-		if fresh < 0 {
-			fresh = 0
-		}
-		cost := float64(fresh)/1e6*pr.in + float64(out[i].OutputTokens)/1e6*pr.outp +
-			float64(out[i].CacheReadTokens)/1e6*pr.cr + float64(out[i].CacheWriteTokens)/1e6*pr.cw
-		c := cost
+		c := pr.Cost(out[i].InputTokens, out[i].OutputTokens, out[i].CacheReadTokens, out[i].CacheWriteTokens)
 		out[i].CostEur = &c
 	}
 	return nil
