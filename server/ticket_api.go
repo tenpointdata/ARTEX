@@ -106,6 +106,12 @@ func (s *Server) createTracker(w http.ResponseWriter, r *http.Request) {
 	if req.Config == nil {
 		req.Config = map[string]any{}
 	}
+	for _, k := range impl.SecretKeys() {
+		if v, ok := req.Config[k].(string); ok && notify.IsMasked(v) {
+			writeErr(w, 400, k+" holds the masked placeholder; enter the real credential")
+			return
+		}
+	}
 	if err := impl.Validate(req.Config); err != nil {
 		writeErr(w, 400, err.Error())
 		return
@@ -180,8 +186,10 @@ func (s *Server) updateTracker(w http.ResponseWriter, r *http.Request) {
 	if req.Enabled != nil {
 		t.Enabled = *req.Enabled
 	}
+	destChanged := false
 	if req.Config != nil {
-		merged, err := notify.PrepareConfigUpdateKeys(impl.SecretKeys(), impl.DestinationKeys(), trackerConfig(t), req.Config)
+		stored := trackerConfig(t)
+		merged, err := notify.PrepareConfigUpdateKeys(impl.SecretKeys(), impl.DestinationKeys(), stored, req.Config)
 		if err != nil {
 			writeErr(w, 400, err.Error())
 			return
@@ -190,11 +198,24 @@ func (s *Server) updateTracker(w http.ResponseWriter, r *http.Request) {
 			writeErr(w, 400, err.Error())
 			return
 		}
+		for _, k := range impl.DestinationKeys() {
+			a, _ := json.Marshal(stored[k])
+			b, _ := json.Marshal(merged[k])
+			destChanged = destChanged || string(a) != string(b)
+		}
 		t.Config, _ = json.Marshal(merged)
 	}
 	if _, err := pg.SaveTicketTracker(r.Context(), t); err != nil {
 		writeErr(w, 500, err.Error())
 		return
+	}
+	if destChanged {
+		// The stored ticket ids belong to the old destination: never read or
+		// write them in the new one. The next push creates fresh tickets.
+		if _, err := pg.DeleteFindingTicketsByTracker(r.Context(), t.ID); err != nil {
+			writeErr(w, 500, err.Error())
+			return
+		}
 	}
 	saved, err := pg.TicketTrackerByID(r.Context(), t.ID)
 	if err != nil {
@@ -271,7 +292,9 @@ func (s *Server) pushTickets(w http.ResponseWriter, r *http.Request) {
 	for _, id := range req.FindingIDs {
 		it := item{FindingID: id}
 		f, err := pg.GetFinding(id)
-		if err != nil || f == nil {
+		if err != nil {
+			it.Error = "load finding: " + err.Error()
+		} else if f == nil {
 			it.Error = "finding not found"
 		} else if it.Ticket, it.Created, err = sy.push(r.Context(), f); err != nil {
 			it.Error = err.Error()

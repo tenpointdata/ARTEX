@@ -2,7 +2,9 @@ package server
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"regexp"
 	"sort"
@@ -70,8 +72,10 @@ func ticketToStatus(st ticketing.State, current string) string {
 
 // findingDedupKey is the stable key a finding's ticket carries. An imported
 // finding reuses its import key, so the same scanner result maps to the same
-// ticket across ARTEX instances; any other finding is keyed on what it is
-// (class, name, assets), not on its row id.
+// ticket across ARTEX instances. Any other finding is keyed on its class,
+// name, assets and its own id: two findings of one class on one asset (two
+// parameters, two endpoints) are two tickets, and a lost link still finds its
+// ticket again.
 func findingDedupKey(f *db.DBFinding, importKey string) string {
 	if importKey != "" {
 		return ticketing.DedupKey("import", importKey)
@@ -82,18 +86,27 @@ func findingDedupKey(f *db.DBFinding, importKey string) string {
 	for _, id := range ids {
 		parts = append(parts, strconv.FormatInt(id, 10))
 	}
-	return ticketing.DedupKey("finding", f.VulnClass, f.Name, strings.Join(parts, ","))
+	return ticketing.DedupKey("finding", f.VulnClass, f.Name, strings.Join(parts, ","), strconv.FormatInt(f.ID, 10))
 }
 
 // ticketEvidenceMax caps the evidence copied into a ticket body.
 const ticketEvidenceMax = 8 << 10
 
-// sensitiveHeaderRe matches credential-bearing header lines in captured evidence.
-var sensitiveHeaderRe = regexp.MustCompile(`(?im)^(\s*(?:authorization|proxy-authorization|cookie|set-cookie|x-api-key|x-auth-token|api-key)\s*:\s*).*$`)
+// Credential patterns blanked in evidence copied to a ticket: header values
+// anywhere on a line (raw requests, curl -H '...', indented dumps), query or
+// form parameters, and JSON fields.
+var (
+	sensitiveHeaderRe = regexp.MustCompile(`(?i)\b((?:proxy-)?authorization|cookie|set-cookie|x-api-key|x-auth-token|x-csrf-token|api-key)(\s*:\s*)[^\r\n'"]*`)
+	sensitiveParamRe  = regexp.MustCompile(`(?i)\b((?:access_|refresh_|id_)?token|password|passwd|secret|api_?key|session(?:id)?|sid)=[^&\s'"]*`)
+	sensitiveJSONRe   = regexp.MustCompile(`(?i)("(?:(?:access_|refresh_|id_)?token|password|passwd|secret|api_?key|session(?:id)?)"\s*:\s*)"(?:[^"\\]|\\.)*"`)
+)
 
-// redactEvidence blanks credential headers and caps the text.
+// redactEvidence blanks credential material and caps the text.
 func redactEvidence(s string) string {
-	return notify.TruncateBytes(sensitiveHeaderRe.ReplaceAllString(s, "${1}[redacted]"), ticketEvidenceMax)
+	s = sensitiveHeaderRe.ReplaceAllString(s, "${1}${2}[redacted]")
+	s = sensitiveParamRe.ReplaceAllString(s, "${1}=[redacted]")
+	s = sensitiveJSONRe.ReplaceAllString(s, `${1}"[redacted]"`)
+	return notify.TruncateBytes(s, ticketEvidenceMax)
 }
 
 // ticketOptions are the server-side keys of a tracker config, next to the
@@ -180,7 +193,31 @@ func (s *ticketSyncer) key(ctx context.Context, f *db.DBFinding) (string, error)
 	return findingDedupKey(f, imp), nil
 }
 
+// scrub removes every credential of the tracker config from an adapter
+// error (raw, and base64 of "<any config value>:<secret>" for basic auth),
+// because a non-2xx response snippet is whatever the configured endpoint sent
+// back and may echo the request headers.
+func (s *ticketSyncer) scrub(err error) string {
+	msg := err.Error()
+	for _, k := range s.impl.SecretKeys() {
+		sec, _ := s.cfg[k].(string)
+		if strings.TrimSpace(sec) == "" {
+			continue
+		}
+		msg = strings.ReplaceAll(msg, sec, "[redacted]")
+		msg = strings.ReplaceAll(msg, base64.StdEncoding.EncodeToString([]byte(sec)), "[redacted]")
+		for _, v := range s.cfg {
+			if u, ok := v.(string); ok && u != "" {
+				msg = strings.ReplaceAll(msg, base64.StdEncoding.EncodeToString([]byte(u+":"+sec)), "[redacted]")
+			}
+		}
+	}
+	return notify.OneLine(msg, 300)
+}
+
 // push creates or updates the finding's ticket and records the agreed state.
+// An existing link is reconciled first, so a change made in the tracker since
+// the last sync is pulled (the tracker wins), never overwritten by a push.
 func (s *ticketSyncer) push(ctx context.Context, f *db.DBFinding) (*db.FindingTicket, bool, error) {
 	link, err := s.pg.FindingTicket(ctx, s.tracker.ID, f.ID)
 	if err != nil {
@@ -189,6 +226,12 @@ func (s *ticketSyncer) push(ctx context.Context, f *db.DBFinding) (*db.FindingTi
 	key := ""
 	var existing *ticketing.Ref
 	if link != nil {
+		if r := s.sync(ctx, link); r.Action == "error" {
+			return nil, false, errors.New(r.Error)
+		}
+		if f, err = s.pg.GetFinding(f.ID); err != nil || f == nil {
+			return nil, false, errors.New("finding disappeared during push")
+		}
 		key, existing = link.DedupKey, &ticketing.Ref{ID: link.ExternalID, URL: link.ExternalURL}
 	} else if key, err = s.key(ctx, f); err != nil {
 		return nil, false, err
@@ -196,10 +239,11 @@ func (s *ticketSyncer) push(ctx context.Context, f *db.DBFinding) (*db.FindingTi
 	t := buildTicket(f, key, s.opt)
 	ref, created, err := ticketing.Push(ctx, s.impl, s.cfg, existing, t)
 	if err != nil {
+		msg := s.scrub(err)
 		if link != nil {
-			_ = s.pg.SetFindingTicketError(ctx, link.ID, err.Error())
+			_ = s.pg.SetFindingTicketError(ctx, link.ID, msg)
 		}
-		return nil, false, err
+		return nil, false, errors.New(msg)
 	}
 	out := &db.FindingTicket{FindingID: f.ID, TrackerID: s.tracker.ID, DedupKey: key, ExternalID: ref.ID, ExternalURL: ref.URL,
 		SyncedStatus: f.Status, RemoteOpen: t.Open, RemoteResolution: string(t.Resolution)}
@@ -221,12 +265,16 @@ type ticketSyncResult struct {
 func (s *ticketSyncer) sync(ctx context.Context, link *db.FindingTicket) ticketSyncResult {
 	res := ticketSyncResult{FindingID: link.FindingID, ExternalID: link.ExternalID}
 	fail := func(err error) ticketSyncResult {
-		_ = s.pg.SetFindingTicketError(ctx, link.ID, err.Error())
-		res.Action, res.Error = "error", err.Error()
+		msg := s.scrub(err)
+		_ = s.pg.SetFindingTicketError(ctx, link.ID, msg)
+		res.Action, res.Error = "error", msg
 		return res
 	}
 	f, err := s.pg.GetFinding(link.FindingID)
-	if err != nil || f == nil {
+	if err != nil {
+		return fail(fmt.Errorf("finding %d: %w", link.FindingID, err))
+	}
+	if f == nil {
 		return fail(fmt.Errorf("finding %d: not found", link.FindingID))
 	}
 	remote, err := s.impl.State(ctx, s.cfg, ticketing.Ref{ID: link.ExternalID, URL: link.ExternalURL})
@@ -239,8 +287,12 @@ func (s *ticketSyncer) sync(ctx context.Context, link *db.FindingTicket) ticketS
 	case remoteChanged:
 		to := ticketToStatus(remote, f.Status)
 		if to != f.Status {
-			if _, found, _, err := s.pg.SetFindingStatusWithNotify(ctx, f.ID, to); err != nil || !found {
-				return fail(fmt.Errorf("set finding status: %v", err))
+			_, found, _, err := s.pg.SetFindingStatusWithNotify(ctx, f.ID, to)
+			if err != nil {
+				return fail(fmt.Errorf("set finding status: %w", err))
+			}
+			if !found {
+				return fail(fmt.Errorf("finding %d: not found", f.ID))
 			}
 		}
 		res.Action, res.From, res.To = "pulled", f.Status, to

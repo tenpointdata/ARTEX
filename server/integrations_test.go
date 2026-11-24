@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -210,6 +211,29 @@ func TestFindingRoundTripsStatusWithGitHubIssue(t *testing.T) {
 	if w.Code != 200 || !strings.Contains(w.Body.String(), `"external_id":"1"`) {
 		t.Fatalf("finding integrations: %d %s", w.Code, w.Body)
 	}
+
+	// A push right after a change in GitHub pulls it instead of overwriting it.
+	if _, _, _, err := pg.SetFindingStatusWithNotify(context.Background(), fid, db.FindingConfirmed); err != nil {
+		t.Fatal(err)
+	}
+	if r := sync(); r[0].Action != "pushed" {
+		t.Fatalf("reopen push: %+v", r)
+	}
+	gh.close(1, "not_planned", "artex:risk-accepted")
+	push()
+	if st, _ := gh.state(1); st != "closed" || status() != db.FindingRiskAccepted {
+		t.Fatalf("push overwrote a tracker change: issue=%s finding=%s", st, status())
+	}
+
+	// A destination change drops the links: the old issue numbers mean nothing in the new repo.
+	w = request("PATCH", fmt.Sprintf("/api/integrations/trackers/%d", tr.ID),
+		`{"config":{"repo":"acme/other","token":"ghp_roundtrip_secret_value"}}`)
+	if w.Code != 200 {
+		t.Fatalf("repo change: %d %s", w.Code, w.Body)
+	}
+	if links, _ := pg.FindingTicketsByTracker(context.Background(), tr.ID); len(links) != 0 {
+		t.Fatalf("links kept across a destination change: %d", len(links))
+	}
 }
 
 func TestTrackerDestinationChangeNeedsCredentials(t *testing.T) {
@@ -236,9 +260,21 @@ func TestStatusTicketMappingRoundTrips(t *testing.T) {
 	if got := ticketToStatus(ticketing.State{Open: false, Resolution: ticketing.ResFixed}, db.FindingResolved); got != db.FindingResolved {
 		t.Errorf("resolved should stay resolved, got %s", got)
 	}
-	ev := redactEvidence("GET / HTTP/1.1\nCookie: sid=abc\nAuthorization: Bearer xyz\nHost: x")
-	if strings.Contains(ev, "abc") || strings.Contains(ev, "xyz") || !strings.Contains(ev, "Host: x") {
-		t.Errorf("redaction: %q", ev)
+	ev := redactEvidence("GET /?access_token=qqq1&a=b HTTP/1.1\nCookie: sid=abc\nAuthorization: Bearer xyz\nHost: x\n" +
+		`curl -H 'Authorization: Bearer eyJcurl' -d '{"password":"pw1","user":"u"}'`)
+	for _, leak := range []string{"abc", "xyz", "qqq1", "eyJcurl", "pw1"} {
+		if strings.Contains(ev, leak) {
+			t.Errorf("redaction kept %q: %q", leak, ev)
+		}
+	}
+	if !strings.Contains(ev, "Host: x") || !strings.Contains(ev, `"user":"u"`) || !strings.Contains(ev, "a=b") {
+		t.Errorf("redaction removed too much: %q", ev)
+	}
+	impl, _ := ticketing.Get(ticketing.KindJira)
+	sy := &ticketSyncer{impl: impl, cfg: map[string]any{"email": "a@b.c", "token": "jiratok123"}}
+	basic := base64.StdEncoding.EncodeToString([]byte("a@b.c:jiratok123"))
+	if msg := sy.scrub(fmt.Errorf("HTTP 400: echo Authorization: Basic %s token jiratok123", basic)); strings.Contains(msg, "jiratok123") || strings.Contains(msg, basic) {
+		t.Errorf("scrub kept the credential: %q", msg)
 	}
 }
 

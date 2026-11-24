@@ -34,7 +34,9 @@ CREATE TABLE IF NOT EXISTS finding_tickets (
     last_error        TEXT NOT NULL DEFAULT '',
     synced_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
     created_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
-    UNIQUE (tracker_id, finding_id)
+    UNIQUE (tracker_id, finding_id),
+    -- One external ticket belongs to one finding: two findings never share (and overwrite) a ticket.
+    UNIQUE (tracker_id, external_id)
 );
 CREATE INDEX IF NOT EXISTS idx_finding_tickets_finding ON finding_tickets(finding_id);
 

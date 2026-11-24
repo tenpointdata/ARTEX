@@ -194,3 +194,14 @@ func (d *DB) SetFindingTicketError(ctx context.Context, id int64, msg string) er
 	_, err := d.ExecContext(ctx, `UPDATE finding_tickets SET last_error=$2 WHERE id=$1`, id, msg)
 	return err
 }
+
+// DeleteFindingTicketsByTracker drops every link of a tracker. Called when the
+// tracker's destination changes: the stored external ids belong to the old
+// repository/project and must never be read or written in the new one.
+func (d *DB) DeleteFindingTicketsByTracker(ctx context.Context, trackerID int64) (int64, error) {
+	res, err := d.ExecContext(ctx, `DELETE FROM finding_tickets WHERE tracker_id=$1`, trackerID)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
+}

@@ -219,6 +219,15 @@ func (s *Server) importScan(w http.ResponseWriter, r *http.Request) {
 			writeErr(w, 400, "bad task_id")
 			return
 		}
+		task, err := pg.GetTask(id)
+		if err != nil {
+			writeErr(w, 500, "load task: "+err.Error())
+			return
+		}
+		if task == nil {
+			writeErr(w, 404, "task not found")
+			return
+		}
 		req.TaskID = &id
 	}
 	raw, err := io.ReadAll(http.MaxBytesReader(w, r.Body, decodeMaxBytes))
