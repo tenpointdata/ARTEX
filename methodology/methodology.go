@@ -181,3 +181,48 @@ func Select(ms []Methodology, text string) []Methodology {
 	}
 	return out
 }
+
+// ResolveIDs maps operator-supplied methodology ids to the canonical ids of ms
+// (matched by Key, so "OWASP API Top10" names owasp-api-top10). Order is kept
+// and repeats dropped; blank entries are ignored. An id naming no methodology
+// is an error, so a typo never silently falls back to automatic selection.
+func ResolveIDs(ms []Methodology, ids []string) ([]string, error) {
+	out := make([]string, 0, len(ids))
+	seen := map[string]bool{}
+	for _, id := range ids {
+		k := Key(id)
+		if k == "" {
+			continue
+		}
+		found := ""
+		for _, m := range ms {
+			if Key(m.ID) == k {
+				found = m.ID
+				break
+			}
+		}
+		if found == "" {
+			return nil, fmt.Errorf("unknown methodology %q", strings.TrimSpace(id))
+		}
+		if !seen[found] {
+			seen[found] = true
+			out = append(out, found)
+		}
+	}
+	return out, nil
+}
+
+// Pick returns the methodologies of ms named by ids, in the order of ids. An id
+// that names none (a checklist removed since the choice was stored) is skipped.
+func Pick(ms []Methodology, ids []string) []Methodology {
+	var out []Methodology
+	for _, id := range ids {
+		for _, m := range ms {
+			if Key(m.ID) == Key(id) {
+				out = append(out, m)
+				break
+			}
+		}
+	}
+	return out
+}

@@ -2732,5 +2732,12 @@
   "Covered": "已覆盖",
   "Item": "条目",
   "Intents": "意图",
-  "No items": "无条目"
+  "No items": "无条目",
+  "Testing methodologies": "测试方法论",
+  "Failed to load methodologies": "加载方法论失败",
+  "Methodology": "方法论",
+  "Items": "条目",
+  "Chosen automatically for": "自动选用条件",
+  "None ticked: automatic. A checklist applies when the goal or description contains one of its words.": "未勾选：自动。目标或描述包含某清单的关键词时，该清单适用。",
+  "Only the ticked checklists apply to this task, whatever its goal says.": "无论目标如何描述，本任务仅适用已勾选的清单。"
 }

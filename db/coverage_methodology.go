@@ -1,15 +1,16 @@
 package db
 
 import (
+	"encoding/json"
 	"strings"
 
 	"github.com/Autumn-27/artex/methodology"
 )
 
 // Methodology coverage: the task's checklist completion against the testing
-// methodologies (methodology package) that apply to it. Applicability is derived
-// from the task's goal and description (methodology.Select), so it needs no
-// column and stays fixed for the task. The score reads three existing sources:
+// methodologies (methodology package) that apply to it. The operator may choose
+// them at creation (tasks.methodologies); otherwise they are derived from the
+// task's goal and description (methodology.Select). Either way they stay fixed. The score reads three existing sources:
 //   - coverage_ledger rows (agent_reported), matched by risk_area;
 //   - findings (machine_observed), matched by vulnclass, as "reported";
 //   - intents whose payload names a methodology_item (planner citations).
@@ -34,16 +35,25 @@ func CoverageEntryCloses(outcome, evidence, reason string) bool {
 	return false
 }
 
-// TaskMethodologies returns the built-in methodologies that apply to a task,
-// from its goal and description. None applies to a task without a match.
+// TaskMethodologies returns the built-in methodologies that apply to a task:
+// the operator's choice (tasks.methodologies) when set, else those its goal and
+// description select. None applies to an automatic task without a match.
 func (s *AssetStore) TaskMethodologies(taskID int64) ([]methodology.Methodology, error) {
-	var goal, desc string
-	if err := s.db.QueryRow(`SELECT COALESCE(goal,''), COALESCE(description,'') FROM tasks WHERE id=$1`, taskID).Scan(&goal, &desc); err != nil {
+	var goal, desc, chosenJSON string
+	if err := s.db.QueryRow(`SELECT COALESCE(goal,''), COALESCE(description,''),
+COALESCE(array_to_json(methodologies)::text,'[]') FROM tasks WHERE id=$1`, taskID).Scan(&goal, &desc, &chosenJSON); err != nil {
+		return nil, err
+	}
+	var chosen []string
+	if err := json.Unmarshal([]byte(chosenJSON), &chosen); err != nil {
 		return nil, err
 	}
 	all, err := methodology.All()
 	if err != nil {
 		return nil, err
+	}
+	if len(chosen) > 0 {
+		return methodology.Pick(all, chosen), nil
 	}
 	return methodology.Select(all, goal+"\n"+desc), nil
 }

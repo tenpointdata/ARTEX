@@ -67,6 +67,7 @@ import type {
   LLMTask,
   MCPServer,
   MCPTool,
+  MethodologySummary,
   MissingSkill,
   ModelTokenStat,
   NotificationChannel,
@@ -312,6 +313,7 @@ export const api = {
     seedFirstIntent?: boolean;
     planHeartbeatSeconds?: number;
     coverageEnabled?: boolean;
+    methodologies?: string[]; // empty = automatic (derived from the goal and description)
     interceptRules?: AssetInterceptRuleInput[];
     credentials?: TaskCredentialInput[];
   }) =>
@@ -328,9 +330,11 @@ export const api = {
       seed_first_intent: input.seedFirstIntent ?? false,
       plan_heartbeat_seconds: input.planHeartbeatSeconds ?? 0, // 0 = the backend normalizes to the default 600 (10min)
       coverage_enabled: input.coverageEnabled ?? true, // on by default; false disables the asset coverage feature
+      methodologies: input.methodologies ?? [],
       intercept_rules: input.interceptRules ?? [], // task-level asset interception rules
       credentials: input.credentials ?? [], // test accounts declared at creation; an empty password = the agent generates and records it (#3)
     }),
+  methodologies: () => get<MethodologySummary[]>("/methodologies").then((r) => arr(r)),
   taskCategories: () => get<{ categories: TaskCategory[] }>("/task-categories").then((r) => arr(r.categories)),
   updateTask: (id: string, input: { name?: string; pinned?: boolean }) => patch<Task>(`/tasks/${id}`, input),
   renameTask: (id: string, name: string) => patch<Task>(`/tasks/${id}`, { name }),

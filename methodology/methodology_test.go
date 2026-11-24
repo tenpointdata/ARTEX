@@ -117,3 +117,24 @@ func TestEvaluate(t *testing.T) {
 		t.Fatalf("pending caps at n: %+v", p)
 	}
 }
+
+func TestResolveIDsAndPick(t *testing.T) {
+	all, err := All()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := ResolveIDs(all, []string{" OWASP API Top10 ", "", "owasp-wstg", "owasp_api_top10"})
+	if err != nil || len(got) != 2 || got[0] != "owasp-api-top10" || got[1] != "owasp-wstg" {
+		t.Fatalf("ResolveIDs = %v, %v", got, err)
+	}
+	if _, err := ResolveIDs(all, []string{"owasp-nope"}); err == nil {
+		t.Fatal("unknown id accepted")
+	}
+	if got, err := ResolveIDs(all, nil); err != nil || got == nil || len(got) != 0 {
+		t.Fatalf("empty ResolveIDs = %#v, %v", got, err)
+	}
+	picked := Pick(all, []string{"owasp-wstg", "gone", "owasp-api-top10"})
+	if len(picked) != 2 || picked[0].ID != "owasp-wstg" || picked[1].ID != "owasp-api-top10" {
+		t.Fatalf("Pick = %+v", picked)
+	}
+}

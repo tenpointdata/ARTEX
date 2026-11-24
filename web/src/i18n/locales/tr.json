@@ -2732,5 +2732,12 @@
   "Covered": "Kapsandı",
   "Item": "Öğe",
   "Intents": "Niyetler",
-  "No items": "Öğe yok"
+  "No items": "Öğe yok",
+  "Testing methodologies": "Test metodolojileri",
+  "Failed to load methodologies": "Metodolojiler yüklenemedi",
+  "Methodology": "Metodoloji",
+  "Items": "Öğeler",
+  "Chosen automatically for": "Otomatik seçildiği durumlar",
+  "None ticked: automatic. A checklist applies when the goal or description contains one of its words.": "Hiçbiri işaretli değil: otomatik. Hedef veya açıklama kelimelerinden birini içerdiğinde bir kontrol listesi uygulanır.",
+  "Only the ticked checklists apply to this task, whatever its goal says.": "Hedef ne derse desin, bu göreve yalnızca işaretli kontrol listeleri uygulanır."
 }
