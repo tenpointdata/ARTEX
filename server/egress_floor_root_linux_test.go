@@ -3,6 +3,7 @@
 package server
 
 import (
+	"context"
 	"net"
 	"net/http"
 	"os"
@@ -99,7 +100,7 @@ func TestAgentEgressFloorRefusesMetadataAsRoot(t *testing.T) {
 	}
 
 	for range 2 { // a second start converges on the same rules
-		st := installAgentEgressFloor("linux", p, ownerfw.ExecRunner)
+		st := installAgentEgressFloor("linux", p, ownerfw.ExecRunner).Status
 		if len(st.Installed) == 0 || st.Installed[0] != ownerfw.IPv4 {
 			t.Fatalf("floor not installed: %s", st)
 		}
@@ -131,22 +132,12 @@ func TestAgentEgressFloorRefusesMetadataAsRoot(t *testing.T) {
 
 }
 
-// removeEgressFloor deletes the floor chain and its OUTPUT jumps for p's owners.
-func removeEgressFloor(t *testing.T, p ExecPrivilege) {
+// removeEgressFloor deletes the floor chain and every OUTPUT jump to it.
+func removeEgressFloor(t *testing.T, _ ExecPrivilege) {
 	t.Helper()
-	r, err := agentEgressRules(p, "")
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, bin := range []string{"iptables", "ip6tables"} {
-		if _, err := exec.LookPath(bin); err != nil {
-			continue
+	for _, fam := range []ownerfw.Family{ownerfw.IPv4, ownerfw.IPv6} {
+		if _, err := exec.LookPath(fam.Binary()); err == nil {
+			_, _, _ = ownerfw.Remove(context.Background(), ownerfw.ExecRunner, fam, egressFloorChain)
 		}
-		for _, o := range r.Owners {
-			for exec.Command(bin, "-w", "-D", "OUTPUT", "-m", "owner", "--uid-owner", o, "-j", egressFloorChain).Run() == nil {
-			}
-		}
-		_ = exec.Command(bin, "-w", "-F", egressFloorChain).Run()
-		_ = exec.Command(bin, "-w", "-X", egressFloorChain).Run()
 	}
 }

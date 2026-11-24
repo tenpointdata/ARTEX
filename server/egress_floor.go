@@ -1,14 +1,12 @@
 package server
 
 import (
-	"context"
-	"errors"
 	"fmt"
 	"log"
 	"net/netip"
 	"os"
+	"slices"
 	"strings"
-	"time"
 
 	"github.com/Autumn-27/artex/intercept"
 	"github.com/Autumn-27/artex/ownerfw"
@@ -47,8 +45,8 @@ const egressAllowEnv = "ARTEX_EGRESS_ALLOW"
 // egressFloorChain is the floor's iptables chain. egress.sh uses ARTEX_EGRESS.
 const egressFloorChain = "ARTEX_AGENT_FLOOR"
 
-// egressFloorTimeout bounds all iptables calls of one start.
-const egressFloorTimeout = 30 * time.Second
+// egressFloorTag is the comment on the floor's OUTPUT jumps.
+const egressFloorTag = "artex-floor"
 
 // metadataProbeAddrs are the instance-metadata endpoints the self-test dials as
 // the executor: AWS/GCP/Azure/OpenStack, AWS over IPv6, Alibaba, Azure
@@ -105,27 +103,54 @@ func (s EgressFloorStatus) String() string {
 }
 
 // agentEgressRules are the floor's rules for p: refuse the metadata prefixes to
-// every uid an agent process can run as. DNS passes, since a native host's
-// resolver can be a link-local address (AWS 169.254.169.253) or the Azure
-// WireServer; no metadata service answers HTTP on port 53. allow are operator
-// exceptions (egressAllowEnv).
-func agentEgressRules(p ExecPrivilege, allow string) (ownerfw.Rules, error) {
+// every uid an agent process can run as. allow are operator exceptions
+// (egressAllowEnv); entries that are not an address come back in bad. resolv is
+// the text of /etc/resolv.conf: DNS (port 53) passes to a nameserver in a
+// refused range, since a native host's resolver can be link-local (AWS
+// 169.254.169.253, GCP 169.254.169.254) or the Azure WireServer. Port 53 to any
+// other refused address is refused like the rest.
+func agentEgressRules(p ExecPrivilege, allow, resolv string) (r ownerfw.Rules, bad []string, err error) {
 	owners := []string{execIDString(p.UID), execIDString(p.mcpUID())}
 	if p.Range.Enabled() {
 		owners = append(owners, p.Range.String())
 	}
 	pass, bad := parsePrefixList(allow)
-	for _, b := range bad {
-		log.Printf("[egress] WARNING: %s: %q is not an IP address or CIDR; ignored by the agent egress floor", egressAllowEnv, b)
+	refuse := intercept.MetadataPrefixes()
+	var dns []ownerfw.Port
+	for _, ns := range refusedNameservers(resolv, refuse) {
+		dns = append(dns, ownerfw.Port{Proto: "udp", Port: 53, To: ns}, ownerfw.Port{Proto: "tcp", Port: 53, To: ns})
 	}
-	r := ownerfw.Rules{
+	r = ownerfw.Rules{
 		Chain:     egressFloorChain,
+		Tag:       egressFloorTag,
 		Owners:    owners,
 		Pass:      pass,
-		PassPorts: []ownerfw.Port{{Proto: "udp", Port: 53}, {Proto: "tcp", Port: 53}},
-		Refuse:    intercept.MetadataPrefixes(),
+		PassPorts: dns,
+		Refuse:    refuse,
 	}
-	return r, r.Validate()
+	return r, bad, r.Validate()
+}
+
+// refusedNameservers are the resolv.conf nameservers that fall in refuse, as
+// host prefixes, without duplicates.
+func refusedNameservers(resolv string, refuse []netip.Prefix) []netip.Prefix {
+	var out []netip.Prefix
+	for _, line := range strings.Split(resolv, "\n") {
+		f := strings.Fields(line)
+		if len(f) < 2 || f[0] != "nameserver" {
+			continue
+		}
+		a, err := netip.ParseAddr(f[1])
+		if err != nil {
+			continue
+		}
+		a = a.WithZone("").Unmap()
+		h := netip.PrefixFrom(a, a.BitLen())
+		if slices.ContainsFunc(refuse, func(p netip.Prefix) bool { return p.Contains(a) }) && !slices.Contains(out, h) {
+			out = append(out, h)
+		}
+	}
+	return out
 }
 
 // parsePrefixList reads space or comma separated CIDRs and IPs. Entries that are
@@ -151,61 +176,4 @@ func metadataReachedHint(floor EgressFloorStatus) string {
 		return floor.String() + ", so another rule lets the packet through: check " + egressAllowEnv + " and the host's other OUTPUT rules, " + accept
 	}
 	return floor.String() + ". Install iptables and run the server as root with CAP_NET_ADMIN (Docker: cap_add: NET_ADMIN), " + accept
-}
-
-// InstallAgentEgressFloor installs the floor on Linux with the privilege drop on
-// and logs the result. run executes iptables (ownerfw.ExecRunner in production).
-// It never fails the start itself: the self-test decides, from what an executor
-// process can reach.
-func InstallAgentEgressFloor(goos string, p ExecPrivilege, run ownerfw.Runner) EgressFloorStatus {
-	st := installAgentEgressFloor(goos, p, run)
-	switch {
-	case len(st.Installed) == 0:
-		log.Printf("[egress] WARNING: %s; agent processes are not refused the cloud instance-metadata and link-local addresses unless another filter does it", st)
-	case st.Problem != "":
-		log.Printf("[egress] WARNING: %s", st)
-	default:
-		log.Printf("[egress] %s for uids %s", st, strings.Join(egressOwners(p), ", "))
-	}
-	return st
-}
-
-func egressOwners(p ExecPrivilege) []string {
-	r, _ := agentEgressRules(p, "")
-	return r.Owners
-}
-
-func installAgentEgressFloor(goos string, p ExecPrivilege, run ownerfw.Runner) EgressFloorStatus {
-	switch {
-	case goos != "linux":
-		return EgressFloorStatus{Problem: "it needs Linux (iptables owner match)"}
-	case !p.Enabled:
-		return EgressFloorStatus{Problem: "the privilege drop is off, so agent processes have no uid of their own to filter"}
-	case strings.TrimSpace(os.Getenv(egressFilterEnv)) == "0":
-		return EgressFloorStatus{Problem: egressFilterEnv + "=0 turns it off"}
-	}
-	rules, err := agentEgressRules(p, os.Getenv(egressAllowEnv))
-	if err != nil {
-		return EgressFloorStatus{Problem: err.Error()}
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), egressFloorTimeout)
-	defer cancel()
-	var st EgressFloorStatus
-	if err := ownerfw.Apply(ctx, run, rules.Plan(ownerfw.IPv4)); err != nil {
-		return EgressFloorStatus{Problem: egressFloorHint(err)}
-	}
-	st.Installed = append(st.Installed, ownerfw.IPv4)
-	if err := ownerfw.Apply(ctx, run, rules.Plan(ownerfw.IPv6)); err != nil {
-		st.Problem = "ipv6 rules not installed (" + egressFloorHint(err) + "); fd00:ec2::254 and fe80::/10 stay reachable if the host has IPv6"
-	} else {
-		st.Installed = append(st.Installed, ownerfw.IPv6)
-	}
-	return st
-}
-
-func egressFloorHint(err error) string {
-	if errors.Is(err, ownerfw.ErrNoBinary) {
-		return err.Error() + " (install iptables)"
-	}
-	return err.Error() + " (missing CAP_NET_ADMIN, or no owner match in the kernel?)"
 }

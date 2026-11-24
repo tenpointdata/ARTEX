@@ -224,7 +224,7 @@ func run() int {
 	// escape is set; elsewhere the server starts degraded and says so.
 	selfTest := server.IsolationSelfTest(priv, server.IsolationTargets{
 		DataDir: *dataDir, KeyDir: keyDir, ConfigPath: cfgPath, SkillDir: skillDir, DSN: dsn,
-		MetadataDial: server.MetadataProbeAddrs(), EgressFloor: egressFloor,
+		MetadataDial: server.MetadataProbeAddrs(), EgressFloor: egressFloor.Status,
 	})
 	isolation, err := server.EnforceIsolation(runtime.GOOS, priv, selfTest, *devNoIsolation)
 	if err != nil {
@@ -236,6 +236,8 @@ func run() int {
 	defer stop()
 	ctx, shutdown := shutdownContext(sigCtx)
 	defer shutdown(agent.AbortShutdown)
+	// Keep the floor in force: a firewall reload while the server runs can flush it.
+	go egressFloor.Watch(ctx, server.EgressFloorCheckInterval)
 
 	mgr, err := server.NewManager(*dataDir, *proxy)
 	if err != nil {

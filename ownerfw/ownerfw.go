@@ -1,15 +1,17 @@
-// Package ownerfw builds and applies packet-filter rules that match local
+// Package ownerfw builds and keeps packet-filter rules that match local
 // processes by their uid (iptables/ip6tables -m owner --uid-owner) and refuse
 // their connections to given destinations. It knows nothing of the product that
-// uses it: the caller names the chain, the owners, the destinations to refuse and
-// the exceptions.
+// uses it: the caller names the chain, the tag, the owners, the destinations to
+// refuse and the exceptions.
 //
-// A Rules value is turned into a Plan per address family: a list of Steps that
-// Apply runs through an iptables binary. Applying is idempotent. The chain is
-// created or flushed and rebuilt, and the OUTPUT jump for each owner is inserted
-// at the top only when it is missing, so a second start converges on the same
-// rules. A jump left from an earlier start for an owner that is gone stays: it
-// refuses more, never less.
+// Rules are installed in one iptables-restore --noflush transaction per address
+// family (Keeper.Apply): the chain is rebuilt and every OUTPUT jump to it is
+// replaced by one jump per current owner, inserted at the top of OUTPUT and
+// tagged with a comment. The kernel never sees an empty or half-built chain,
+// and a jump for an owner that is no longer current (an old uid range) is
+// removed. Keeper.Drift then tells when something else (a firewalld or ufw
+// reload, a netfilter-persistent restore, a rule inserted above the jumps)
+// changed the result, so the caller can re-apply.
 //
 // Only locally generated packets of the owners pass through the chain; the
 // traffic of every other uid (root included) is untouched.
@@ -19,9 +21,10 @@ import (
 	"fmt"
 	"net/netip"
 	"strconv"
+	"strings"
 )
 
-// Family is an address family, with the binary that filters it.
+// Family is an address family, with the binaries that filter it.
 type Family int
 
 const (
@@ -37,6 +40,11 @@ func (f Family) Binary() string {
 	return "iptables"
 }
 
+// RestoreBinary is the iptables-restore binary of the family.
+func (f Family) RestoreBinary() string { return f.Binary() + "-restore" }
+
+func (f Family) String() string { return "ipv" + strconv.Itoa(int(f)) }
+
 func (f Family) holds(p netip.Prefix) bool {
 	if f == IPv6 {
 		return p.Addr().Is6()
@@ -44,45 +52,41 @@ func (f Family) holds(p netip.Prefix) bool {
 	return p.Addr().Is4()
 }
 
-// Port is a transport port that passes the chain whatever its destination.
+// Port is a transport port that passes the chain. To limits it to one
+// destination; the zero prefix means every destination.
 type Port struct {
 	Proto string // "tcp" or "udp"
 	Port  uint16
+	To    netip.Prefix
 }
 
 // Rules is what one chain enforces for a set of owners.
 type Rules struct {
 	// Chain is the name of the chain the rules live in (at most 28 characters).
+	// Every OUTPUT rule that jumps to it belongs to these Rules.
 	Chain string
+	// Tag is the comment put on the OUTPUT jumps, so an operator reading
+	// iptables -S sees whose they are. Letters, digits, '-', '_' and '.' only.
+	Tag string
 	// Owners are uids or inclusive uid ranges, as --uid-owner takes them:
 	// "10001" or "20000-29999".
 	Owners []string
 	// Pass are destinations that leave the chain before any refusal (RETURN):
 	// operator exceptions. Rules in other chains still apply to them.
 	Pass []netip.Prefix
-	// PassPorts leave the chain before any refusal too, for every destination.
+	// PassPorts leave the chain before any refusal too.
 	PassPorts []Port
 	// Refuse are the destinations the owners are refused (REJECT).
 	Refuse []netip.Prefix
 }
 
-// Step is one iptables invocation (arguments after the binary). When it fails
-// and Fallback is set, Fallback runs instead and its result counts.
-type Step struct {
-	Args     []string
-	Fallback []string
-}
-
-// Plan is the ordered steps that install Rules for one family.
-type Plan struct {
-	Family Family
-	Steps  []Step
-}
-
 // Validate reports a Rules value that iptables would refuse or misread.
 func (r Rules) Validate() error {
-	if r.Chain == "" || len(r.Chain) > 28 {
-		return fmt.Errorf("ownerfw: chain name %q must be 1 to 28 characters", r.Chain)
+	if r.Chain == "" || len(r.Chain) > 28 || strings.ContainsAny(r.Chain, " \t\n\"'") {
+		return fmt.Errorf("ownerfw: chain name %q must be 1 to 28 characters without spaces or quotes", r.Chain)
+	}
+	if !validTag(r.Tag) {
+		return fmt.Errorf("ownerfw: tag %q must be 1 to 64 letters, digits, '-', '_' or '.'", r.Tag)
 	}
 	if len(r.Owners) == 0 {
 		return fmt.Errorf("ownerfw: no owner to filter")
@@ -100,13 +104,23 @@ func (r Rules) Validate() error {
 	return nil
 }
 
+func validTag(s string) bool {
+	if s == "" || len(s) > 64 {
+		return false
+	}
+	for _, c := range s {
+		if !(c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '-' || c == '_' || c == '.') {
+			return false
+		}
+	}
+	return true
+}
+
 // validOwner accepts canonical decimal uids and ranges: iptables reads a
 // leading zero as octal.
 func validOwner(s string) bool {
-	for i := 0; i < len(s); i++ {
-		if s[i] == '-' {
-			return i > 0 && validUID(s[:i]) && validUID(s[i+1:]) && atoi(s[:i]) <= atoi(s[i+1:])
-		}
+	if lo, hi, ok := strings.Cut(s, "-"); ok {
+		return validUID(lo) && validUID(hi) && atoi(lo) <= atoi(hi)
 	}
 	return validUID(s)
 }
@@ -118,25 +132,28 @@ func validUID(s string) bool {
 
 func atoi(s string) uint64 { n, _ := strconv.ParseUint(s, 10, 32); return n }
 
-// Plan returns the steps that install r for family f. Destinations of the other
-// family are left out.
-func (r Rules) Plan(f Family) Plan {
-	p := Plan{Family: f}
-	add := func(args ...string) { p.Steps = append(p.Steps, Step{Args: append([]string{"-w"}, args...)}) }
-	p.Steps = append(p.Steps, Step{Args: []string{"-w", "-N", r.Chain}, Fallback: []string{"-w", "-F", r.Chain}})
-	for _, o := range r.Owners {
-		match := []string{"OUTPUT", "-m", "owner", "--uid-owner", o, "-j", r.Chain}
-		p.Steps = append(p.Steps, Step{
-			Args:     append([]string{"-w", "-C"}, match...),
-			Fallback: append([]string{"-w", "-I", "OUTPUT", "1"}, match[1:]...),
-		})
-	}
-	for _, port := range r.PassPorts {
-		add("-A", r.Chain, "-p", port.Proto, "--dport", strconv.Itoa(int(port.Port)), "-j", "RETURN")
+// jumpSpec is the OUTPUT rule (after "-A OUTPUT"/"-I OUTPUT 1") for one owner.
+func (r Rules) jumpSpec(owner string) string {
+	return "-m owner --uid-owner " + owner + " -m comment --comment " + r.Tag + " -j " + r.Chain
+}
+
+// chainSpecs are the chain's rules for family f, in order. Destinations of the
+// other family are left out.
+func (r Rules) chainSpecs(f Family) []string {
+	var out []string
+	for _, p := range r.PassPorts {
+		if p.To.IsValid() && !f.holds(p.To) {
+			continue
+		}
+		dst := ""
+		if p.To.IsValid() {
+			dst = "-d " + p.To.Masked().String() + " "
+		}
+		out = append(out, dst+"-p "+p.Proto+" --dport "+strconv.Itoa(int(p.Port))+" -j RETURN")
 	}
 	for _, d := range r.Pass {
 		if f.holds(d) {
-			add("-A", r.Chain, "-d", d.Masked().String(), "-j", "RETURN")
+			out = append(out, "-d "+d.Masked().String()+" -j RETURN")
 		}
 	}
 	// A refused destination is matched twice: as the packet's destination and as
@@ -145,9 +162,106 @@ func (r Rules) Plan(f Family) Plan {
 	// redirects 169.254.170.2 to a loopback agent) would otherwise pass.
 	for _, d := range r.Refuse {
 		if f.holds(d) {
-			add("-A", r.Chain, "-d", d.Masked().String(), "-j", "REJECT")
-			add("-A", r.Chain, "-m", "conntrack", "--ctorigdst", d.Masked().String(), "-j", "REJECT")
+			out = append(out, "-d "+d.Masked().String()+" -j REJECT",
+				"-m conntrack --ctorigdst "+d.Masked().String()+" -j REJECT")
 		}
 	}
-	return p
+	return out
+}
+
+// Render is what r installs for family f, as iptables-restore lines without the
+// table header: the OUTPUT jumps in order, then the chain's rules. Two Rules
+// with the same Render install the same thing.
+func (r Rules) Render(f Family) string {
+	var b strings.Builder
+	for _, o := range r.Owners {
+		b.WriteString("-A OUTPUT " + r.jumpSpec(o) + "\n")
+	}
+	for _, s := range r.chainSpecs(f) {
+		b.WriteString("-A " + r.Chain + " " + s + "\n")
+	}
+	return b.String()
+}
+
+// restoreInput is the iptables-restore --noflush transaction that installs r for
+// f, given the current OUTPUT rules (iptables -S OUTPUT). Declaring the chain
+// creates or flushes it inside the transaction; every OUTPUT rule that jumps to
+// the chain is deleted and the current owners' jumps are inserted at the top.
+func (r Rules) restoreInput(f Family, output []string) string {
+	var b strings.Builder
+	b.WriteString("*filter\n:" + r.Chain + " - [0:0]\n")
+	for _, l := range output {
+		if isJumpTo(l, r.Chain) {
+			b.WriteString("-D OUTPUT" + strings.TrimPrefix(l, "-A OUTPUT") + "\n")
+		}
+	}
+	for i := len(r.Owners) - 1; i >= 0; i-- { // inserted at 1 in reverse: final order is Owners
+		b.WriteString("-I OUTPUT 1 " + r.jumpSpec(r.Owners[i]) + "\n")
+	}
+	for _, s := range r.chainSpecs(f) {
+		b.WriteString("-A " + r.Chain + " " + s + "\n")
+	}
+	b.WriteString("COMMIT\n")
+	return b.String()
+}
+
+// removeInput deletes every OUTPUT jump to chain and, when it exists, the chain.
+func removeInput(chain string, output []string, chainExists bool) string {
+	var b strings.Builder
+	b.WriteString("*filter\n")
+	for _, l := range output {
+		if isJumpTo(l, chain) {
+			b.WriteString("-D OUTPUT" + strings.TrimPrefix(l, "-A OUTPUT") + "\n")
+		}
+	}
+	if chainExists {
+		b.WriteString("-F " + chain + "\n-X " + chain + "\n")
+	}
+	b.WriteString("COMMIT\n")
+	return b.String()
+}
+
+// fields splits an iptables -S line, honouring double quotes.
+func fields(l string) []string {
+	var out []string
+	var cur strings.Builder
+	in, quoted := false, false
+	for i := 0; i < len(l); i++ {
+		c := l[i]
+		switch {
+		case c == '"':
+			in, quoted = !in, true
+		case c == '\\' && in && i+1 < len(l):
+			i++
+			cur.WriteByte(l[i])
+		case (c == ' ' || c == '\t') && !in:
+			if quoted || cur.Len() > 0 {
+				out = append(out, cur.String())
+			}
+			cur.Reset()
+			quoted = false
+		default:
+			cur.WriteByte(c)
+		}
+	}
+	if quoted || cur.Len() > 0 {
+		out = append(out, cur.String())
+	}
+	return out
+}
+
+// flagValue is the token after flag in f, or "".
+func flagValue(f []string, flag string) string {
+	for i := 0; i+1 < len(f); i++ {
+		if f[i] == flag {
+			return f[i+1]
+		}
+	}
+	return ""
+}
+
+// isJumpTo reports whether an iptables -S OUTPUT line jumps to chain.
+func isJumpTo(l, chain string) bool {
+	f := fields(l)
+	return len(f) > 1 && f[0] == "-A" && f[1] == "OUTPUT" && (flagValue(f, "-j") == chain || flagValue(f, "--jump") == chain)
 }
