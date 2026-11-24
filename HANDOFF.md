@@ -107,7 +107,12 @@ Operator-facing changes:
   `ej/20261124-110649-dbd854`, stacked on PR #13's branch): stdio MCP servers, the Playwright browser
   included, are spawned per run with their capture-proxy `--proxy-server`/proxy env rewritten to a
   per-run loopback **scope relay** (`traffic/scope_relay.go`, `Manager.scopeMCPProxy`), so browser
-  dials carry the run's scope; listing tools from the UI (no run) still uses the global rules. Operators' own clients keep the global rules. go-mitmproxy's keep-alive host pinning is worked around
+  dials carry the run's scope; listing tools from the UI (no run) still uses the global rules. **2026-11-24**
+  (card `c-a1c0fc`, branch `ej/20261124-114610-cae888`, which carries c-15b39d): a relay serves at most 256
+  connections at once; a prepareMCP closer is released at once when its MCP fails to start; tests cover
+  the hook (PG), two concurrent scopes, the keep-alive host change, wss, an in-flight request across the
+  relay's close (tombstone), the cap, and a real headless Chrome (opt-in `ARTEX_TEST_CHROME`). A full
+  live task is `c-517c2d`. Operators' own clients keep the global rules. go-mitmproxy's keep-alive host pinning is worked around
   (`unpinHostChange`; upstream report `c-9b48b7`). The global-egress-proxy bypass is accepted and
   documented (`docs/OPS.md` §6). `scripts/verify.sh` passes.
   Block rules apply even with the gate off. Fuzzy allow rules match on name and address boundaries.
@@ -150,7 +155,8 @@ the newer main (`-exec-uid-range`, #18).
    Done = govulncheck clean.
 3. *(unclaimed)* — **SEC: upstream-gate residuals** (M), card `c-5a6f96`: task-scoped rules on proxy
    dials, go-mitmproxy keep-alive host pinning, and the global-egress-proxy bypass. Done = a test or a decision for each.
-   Then **SEC: scope-relay follow-ups** (S), card `c-a1c0fc` (tests + a live Playwright check).
+   Then **SEC: ended scope keeps open upstreams** (S), card `c-5d033e`. Done = ForgetScope closes the
+   scope's client connections, by a test, or a recorded acceptance.
 4. *(unclaimed)* — **SEC: logout revocation** (S), card `c-a0af33`. Done = a token replayed after
    logout or a password change gets 401, by a test.
 5. *(unclaimed)* — **SEC: Docker Desktop named volumes** (S), card `c-775dc2`. Done = `docker compose up`
@@ -168,6 +174,8 @@ the newer main (`-exec-uid-range`, #18).
   File GitHub issues only if the repo goes private or you want them public.
 - Decide engagement-governance direction (E5): how formal the rules-of-engagement/authorization
   artifact should be for your use.
+- **SEC: live Playwright scope-relay check** (S), card `c-517c2d`: a real task with capture on and the
+  seeded Playwright MCP. Done = the browser's dials show the task scope and an out-of-scope host is refused.
 
 **Blocked**
 - Nothing blocked.
@@ -205,7 +213,8 @@ Card ids in brackets:
 - **E7** [`c-d60149`] Distributed/remote workers (queue-backed intents) for larger engagements; Helm chart.
 - **E8** [`c-5487e8`] Planner/worker evaluation suite (regression targets, prompt-version A/B via the benchmark gate).
 - **E9** [`c-73af97`] Frontend/UX pass (tables over cards, fewer-clicks triage workflow, live engagement dashboard).
-- **SEC** [`c-a1c0fc`] Scope-relay follow-ups: PG test of the prepareMCP hook, concurrent/keep-alive/WebSocket relay tests, per-relay connection cap, live Playwright check.
+- **SEC** [`c-5d033e`] An ended scope leaves already-open upstream connections usable (dial-time check).
+- **SEC** [`c-517c2d`] Live Playwright task check of the scope relay (human/bench: needs an LLM key and an authorized target).
 - **SEC** [`c-3b9252`] Capture-proxy upstream connection reuse across scopes (rules checked only at dial time).
 - **SEC** [`c-9b48b7`] Report go-mitmproxy keep-alive host pinning upstream; drop `unpinHostChange` once fixed.
 - **SEC** [`c-dadc14`] Verify the security branch on Linux root, in Docker and against Postgres, plus the web typecheck.
@@ -232,6 +241,11 @@ Card ids in brackets:
   key go-mitmproxy hands `upstreamFor` (`traffic/scope.go`). A client that cannot send a credential
   (Chromium's `--proxy-server`) gets a scope relay instead (`traffic/scope_relay.go`): the binding is
   the relay's outbound address, stored before any byte is forwarded, and it wins over a credential.
+- The scope is checked when the proxy dials upstream, not per request: after `ForgetScope`, an upstream
+  a keep-alive connection already holds stays usable until that connection closes (relays close theirs
+  at run end; credential clients that outlive a run do not: `c-5d033e`).
+- `server` tests on macOS: `TestManagerSOCKS5UDPOptInAndAssetBlockRuleDropsDatagram` fails because
+  127.0.0.2 is not configured on the host (`bind: can't assign requested address`). That's environmental.
 
 - **Guardrails are invariants.** Scope/target gate, interception gate, budgets, noise governor,
   untrusted-output boundary, audit trail — never weaken/bypass/route around them. `RSI.md`
