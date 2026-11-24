@@ -785,6 +785,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/logs/stream", s.streamLogs)
 
 	mux.HandleFunc("GET /api/tasks", s.listTasks)
+	mux.HandleFunc("GET /api/me/companies", s.myCompanies)
+	mux.HandleFunc("GET /api/me/tasks", s.myTasks)
 	mux.HandleFunc("POST /api/tasks", s.createTask)
 	mux.HandleFunc("GET /api/skill-gaps", s.skillGaps)
 	mux.HandleFunc("GET /api/task-categories", s.pgListTaskCategories)
