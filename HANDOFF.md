@@ -78,6 +78,12 @@ is tested against Postgres 17 on macOS; see `docs/GOVERNANCE.md`.
   - `TestGateOffTaskIsUnchanged`, which also fails on base `1abe24f` (card `c-3157b4`);
   - `TestConnectWithoutPasswordRealPG`, because the local Postgres uses trust auth;
   - the SOCKS5 UDP test, because macOS cannot bind 127.0.0.2.
+- **Head-lock contention fixed (card `c-ba9f64`).** Migration **0018** recreates the three audit row
+  triggers as `DEFERRABLE INITIALLY DEFERRED` constraint triggers, so `audit_chain_head` is locked
+  only at commit. A task archive no longer stalls gate decisions or logins, and the
+  write-then-lock deadlock is gone. 0018 rather than 0017 because the E1 branch
+  (`ej/20261124-083744-02fa3c`) takes 0017. Tests: `db/audit_chain_concurrency_test.go` (both
+  concurrency tests fail without 0018). This branch merged the E5 branch in, so it carries E5 too.
 - **Not done.** There is no web UI for E5 yet (card `c-869050`). The login page still assumes `ARTEX`.
 
 **2026-11-23** — Fixes for the High and Medium findings from the 2026-11-23 security audit are on the
@@ -108,20 +114,18 @@ Linux-root tests, the Docker egress iptables rules, the Postgres-backed tests an
 ## Triage (next handful)
 
 **Agents' lane**
-1. *(unclaimed)* — **E5: audit-chain head-lock contention** (M), card `c-ba9f64`. Done = archive concurrent
-   with gate decisions doesn't stall; verify still passes.
-2. *(unclaimed)* — **E5: bind client_read to a client** (M), card `c-5b5421`. Done = PG test: bound user
+1. *(unclaimed)* — **E5: bind client_read to a client** (M), card `c-5b5421`. Done = PG test: bound user
    sees only its company.
-3. *(unclaimed)* — **E5: web UI for users / authorization / chain** (M), card `c-869050`.
-4. *(unclaimed)* — **SEC: gorilla/websocket bump, GO-2026-6278** (XS), card `c-c10f2c`; needs network.
+2. *(unclaimed)* — **E5: web UI for users / authorization / chain** (M), card `c-869050`.
+3. *(unclaimed)* — **SEC: gorilla/websocket bump, GO-2026-6278** (XS), card `c-c10f2c`; needs network.
    Done = govulncheck clean.
-5. *(unclaimed)* — **SEC: upstream-gate residuals** (M), card `c-5a6f96`: task-scoped rules on proxy
+4. *(unclaimed)* — **SEC: upstream-gate residuals** (M), card `c-5a6f96`: task-scoped rules on proxy
    dials, go-mitmproxy keep-alive host pinning, and the global-egress-proxy bypass. Done = a test or a decision for each.
-6. *(unclaimed)* — **E1 Client-grade reporting & deliverables** (M). Turn `report/` into
+5. *(unclaimed)* — **E1 Client-grade reporting & deliverables** (M). Turn `report/` into
    CVSS/EPSS-scored, remediation-bearing, standards-mapped deliverables (OWASP ASVS/WSTG, MITRE
    ATT&CK). Done = a report export with per-finding CVSS vector + remediation + framework tags,
    covered by tests. Card `c-8f9cca`.
-7. *(unclaimed)* — **E4 Methodology-driven coverage** (M), card `c-c0bb07`. Extend the coverage ledger to score
+6. *(unclaimed)* — **E4 Methodology-driven coverage** (M), card `c-c0bb07`. Extend the coverage ledger to score
    coverage against a codified methodology checklist, not only asset touch. Done = planner can
    read a methodology and the coverage graph shows checklist completion.
 
@@ -161,7 +165,7 @@ Card ids in brackets:
 - **E3** [`c-d25ff9`] Loop-B lesson library graduation + Loop-C benchmark gate per the `RSI.md` contract (owner-approval, immutable surfaces).
 - **E4** [`c-c0bb07`] Methodology-driven coverage (OWASP WSTG / API Top 10 as structured checklists).
 - **E5** [`c-669406`] Engagement governance. The backend is done on `ej/20261124-055929-bd2253`. Follow-ups:
-  `c-ba9f64` (head-lock contention), `c-5b5421` (client binding), `c-869050` (UI), `c-f4115c` (lifecycle gaps).
+  `c-5b5421` (client binding), `c-869050` (UI), `c-f4115c` (lifecycle gaps).
 - **TEST** [`c-3157b4`] `TestGateOffTaskIsUnchanged` fails on main with Postgres (also fails before E5).
 - **E6** [`c-cb0093`] Cost/observability dashboard + OpenTelemetry export, building on existing context telemetry.
 - **E7** [`c-d60149`] Distributed/remote workers (queue-backed intents) for larger engagements; Helm chart.
@@ -222,6 +226,12 @@ Card ids in brackets:
   limited. The audit chain is fed by DB row triggers (atomic with every writer, present and future),
   and the hashed payload is stored as text so the bytes are hashed exactly. Users' roles are read from
   the DB on every request, not from the token, so revocation is immediate.
+
+- **2026-11-24** — Audit head-lock contention (`c-ba9f64`): fixed with deferred constraint triggers
+  (migration 0018) rather than reordering the archive's deletes (which fixes one caller only) or an
+  unchained staging table plus a sequencer (which leaves a window where committed writes are not yet
+  chained, and adds a worker). Entries stay atomic with their writes; the head becomes the last lock a
+  transaction takes. Accepted costs: chain order is commit order, and the actor is `artex.actor` at commit.
 
 ## Deltas
 
