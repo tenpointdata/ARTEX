@@ -59,6 +59,12 @@ See `docs/ARCHITECTURE.md` for the code-level map. Summary:
 
 ## Current state
 
+**2026-11-24 (c-75c593)** — The benchmark subject instance (`docker-compose.bench.yml`) now builds from a
+clean clone: production `Dockerfile`, a sibling Postgres, named volumes, committed `bench/.env.example`
+with `ARTEX_RSI_LESSONS=off`. Verified on Docker Desktop arm64: `up --build` brings both containers up,
+isolation self-test passes, egress filter installed, UI 200, `ARTEX_RSI_LESSONS=off` in the container.
+No benchmark run was made against it.
+
 **2026-11-23** — Fixes for the High and Medium findings from the 2026-11-23 security audit are on
 `main` (PR #1, branch `ej/20261123-145205-6a3af6`); the Linux/Docker verification fixes come from
 `ej/20261123-152406-fccff3`. It covers audit findings #1–#16 except as listed under Open work.
@@ -190,7 +196,11 @@ the newer main (`-exec-uid-range`, #18).
   open http://localhost:8787, setup token via `docker compose logs artex | grep "Setup token"`.
 - **Verify (reproduces CI):** `scripts/verify.sh` (fast set, no Docker); `--full` adds `go test -race`
   + web static build; `--security` runs `govulncheck ./...`.
-- **Benchmark harness:** `docker-compose.bench.yml` + `scripts/benchmark`.
+- **Benchmark harness:** `scripts/benchmark` against the subject instance `docker-compose.bench.yml`
+  (`cp bench/.env.example bench/.env`, set `ARTEX_PG_PASSWORD` + an LLM key, then
+  `docker compose -f docker-compose.bench.yml up --build -d`; `ARTEX_BENCH_PORT=18787` when a production
+  instance holds 8787). Builds from the production `Dockerfile`, own Postgres and named volumes,
+  `ARTEX_RSI_LESSONS=off`. Details in `scripts/benchmark/README.md` ("Subject instance").
 - **Container egress/login check:** after `docker compose up`, run
   `scripts/docker-egress-probe.sh <artex container> [host port] [LAN url]`, then set the admin
   password and run `scripts/docker-login-probe.js` inside the container (usage in its header).
@@ -264,6 +274,13 @@ Card ids in brackets:
 
 ## Decisions
 
+- **2026-11-24** — c-75c593: the bench subject instance builds from the production `Dockerfile` instead
+  of a separate `Dockerfile.bench`, so the benchmark measures the shipped image and there is one image
+  definition. Postgres is a sibling service (not baked in), data/keys are named volumes (Docker Desktop
+  bind mounts fail the isolation self-test), and it is a bridge network with `127.0.0.1` ports instead of
+  the old `network_mode: host` (no port clashes, works on Docker Desktop). Host-published corpora are
+  reached as `host.docker.internal`; the egress filter still denies that to agents until the operator
+  sets `ARTEX_EGRESS_ALLOW` in `bench/.env` — documented, not defaulted, since it opens host services.
 - **2026-11-23** — c-dadc14: the security branch's always-on metadata check resolves each name the
   platform dials (gate on or off); `TestGateOffTaskIsUnchanged` now asserts one lookup per platform
   connection instead of none, since this is the intended behaviour, not a regression. The isolation
@@ -344,6 +361,9 @@ Card ids in brackets:
 - **2026-11-24 07:59 MST** · claude-code · `h-6bba55` — Board card c-f89815 is fixed. **Next:** Reconcile TestGateOffTaskIsUnchanged with the c-3157b4 fix when it lands: the http tool now makes one dial lookup with the gate off.
 - **2026-11-24 06:49 MST** · claude-code · `h-7dc82c` — E5 engagement governance backend. **Next:** c-ba9f64 (audit head-lock contention), c-5b5421 (bind client_read to a client), c-869050 (web UI incl. **Issues:** opened #c-3157b4, #c-5b5421, #c-869050, #c-ba9f64, #c-f4115c.
 - **2026-11-24 06:21 MST** · claude-code · `h-9348ac` — E2 backend landed (card c-6def05 → review): package ticketing (GitHub/Jira/DefectDojo over notify.Do with masking + SSRF guard + stable dedup key), two-way finding↔ticket status sync, package scanimport (Nmap, Nuclei, ZAP, Burp, SARIF) and an import API that… **Next:** c-597eb6: web UI for trackers and imports.
+- **2026-11-24 06:17 MST** · claude-code · `h-537f2b` — c-8d54d5 done: the capture proxy verifies upstream TLS per host. **Next:** Run `ARTEX_PG_DSN=… go test ./db -run ActiveTaskScopeRulesPG`.
+- **2026-11-24 05:18 MST** · claude-code · `h-5a3839` — c-5a6f96 is done; follow-up cards c-eb32cc and c-9b48b7 are open. **Next:** c-eb32cc: scope the chat and conversation agents, the custom HTTP tools and the transparent listener.
+- **2026-11-23 21:08 MST** · claude-code · `h-43cc9e` — c-775dc2: docker-compose.yml and docker-compose.ghcr.yml now keep /app/data, /app/keys and /app/skills in named volumes, so the stock `docker compose up` starts on Docker Desktop with the isolation self-test passing. **Next:** c-965b0e: Docker's `restart: unless-stopped` still restarts the container after an exit 78.
 <!-- /composite:deltas -->
 
 _(written by `merge_handoff`)_

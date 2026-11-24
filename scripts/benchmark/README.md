@@ -17,6 +17,29 @@ benchmark harness (Apache-2.0).
 | `ground_truth/<corpus>.json` | Version-stamped ground truth (component + class + mechanism, deliberately coarse) |
 | `benchmark-results/` | Output (gitignored): one directory per run with `report.md` + `results.json` |
 
+## Subject instance
+
+The instance under test is `docker-compose.bench.yml` at the repository root. It
+builds from the production `Dockerfile` (the benchmark measures the shipped
+image) and runs its own Postgres and named volumes for data and keys, separate from any production
+instance on the host:
+
+```bash
+cp bench/.env.example bench/.env     # set ARTEX_PG_PASSWORD and an LLM key
+docker compose -f docker-compose.bench.yml up --build -d
+docker compose -f docker-compose.bench.yml logs artex-bench | grep "Setup token"
+```
+
+`bench/.env.example` sets `ARTEX_RSI_LESSONS=off`, so held-out runs measure the
+prompts under test and not the lesson library. The runner can mint its token
+from the server's key: `docker compose -f docker-compose.bench.yml cp
+artex-bench:/app/keys/jwt.key bench/jwt.key`, then `ARTEX_JWT_KEY=bench/jwt.key`
+(gitignored). When port 8787 is taken, set `ARTEX_BENCH_PORT` (and
+`ARTEX_BENCH_PROXY_PORT`) in the shell and point `ARTEX_BASE` at it. A corpus
+published on the host is reached as `--target-host host.docker.internal`, which
+the egress filter denies to agents until `bench/.env` allows that one address
+(`ARTEX_EGRESS_ALLOW`, see the comment there).
+
 ## Scoring
 
 Every ground-truth entry is matched against the scanner's findings by an
