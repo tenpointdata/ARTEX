@@ -1,6 +1,6 @@
 # HANDOFF.md — ARTEX
 
-**Last updated:** 2026-11-24 16:09 MST, by claude-code: E7 (c-d60149) built, in review: -role all|control|worker. Earlier hand-offs are under Deltas and in `ej handoff log`.
+**Last updated:** 2026-11-24 17:05 MST, by claude-code: c-18f7a8 (E7 smaller gaps, in review): browser MCP relay on workers, remote finding wake-ups, proxy scope token required for every non-loopback client, rule-revision bump in the write transaction; noise-governor floor decided against. Earlier hand-offs are under Deltas and in `ej handoff log`.
 
 > Single entry point for whoever picks this up next (any agent or human), with no access to the
 > originating conversation. Read this first, then the sections of the code it points at.
@@ -134,114 +134,32 @@ switches between them and reads each one's findings and report; all 51 `/api` re
 username. Browser-tested as admin, reviewer and client_read against a real backend. Open: `c-92bb52`,
 `c-7c4715`, `c-601ec6`.
 
-**2026-11-24 (c-d25ff9, E3)** — The `RSI.md` Loop C benchmark gate and Loop B lesson graduation are built,
-flag off (`ARTEX_RSI_LOOP`, default off, read per request). Pure core `rsi/` (search-space allowlist:
-`prompt_body` for goals/planner/worker and `lesson`; immutable and git-reviewed surfaces refused;
-annealed budget 4,2,1,1…; `Evaluate` recomputes per-gate and paired results from raw E8 arm records,
-binds them to the exact body sha / lesson set, refuses proposed-from targets, net regressions and
-gains on fewer than 2 targets). API `/api/rsi/*` (`server/rsi_loop.go`); migration **0020**
-(`rsi_proposals`, `rsi_proposal_evidence`, append-only `rsi_adoption_log`). Adoption = owner
-password + newest passing evidence id + evidence baseline equal to the live prompt; it appends an
-`agent_prompts` version; rollback is a pointer change (refused if an owner edited since, open
-with the flag off). `ARTEX_RSI_LESSONS` gains `adopted` (only graduated lessons) and `bench` (a
-pinned set, `PUT /api/rsi/bench-lessons`). This branch merges the unmerged E8 suite branch
-(`ej/20261124-084655-ccdab2`); harness gains lesson arms and `scripts/benchmark/rsi_submit.py`.
-An adversarial review (opus) found real-upload breakage (string task ids) and replay/forgery
-paths; fixed here: task ledger across proposals, `suite_run` invariant, 3 uploads per proposal,
-crashed candidate runs count as losses, rendered + normalized marker checks, ≤4 open proposals
-with forward-only rounds, split agent lock, lesson block sha and unedited-role shas re-checked at
-adoption. Remaining findings: `c-0d277f`. Verified: `go test ./rsi`, the RSI DB and server tests
-against Postgres 16, 65 benchmark Python tests, `scripts/verify.sh`. Not verified: any live suite run through the gate (`c-772190`); no UI
-(`c-936308`).
+**2026-11-24** — **E2 integrations** (backend `c-6def05`, UI `c-597eb6`, follow-ups `c-2d91eb`, all in review)
+are on branch `ej/20261124-150516-d78c96`. It merges the UI branch `ej/20261124-132955-7aef3f`, which carries
+the backend `ej/20261124-055326-6bcfa9`, so landing it lands all of E2. See `docs/integrations.md`.
+- **Findings out:** package `ticketing` (GitHub Issues, Jira, DefectDojo) goes through `notify.Do` (the SSRF
+  guard and redaction). Tracker configs are sealed and masked, and a destination change needs the credentials again.
+  `/api/integrations/trackers` has CRUD, `push` and `sync`. Status round-trips, and the tracker wins a conflict.
+- **Scanner data in:** package `scanimport` reads Nmap, Nuclei, ZAP, Burp and SARIF. `POST /api/integrations/imports`
+  writes assets with provenance and unverified POE-0 findings (`finding_import_sources`), and never edits on re-import.
+  `GET /api/integrations/imports?limit=&offset=` returns `{imports, total}`.
+- **UI:** System → Integrations (the trackers table and a masked-credential sheet) and Scanner imports (format
+  detection, Past imports with a pager). Each import's New findings count links to
+  `/function/findings?import_id=N`. `import_id` is in the shared findings filter (`db.FindingFilter.ImportID`),
+  so it applies to the list, groups, asset tree and export, and the page shows a chip that clears it.
+  The findings bulk bar and the detail page have Push to tracker; the detail has a Tickets card.
+- **RBAC (with E5):** `GET /api/exploration/findings/{id}/integrations` needs `read`, not `client_read`.
+  Tracker create/edit/delete need `admin`, the same as notification channels. Push, sync and import need `operate`.
+  The E2 pages do not yet gate their controls by role (`c-119206`).
+- **Browser e2e:** `scripts/e2e/integrations.sh` sets up a throwaway Postgres, the backend, a Next production
+  build and Playwright, then runs `integrations-e2e.js` against `fake-github.js`. It passed 24 checks
+  locally on 2026-11-24. It is not a CI job yet (`c-1198a2`, after c-cc25b6).
+- Migration `0015_integrations.sql` is unreleased, and its checksum is enforced, so do not edit it. Fix forward.
+- Local `./server` failures that are environment, not code: `TestConnectWithoutPasswordRealPG` (trust-auth Postgres)
+  and the SOCKS5 test that needs a `127.0.0.2` alias.
 
-**2026-11-24 (c-c0bb07, E4)** — Methodology-driven coverage: OWASP WSTG 4.2 (97 tests) and the OWASP
-API Security Top 10 2023 are typed checklists in `methodology/` (data in `methodology/data/*.json`,
-embedded and validated). A task's applicable checklists come from its goal and description (no
-column). `db/coverage_methodology.go` scores them from the coverage ledger, findings (vulnclass)
-and intents citing an item (`payload.methodology_item`). The planner gets a `[Methodology coverage]`
-block each round, and `add_intent` takes `methodology_item`, which is validated and stored as the
-canonical item id. `GET /api/tasks/{id}/coverage` returns `methodologies`, and the task overview's
-coverage card shows a filterable table of the items. Verified by the methodology, agent and
-db unit tests, a Postgres integration test (`TestMethodologyCoverage`), `tsc` and `scripts/verify.sh`.
-The UI was not checked in a browser.
-
-**2026-11-24 (c-75c593)** — The benchmark subject instance (`docker-compose.bench.yml`) now builds from a
-clean clone: production `Dockerfile`, a sibling Postgres, named volumes, committed `bench/.env.example`
-with `ARTEX_RSI_LESSONS=off`. Verified on Docker Desktop arm64: `up --build` brings both containers up,
-isolation self-test passes, egress filter installed, UI 200, `ARTEX_RSI_LESSONS=off` in the container.
-No benchmark run was made against it.
-
-**2026-11-24 — E5 engagement governance (card `c-669406`)** is on `main` (#31); see `docs/GOVERNANCE.md`.
-Roles `admin`/`operator`/`reviewer`/`client_read` over the JWT (`artex_users`, `/api/users`, policy in
-`server/rbac_policy.go`, enforced in `requireAuth`; `ARTEX` is the break-glass admin). The per-task
-authorization artifact is enforced only inside the target gate (`intercept/authorization.go`). `audit_chain`
-is hash-chained by deferred row triggers (migrations 0016, 0018); `/api/intercept/history/chain[/verify]`.
-With `ARTEX_PG_DSN`, `go test ./...` fails only `TestGateOffTaskIsUnchanged` (`c-3157b4`),
-`TestConnectWithoutPasswordRealPG` (trust auth) and the macOS SOCKS5 UDP test.
-
-**2026-11-24 — client_read bound to companies (card `c-5b5421`, in review)** is on branch
-`ej/20261124-110647-182fa9`. That branch merged the E5 branch (PR #16) in, so it carries E5 too.
-- A `client_read` user sees only the companies in `artex_user_companies` (migration **0019**, audited at
-  commit). Admins set them with `GET/PUT /api/users/{id}/companies`. An unbound client gets 403.
-- `server/client_scope.go`: every route open to `client_read` has a binder that runs after the role
-  check. Findings routes go through the #425 company filter with `StrictCompany`, which ignores
-  agent-added `task_scope` rows. Tasks and ids outside the binding answer 404. A route without a binder
-  is refused, and `TestClientBindersCoverClientRoutes` enforces that. The test found
-  `findings/{id}/traffic` and its body route open to clients without a binder, so both are now bound.
-- A client's report counts only its own companies' assets, and its `/api/stats` drops the global
-  traffic and asset totals. `findings/retests/active` now needs `read`.
-- Tests: `server/client_scope_pg_test.go`, checked by mutation. `go test ./db ./server` with PG passes
-  except `TestConnectWithoutPasswordRealPG` (trust auth) and the SOCKS5 UDP test (macOS). verify.sh passes.
-- **Migration order:** 0016 (E5), 0018, 0019 (this branch), with E1 holding 0017. The loader refuses a
-  pending version older than an applied one, so renumber E1 above 0019 if it lands later.
-
-**2026-11-23** — Fixes for the High and Medium findings from the 2026-11-23 security audit are on
-`main` (PR #1, branch `ej/20261123-145205-6a3af6`); the Linux/Docker verification fixes come from
-`ej/20261123-152406-fccff3`. It covers audit findings #1–#16 except as listed under Open work.
-Verified 2026-11-23 (card `c-dadc14`, done):
-- `go vet ./...` + `go test ./...` **as root on Linux** (golang:1.26.11-bookworm, arm64) with
-  `ARTEX_PG_DSN` set: all packages ok, including the `*AsRoot` executor/isolation tests,
-  `TestExecHomePerRunDirAsRoot` and the MCP uid-10002 split. Two test fixes were needed (commit
-  `fc8c3f9`): the isolation probe could not exec the `go test` binary from its 0700 build dir (also
-  broken on main), and `TestGateOffTaskIsUnchanged` still expected zero lookups with the gate off.
-- Docker egress: through the real `docker-compose.yml` (NET_ADMIN) on a slim image of the same
-  runtime base, `[artex] egress: installed` is logged, `-m owner`/`-m addrtype` load on bookworm's
-  nf_tables iptables 1.8.9, and the executor is refused for 169.254.169.254, 100.100.100.200, the
-  gateway, host.docker.internal (root reaches the host service) and :8787 on every local address,
-  while a LAN router, another container and the internet stay reachable. The full image gives the
-  same results (2026-11-24, `c-a6891b`, below).
-- Web: `npm ci` and `npx tsc --noEmit` clean. `npm run lint` fails with 84 errors, all already on main
-  and none in the changed files (`c-834a5a`). Headless Chromium: setup, login, Sign out over the
-  HttpOnly SameSite=Strict cookie work and `document.cookie` is empty, **but a token copied before
-  logout stays valid for 7 days** (`c-a0af33`).
-- The stock compose cannot start on Docker Desktop for Mac: bind mounts ignore permissions, so the
-  isolation self-test fails closed (also on main; `c-775dc2`). Use named volumes there.
-
-Operator-facing changes from that audit (unsandboxed-start refusal, TLS on non-loopback binds, and more): `docs/handoff/2026-11-23-security-audit-operator-changes.md`.
-
-**2026-11-24: full Docker image verified (card `c-a6891b`).** The complete image (bbot, chromium,
-Playwright) built from `1abe24f` with the committed Dockerfile on Docker Desktop arm64 in 34 min. The
-bbot layer's own dry-run grep passed: trufflehog installed cleanly this time, with no ERRR. Run through
-`docker-compose.yml` with named volumes, it logs `[artex] egress: installed for uid 10001 (ipv4)…(ipv6)`
-and the isolation self-test passes. Checked with `scripts/docker-egress-probe.sh` (new): the executor
-gets REJECT on 169.254.169.254, 127.0.0.1:8787, the container IP's :8787 and host.docker.internal; root
-reaches all of them except metadata, which Docker Desktop doesn't serve (timeout). Both reach the LAN
-router and example.com. `scripts/docker-login-probe.js` (new, uses the image's Playwright) passes
-login, HttpOnly + SameSite=Strict cookie, token hidden from scripts, Sign out → /login and 401. Replaying
-the pre-logout cookie still gets 200 because revocation (`c-a0af33`) is not on main yet. Not re-run on
-the newer main (`-exec-uid-range`, #18).
-
-**2026-11-24: E8 evaluation suite** (card `c-5487e8`) is in `scripts/benchmark`. `eval_suite.py run` runs a
-baseline and a candidate prompt arm over a held-out suite. Both arms share one stamp: model chain, schedule
-seed, per-task budget, judge, and content-hashed ground truth. Runs go one at a time and the arms alternate in
-an order drawn from the seed. The output is per-gate passes/n for `detected`, `component`, `class`, `keywords`,
-`proof` and `flag_captured`, with Wilson and Newcombe intervals, a paired gained/lost table and cost per arm.
-`compare` refuses two results whose stamps differ. Arms change only the editable `goals`/`planner`/`worker`
-body, through the versioned prompt API, and the starting bodies are restored afterwards. Suites:
-`suites/heldout-v1.json` (Juice Shop v20.4.0, DVGA 2.2.0, DrostBench 005…095) and a disjoint
-`suites/dev-v1.json`. New ground truth: `ground_truth/dvga.json` (v2, hand-verified 2026-11-24 against DVGA tag 2.2.0 commit `a961308`; card `c-085c80` done, see Decisions). `run_bench.py` now exposes
-`build_parser`/`prepare`/`run` and stamps `/api/tasks/{id}/outcome`. Unit-tested (15 new tests,
-`scripts/verify.sh` passes); never yet run live (card `c-f1518c`).
+Older entries (E3, E4 coverage, bench subject, E5 governance, client binding, security audit, full Docker
+image, E8 eval suite) moved to `docs/handoff/2026-11-24-current-state-archive.md`.
 
 ## Triage (next handful)
 
@@ -263,6 +181,8 @@ body, through the versioned prompt API, and the starting bodies are restored aft
    CVSS/EPSS-scored, remediation-bearing, standards-mapped deliverables (OWASP ASVS/WSTG, MITRE
    ATT&CK). Done = a report export with per-finding CVSS vector + remediation + framework tags,
    covered by tests. Card `c-8f9cca`.
+8. *(unclaimed)* — **E2 UI: gate integrations controls by role** (S), card `c-119206`. Done = as reviewer
+   and as client_read, no E2 control the server refuses is shown, and the finding detail has no 403.
 
 - *(unclaimed)* — **RSI gate hardening** (M), card `c-0d277f`: server-side per-task arm ledger, suite
   pre-registration, adopted-lesson retire sync. Done = Postgres tests for each.
@@ -290,7 +210,8 @@ body, through the versioned prompt API, and the starting bodies are restored aft
   notify) suit how operators work.
 
 **Blocked**
-- Nothing blocked.
+- **E2 browser e2e as a CI job** (S), card `c-1198a2`: blocked on c-cc25b6's SHA-pinned ci.yml landing. Done = a
+  `web-e2e` job runs `scripts/e2e/integrations.sh` on pull requests and fails when the import filter is broken.
 
 ## Set up / run / test / deploy
 
@@ -306,6 +227,9 @@ body, through the versioned prompt API, and the starting bodies are restored aft
   docker-compose.yml -f docker-compose.distributed.yml up -d --build`. See `docs/DISTRIBUTED.md`.
 - **Verify (reproduces CI):** `scripts/verify.sh` (fast set, no Docker); `--full` adds `go test -race`
   + web static build; `--security` runs `govulncheck ./...`.
+- **Browser e2e (E2 integrations):** `scripts/e2e/integrations.sh`. It needs Go, Node, and initdb/pg_ctl,
+  or `ARTEX_E2E_PG_DSN` set to an empty database. It installs Playwright unless it resolves on `NODE_PATH`.
+  `ARTEX_E2E_KEEP=1` keeps the logs and screenshots. Ports are set with `ARTEX_E2E_{API,UI,PG}_PORT`.
 - **Benchmark harness:** `scripts/benchmark` against the subject instance `docker-compose.bench.yml`
   (`cp bench/.env.example bench/.env`, set `ARTEX_PG_PASSWORD` + an LLM key, then
   `docker compose -f docker-compose.bench.yml up --build -d`; `ARTEX_BENCH_PORT=18787` when a production
@@ -325,7 +249,10 @@ Composite ARTEX board, not as GitHub issues, because the repo is public (decisio
 Card ids in brackets:
 
 - **E1** [`c-8f9cca`] Client-grade reporting & deliverables (scoring, remediation, framework mappings, branded export).
-- **E2** [`c-6def05`] Finding/ticketing integrations out (Jira, GitHub issues, DefectDojo) and more ingest in (Nuclei, Nmap, ZAP/Burp, Semgrep).
+- **E2** [`c-6def05`] Backend, UI (`c-597eb6`) and UI follow-ups (`c-2d91eb`) are done, in review on `ej/20261124-150516-d78c96` (see Current state). Follow-ups:
+  [`c-119206`] role-gate the E2 UI controls; [`c-1198a2`] run `scripts/e2e/integrations.sh` in CI (after c-cc25b6);
+  [`c-da9198`] scheduled sync plus a per-tracker lock; [`c-ea60a0`] move agent `scan_ingest` onto
+  `scanimport`, normalize default ports, and settle two dedup edge cases.
 - **E3** [`c-d25ff9`] — gate built (in review). Follow-ups: hardening `c-0d277f`, UI `c-936308`, first live run `c-772190`, proposer/critic `c-c89f5b`.
 - **E4** [`c-c0bb07`] Methodology-driven coverage: landed 2026-11-24 (see Current state). Follow-ups:
   [`c-ca2bd0`] an operator-chosen methodology per task (landed, in review; gaps `c-aed5fd`); [`c-ed937d`] checklist completion in the report export (after E1).
@@ -438,6 +365,19 @@ Card ids in brackets:
   and claims nothing without a live control node or while a `role=all` node shares the database.
   Migration **0023** — renumber if another branch lands 0023 first.
 
+- **2026-11-24 c-2d91eb (E2 follow-ups):**
+  - This branch merges the unmerged E2 UI branch (which carries the backend) instead of waiting, as c-597eb6
+    did. Landing it lands E2.
+  - `import_id` matches the findings an import **created** (`finding_import_sources.import_id`). A later
+    import that only matched one by dedup key does not claim it, so "its new findings" is exact.
+  - Migration 0015 was not edited for an `import_id` index: its checksum is enforced, so any database that
+    applied it would refuse to start. The filter is an `EXISTS` on the `finding_id` primary key.
+  - The import filter lives in the URL, not in the saved list preferences, so it never sticks to a later visit.
+  - E2 under E5: a finding's tickets and raw scanner record are operator data (`read`). Trackers are data
+    sinks, so their CRUD needs `admin`, the same as notification channels.
+  - The e2e uses a production `next build` + `next start` (its `/api` rewrite points at the backend) rather
+    than embedding the UI, so the runner never writes into `server/webui/dist`.
+
 - **2026-11-24** — c-13e86c: SSE streams are same-origin only, with no cross-origin override. The cookie is
   the only credential a script-free EventSource can present, and the backend's CORS answers `*`, which a
   credentialed request may not use. Credentialed CORS for dev origins was rejected: cookies are not
@@ -461,6 +401,27 @@ Card ids in brackets:
   governance client lives in `web/src/lib/governance-api.ts` (not `api.ts`, already over 600 lines) and
   reuses its `http()`. The UI hides by permission only as a convenience; the server's policy stays the
   enforcement. The Dashboard is hidden for `client_read` because its widgets call operator-wide routes.
+
+- **2026-11-24 E2 UI (c-597eb6):**
+  - The UI branch merges the unmerged E2 backend branch rather than waiting for it, because the UI is
+    useless without the routes. Only HANDOFF.md conflicted.
+  - Tracker field layout lives in the web (`tracker-fields.ts`); only `secret_keys` comes from the
+    server. This is the same split Notifications uses, so the shared masked-field component now serves both.
+  - Push has no confirmation: it is idempotent (an existing ticket is updated, never duplicated).
+    Delete keeps its confirmation.
+  - Integrations and Imports are System sidebar entries (the settings area), each one click away.
+- **2026-11-24 E2:**
+  - Imported findings are scanner claims: `unverified`, POE 0, `worker=import:<tool>`. A known dedup
+    key leaves the existing finding untouched.
+  - Imports register no notification events, so bulk uploads do not flood the channels.
+  - Scanner free text goes only into quoted evidence; summary and name come from typed tokens.
+  - When both sides changed, the ticket sync lets the tracker win, because remediation is tracked
+    there.
+  - A tracker destination change drops its ticket links.
+  - Evidence goes into a ticket only when `include_evidence` is on, and then with credentials
+    redacted.
+  - Migration 0015 was edited in place before any release, because it was never on main.
+
 - **2026-11-24** — E3 (c-d25ff9): "one explicit owner action" is an owner-password step-up on adopt,
   because on single-user ARTEX a bearer token minted from `jwt.key` (what the loop holds) is the same
   identity as the owner. The server recomputes every verdict from raw records rather than accepting the
@@ -604,6 +565,8 @@ Card ids in brackets:
 - **2026-11-24 13:36 MST** · claude-code · `h-59bfe6` — c-9b48b7: confirmed go-mitmproxy keep-alive host pinning is still unfixed through v1.9.5 (= upstream main 07e0ca5), and no upstream report exists. **Next:** Ian: approve filing (human lane).
 - **2026-11-24 13:26 MST** · claude-code · `h-4efcbc` — c-965b0e done and c-775dc2 landed: merged the unmerged branch ej/20261123-192351-fab3f4 (named volumes, exit 78, start.sh idle hold e1d7a27) and added an image HEALTHCHECK that is unhealthy while start.sh holds on an isolation refusal (root-only marker /run/a… **Next:** Run docker-compose.bind.yml on a real Linux host (human lane).
 - **2026-11-24 13:25 MST** · me · `h-7df71f` — c-7e0087 (now in review): each ARTEX server's agent egress floor has its own chain, ARTEX_AGENT_FLOOR_<exec uid>, with jumps tagged artex-floor-<exec uid>. **Next:** Land c-b73542 (ej/20261124-113533-f16c00), then c-02e554 (ej/20261124-122709-d136a7), then this branch.
+- **2026-11-24 13:13 MST** · claude-code · `h-7925fc` — c-9ca57a built and verified on branch ej/c-9ca57a-llm-cost-rbac (pushed, commit 7d6b4cf, no PR), stacked on the client_read branch ej/20261124-110647-182fa9 (carries E5 / PR #16) and E6 (PR #28), because neither has landed on main. **Next:** After PR #16, the c-5b5421 branch and PR #28 land: merge main into ej/c-9ca57a-llm-cost-rbac (only HANDOFF.md should conflict; the stacked branch kept stale HANDOFF copies), run scripts/verify.sh and…
+- **2026-11-24 13:03 MST** · claude-code · `h-ce7d36` — E3 (c-d25ff9, now in review): built the RSI.md Loop C benchmark gate and Loop B lesson graduation, with ARTEX_RSI_LOOP off by default. **Next:** c-0d277f (hardening: a server-side per-task arm ledger, suite pre-registration, sync for retired adopted lessons). **Issues:** opened #c-0d277f, #c-772190, #c-936308, #c-c89f5b.
 <!-- /composite:deltas -->
 
 _(written by `merge_handoff`)_

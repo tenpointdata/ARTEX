@@ -186,8 +186,12 @@ type FindingFilter struct {
 	VerificationStatus string // verified | unverified | blocked | not_assessed | false_positive
 	VulnClass          string
 	TaskID             string // task id (in string form; empty/invalid = do not filter by task)
-	Query              string // fuzzy search keyword over name/class/summary/evidence/report body
-	Sort               string // "severity" | "time"
+	// ImportID narrows to the findings a scanner import created (finding_import_sources).
+	// A finding an import only matched by dedup key belongs to the import that created it.
+	// Empty/invalid = do not filter by import.
+	ImportID string
+	Query    string // fuzzy search keyword over name/class/summary/evidence/report body
+	Sort     string // "severity" | "time"
 	// AssetScope is a node key of the asset tree (a:<id> / c:<id> / r:<domain> /
 	// __none__); selecting a node means selecting its whole subtree.
 	// Empty = do not filter by asset.
@@ -247,6 +251,13 @@ func (f FindingFilter) where() (string, []any) {
 	} else if tid, err := strconv.ParseInt(f.TaskID, 10, 64); err == nil && tid > 0 {
 		args = append(args, tid)
 		conds = append(conds, fmt.Sprintf("f.task_id = $%d", len(args)))
+	}
+	// Import filter: finding_import_sources is keyed by finding_id, so the
+	// per-row probe is a primary-key lookup.
+	if iid, err := strconv.ParseInt(f.ImportID, 10, 64); err == nil && iid > 0 {
+		args = append(args, iid)
+		conds = append(conds, fmt.Sprintf(
+			"EXISTS (SELECT 1 FROM finding_import_sources fis WHERE fis.finding_id = f.id AND fis.import_id = $%d)", len(args)))
 	}
 	// Asset filter: asset_ids is a jsonb array; @> ANY(...) can use
 	// idx_findings_asset_ids.

@@ -1,0 +1,112 @@
+# ARTEX — older Current state entries (moved from HANDOFF.md, 2026-11-24)
+
+These were true when written; HANDOFF.md Current state and Deltas carry what is current.
+
+**2026-11-24 (c-d25ff9, E3)** — The `RSI.md` Loop C benchmark gate and Loop B lesson graduation are built,
+flag off (`ARTEX_RSI_LOOP`, default off, read per request). Pure core `rsi/` (search-space allowlist:
+`prompt_body` for goals/planner/worker and `lesson`; immutable and git-reviewed surfaces refused;
+annealed budget 4,2,1,1…; `Evaluate` recomputes per-gate and paired results from raw E8 arm records,
+binds them to the exact body sha / lesson set, refuses proposed-from targets, net regressions and
+gains on fewer than 2 targets). API `/api/rsi/*` (`server/rsi_loop.go`); migration **0020**
+(`rsi_proposals`, `rsi_proposal_evidence`, append-only `rsi_adoption_log`). Adoption = owner
+password + newest passing evidence id + evidence baseline equal to the live prompt; it appends an
+`agent_prompts` version; rollback is a pointer change (refused if an owner edited since, open
+with the flag off). `ARTEX_RSI_LESSONS` gains `adopted` (only graduated lessons) and `bench` (a
+pinned set, `PUT /api/rsi/bench-lessons`). This branch merges the unmerged E8 suite branch
+(`ej/20261124-084655-ccdab2`); harness gains lesson arms and `scripts/benchmark/rsi_submit.py`.
+An adversarial review (opus) found real-upload breakage (string task ids) and replay/forgery
+paths; fixed here: task ledger across proposals, `suite_run` invariant, 3 uploads per proposal,
+crashed candidate runs count as losses, rendered + normalized marker checks, ≤4 open proposals
+with forward-only rounds, split agent lock, lesson block sha and unedited-role shas re-checked at
+adoption. Remaining findings: `c-0d277f`. Verified: `go test ./rsi`, the RSI DB and server tests
+against Postgres 16, 65 benchmark Python tests, `scripts/verify.sh`. Not verified: any live suite run through the gate (`c-772190`); no UI
+(`c-936308`).
+
+**2026-11-24 (c-c0bb07, E4)** — Methodology-driven coverage: OWASP WSTG 4.2 (97 tests) and the OWASP
+API Security Top 10 2023 are typed checklists in `methodology/` (data in `methodology/data/*.json`,
+embedded and validated). A task's applicable checklists come from its goal and description (no
+column). `db/coverage_methodology.go` scores them from the coverage ledger, findings (vulnclass)
+and intents citing an item (`payload.methodology_item`). The planner gets a `[Methodology coverage]`
+block each round, and `add_intent` takes `methodology_item`, which is validated and stored as the
+canonical item id. `GET /api/tasks/{id}/coverage` returns `methodologies`, and the task overview's
+coverage card shows a filterable table of the items. Verified by the methodology, agent and
+db unit tests, a Postgres integration test (`TestMethodologyCoverage`), `tsc` and `scripts/verify.sh`.
+The UI was not checked in a browser.
+
+**2026-11-24 (c-75c593)** — The benchmark subject instance (`docker-compose.bench.yml`) now builds from a
+clean clone: production `Dockerfile`, a sibling Postgres, named volumes, committed `bench/.env.example`
+with `ARTEX_RSI_LESSONS=off`. Verified on Docker Desktop arm64: `up --build` brings both containers up,
+isolation self-test passes, egress filter installed, UI 200, `ARTEX_RSI_LESSONS=off` in the container.
+No benchmark run was made against it.
+
+**2026-11-24 — E5 engagement governance (card `c-669406`)** is on `main` (#31); see `docs/GOVERNANCE.md`.
+Roles `admin`/`operator`/`reviewer`/`client_read` over the JWT (`artex_users`, `/api/users`, policy in
+`server/rbac_policy.go`, enforced in `requireAuth`; `ARTEX` is the break-glass admin). The per-task
+authorization artifact is enforced only inside the target gate (`intercept/authorization.go`). `audit_chain`
+is hash-chained by deferred row triggers (migrations 0016, 0018); `/api/intercept/history/chain[/verify]`.
+With `ARTEX_PG_DSN`, `go test ./...` fails only `TestGateOffTaskIsUnchanged` (`c-3157b4`),
+`TestConnectWithoutPasswordRealPG` (trust auth) and the macOS SOCKS5 UDP test.
+
+**2026-11-24 — client_read bound to companies (card `c-5b5421`, in review)** is on branch
+`ej/20261124-110647-182fa9`. That branch merged the E5 branch (PR #16) in, so it carries E5 too.
+- A `client_read` user sees only the companies in `artex_user_companies` (migration **0019**, audited at
+  commit). Admins set them with `GET/PUT /api/users/{id}/companies`. An unbound client gets 403.
+- `server/client_scope.go`: every route open to `client_read` has a binder that runs after the role
+  check. Findings routes go through the #425 company filter with `StrictCompany`, which ignores
+  agent-added `task_scope` rows. Tasks and ids outside the binding answer 404. A route without a binder
+  is refused, and `TestClientBindersCoverClientRoutes` enforces that. The test found
+  `findings/{id}/traffic` and its body route open to clients without a binder, so both are now bound.
+- A client's report counts only its own companies' assets, and its `/api/stats` drops the global
+  traffic and asset totals. `findings/retests/active` now needs `read`.
+- Tests: `server/client_scope_pg_test.go`, checked by mutation. `go test ./db ./server` with PG passes
+  except `TestConnectWithoutPasswordRealPG` (trust auth) and the SOCKS5 UDP test (macOS). verify.sh passes.
+- **Migration order:** 0016 (E5), 0018, 0019 (this branch), with E1 holding 0017. The loader refuses a
+  pending version older than an applied one, so renumber E1 above 0019 if it lands later.
+
+**2026-11-23** — Fixes for the High and Medium findings from the 2026-11-23 security audit are on
+`main` (PR #1, branch `ej/20261123-145205-6a3af6`); the Linux/Docker verification fixes come from
+`ej/20261123-152406-fccff3`. It covers audit findings #1–#16 except as listed under Open work.
+Verified 2026-11-23 (card `c-dadc14`, done):
+- `go vet ./...` + `go test ./...` **as root on Linux** (golang:1.26.11-bookworm, arm64) with
+  `ARTEX_PG_DSN` set: all packages ok, including the `*AsRoot` executor/isolation tests,
+  `TestExecHomePerRunDirAsRoot` and the MCP uid-10002 split. Two test fixes were needed (commit
+  `fc8c3f9`): the isolation probe could not exec the `go test` binary from its 0700 build dir (also
+  broken on main), and `TestGateOffTaskIsUnchanged` still expected zero lookups with the gate off.
+- Docker egress: through the real `docker-compose.yml` (NET_ADMIN) on a slim image of the same
+  runtime base, `[artex] egress: installed` is logged, `-m owner`/`-m addrtype` load on bookworm's
+  nf_tables iptables 1.8.9, and the executor is refused for 169.254.169.254, 100.100.100.200, the
+  gateway, host.docker.internal (root reaches the host service) and :8787 on every local address,
+  while a LAN router, another container and the internet stay reachable. The full image gives the
+  same results (2026-11-24, `c-a6891b`, below).
+- Web: `npm ci` and `npx tsc --noEmit` clean. `npm run lint` fails with 84 errors, all already on main
+  and none in the changed files (`c-834a5a`). Headless Chromium: setup, login, Sign out over the
+  HttpOnly SameSite=Strict cookie work and `document.cookie` is empty, **but a token copied before
+  logout stays valid for 7 days** (`c-a0af33`).
+- The stock compose cannot start on Docker Desktop for Mac: bind mounts ignore permissions, so the
+  isolation self-test fails closed (also on main; `c-775dc2`). Use named volumes there.
+
+Operator-facing changes from that audit (unsandboxed-start refusal, TLS on non-loopback binds, and more): `docs/handoff/2026-11-23-security-audit-operator-changes.md`.
+
+**2026-11-24: full Docker image verified (card `c-a6891b`).** The complete image (bbot, chromium,
+Playwright) built from `1abe24f` with the committed Dockerfile on Docker Desktop arm64 in 34 min. The
+bbot layer's own dry-run grep passed: trufflehog installed cleanly this time, with no ERRR. Run through
+`docker-compose.yml` with named volumes, it logs `[artex] egress: installed for uid 10001 (ipv4)…(ipv6)`
+and the isolation self-test passes. Checked with `scripts/docker-egress-probe.sh` (new): the executor
+gets REJECT on 169.254.169.254, 127.0.0.1:8787, the container IP's :8787 and host.docker.internal; root
+reaches all of them except metadata, which Docker Desktop doesn't serve (timeout). Both reach the LAN
+router and example.com. `scripts/docker-login-probe.js` (new, uses the image's Playwright) passes
+login, HttpOnly + SameSite=Strict cookie, token hidden from scripts, Sign out → /login and 401. Replaying
+the pre-logout cookie still gets 200 because revocation (`c-a0af33`) is not on main yet. Not re-run on
+the newer main (`-exec-uid-range`, #18).
+
+**2026-11-24: E8 evaluation suite** (card `c-5487e8`) is in `scripts/benchmark`. `eval_suite.py run` runs a
+baseline and a candidate prompt arm over a held-out suite. Both arms share one stamp: model chain, schedule
+seed, per-task budget, judge, and content-hashed ground truth. Runs go one at a time and the arms alternate in
+an order drawn from the seed. The output is per-gate passes/n for `detected`, `component`, `class`, `keywords`,
+`proof` and `flag_captured`, with Wilson and Newcombe intervals, a paired gained/lost table and cost per arm.
+`compare` refuses two results whose stamps differ. Arms change only the editable `goals`/`planner`/`worker`
+body, through the versioned prompt API, and the starting bodies are restored afterwards. Suites:
+`suites/heldout-v1.json` (Juice Shop v20.4.0, DVGA 2.2.0, DrostBench 005…095) and a disjoint
+`suites/dev-v1.json`. New ground truth: `ground_truth/dvga.json` (v2, hand-verified 2026-11-24 against DVGA tag 2.2.0 commit `a961308`; card `c-085c80` done, see Decisions). `run_bench.py` now exposes
+`build_parser`/`prepare`/`run` and stamps `/api/tasks/{id}/outcome`. Unit-tested (15 new tests,
+`scripts/verify.sh` passes); never yet run live (card `c-f1518c`).

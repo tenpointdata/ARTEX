@@ -151,13 +151,51 @@ const respBodyLimit = 8 << 10
 // body). Key-value pairs in headers are appended verbatim, for the generic
 // webhook's custom headers.
 //
-// Error classification is a core responsibility of this function: network-layer
+// Error classification is a core responsibility of Do: network-layer
 // failures and 5xx/408/429 are "retryable"; the remaining 4xx are "permanent
 // failures" — retrying a 403 just logs the same error 3 times.
 func doJSON(ctx context.Context, method, url string, headers map[string]string, payload any) ([]byte, error) {
+	resp, err := Do(ctx, Request{Method: method, URL: url, Headers: headers, Body: payload, Limit: respBodyLimit})
+	if err != nil {
+		return nil, err
+	}
+	return resp.Body, nil
+}
+
+// defaultDoLimit is the response cap Do applies when Request.Limit is 0.
+const defaultDoLimit = 1 << 20
+
+// Request describes one call made through the SSRF-guarded client.
+type Request struct {
+	Method  string
+	URL     string
+	Headers map[string]string
+	// Body is JSON-encoded when non-nil (Content-Type is set accordingly).
+	Body any
+	// Limit caps how many response bytes are read; 0 means 1 MiB.
+	Limit int64
+}
+
+// Response is the result of a 2xx call (or, alongside an error, of a non-2xx one).
+type Response struct {
+	Status int
+	Body   []byte
+	Header http.Header
+}
+
+// Do sends one request through the package's guarded client: loopback /
+// link-local / metadata targets are refused at dial time (unless
+// AllowLocalTargetsEnv is set), cross-host redirects are refused, and every
+// error text is redacted so credentials embedded in URLs never leak.
+//
+// Errors are classified like doJSON: network failures and 5xx/408/429 are
+// retryable plain errors, other 4xx are wrapped with Permanent. A non-2xx
+// response is returned together with its error so callers that need to treat a
+// specific status (for example 404) specially can inspect it.
+func Do(ctx context.Context, r Request) (*Response, error) {
 	var body io.Reader
-	if payload != nil {
-		raw, err := json.Marshal(payload)
+	if r.Body != nil {
+		raw, err := json.Marshal(r.Body)
 		if err != nil {
 			// A serialization failure is a local bug (wrong config field type);
 			// retrying will not make it better.
@@ -165,17 +203,17 @@ func doJSON(ctx context.Context, method, url string, headers map[string]string, 
 		}
 		body = bytes.NewReader(raw)
 	}
-	req, err := http.NewRequestWithContext(ctx, method, url, body)
+	req, err := http.NewRequestWithContext(ctx, r.Method, r.URL, body)
 	if err != nil {
 		// Invalid URL — most likely the user mistyped the address; a permanent
 		// failure. err must not be passed through here either: url.Parse's error
 		// text contains the full address.
-		return nil, Permanent(fmt.Errorf("invalid request URL: %s", redactRequestTarget(url)))
+		return nil, Permanent(fmt.Errorf("invalid request URL: %s", redactRequestTarget(r.URL)))
 	}
-	if payload != nil {
+	if r.Body != nil {
 		req.Header.Set("Content-Type", "application/json; charset=utf-8")
 	}
-	for k, v := range headers {
+	for k, v := range r.Headers {
 		req.Header.Set(k, v)
 	}
 	resp, err := httpClient.Do(req)
@@ -195,22 +233,27 @@ func doJSON(ctx context.Context, method, url string, headers map[string]string, 
 		return nil, fmt.Errorf("request failed: %s", redactTransportError(err))
 	}
 	defer resp.Body.Close()
-	raw, readErr := io.ReadAll(io.LimitReader(resp.Body, respBodyLimit))
+	limit := r.Limit
+	if limit <= 0 {
+		limit = defaultDoLimit
+	}
+	raw, readErr := io.ReadAll(io.LimitReader(resp.Body, limit))
 	if readErr != nil {
 		return nil, fmt.Errorf("failed to read response: %w", readErr)
 	}
+	out := &Response{Status: resp.StatusCode, Body: raw, Header: resp.Header}
 	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
-		return raw, nil
+		return out, nil
 	}
 	// 429 (rate limit) and 408 (timeout) are worth retrying; the remaining 4xx
 	// are configuration or permission problems, and retrying is pointless.
 	if resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode == http.StatusRequestTimeout {
-		return nil, fmt.Errorf("peer rate limit or timeout (HTTP %d): %s", resp.StatusCode, snippet(raw))
+		return out, fmt.Errorf("peer rate limit or timeout (HTTP %d): %s", resp.StatusCode, snippet(raw))
 	}
 	if resp.StatusCode >= 500 {
-		return nil, fmt.Errorf("peer server error (HTTP %d): %s", resp.StatusCode, snippet(raw))
+		return out, fmt.Errorf("peer server error (HTTP %d): %s", resp.StatusCode, snippet(raw))
 	}
-	return nil, Permanent(fmt.Errorf("peer rejected the request (HTTP %d): %s", resp.StatusCode, snippet(raw)))
+	return out, Permanent(fmt.Errorf("peer rejected the request (HTTP %d): %s", resp.StatusCode, snippet(raw)))
 }
 
 // snippet compresses a response body into a one-line short text for error
