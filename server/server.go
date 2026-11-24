@@ -835,6 +835,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("DELETE /api/task-archives/{id}", s.queueTaskArchiveDelete)
 	mux.HandleFunc("POST /api/task-archives/delete/batch", s.deleteTaskArchivesBatch)
 	mux.HandleFunc("GET /api/tasks/{id}/coverage", s.taskCoverage)
+	mux.HandleFunc("GET /api/methodologies", s.listMethodologies)
 	mux.HandleFunc("GET /api/tasks/{id}/coverage-graph", s.taskCoverageGraph)
 	mux.HandleFunc("GET /api/tasks/{id}/asset-refs", s.taskAssetRefs)
 	mux.HandleFunc("POST /api/tasks/{id}/assets", s.attachTaskAssets)
@@ -1786,6 +1787,7 @@ type createTaskReq struct {
 	PlanQuietMode        *bool    `json:"plan_quiet_mode,omitempty"`   // planner quiet-mode switch (#86); omitted = default on; false = edge rounds always plan
 	TargetGate           *bool    `json:"target_gate,omitempty"`       // approval gate for asset targets, opt-in; omitted/null = off
 	SeedFirstIntent      *bool    `json:"seed_first_intent,omitempty"` // issue one seed intent at creation (content = description + goal) so a worker can start right away without waiting for the first planner round; omitted/null = default off, the standard plan-then-execute flow. Pass true explicitly to enable (for CTF tasks often solved in one work, this skips the pre-start planner round).
+	Methodologies        []string `json:"methodologies,omitempty"`     // testing methodology ids (GET /api/methodologies) the task is checked against; omitted/empty = automatic, derived from the goal and description
 	CoverageEnabled      *bool    `json:"coverage_enabled,omitempty"`  // asset coverage feature; omitted/null = default on (true). false = disables coverage calculation/display/auto-accumulated scope + hides add_task_scope/list_untested_assets. company links are unaffected.
 	// InterceptRules: task-level asset interception/allow rules (entered at creation, stored in task_intercept_rules, never the global table).
 	InterceptRules []taskInterceptRuleReq `json:"intercept_rules,omitempty"`
@@ -1859,6 +1861,7 @@ func (s *Server) createTask(w http.ResponseWriter, r *http.Request) {
 		SourceTaskIDs: sourceIDs, CompanyIDs: req.CompanyIDs, LLMProfileIDs: req.LLMProfileIDs,
 		TimeoutSeconds: req.TimeoutSeconds, PlanHeartbeatSeconds: req.PlanHeartbeatSeconds, PlanQuietMode: req.PlanQuietMode,
 		CoverageEnabled: req.CoverageEnabled,
+		Methodologies:   req.Methodologies,
 		InterceptRules:  interceptRules,
 		LLMRotate:       req.LLMRotate,
 		TargetGate:      req.TargetGate,
@@ -1870,6 +1873,10 @@ func (s *Server) createTask(w http.ResponseWriter, r *http.Request) {
 		}
 		if errors.Is(err, db.ErrTaskCompanyIDsInvalid) || errors.Is(err, db.ErrTaskCompanyNotFound) {
 			writeErr(w, 400, "linked company not found or invalid")
+			return
+		}
+		if errors.Is(err, db.ErrTaskMethodologyUnknown) {
+			writeErr(w, 400, err.Error())
 			return
 		}
 		writeErr(w, 500, err.Error())
@@ -2158,6 +2165,11 @@ func (s *Server) taskCoverage(w http.ResponseWriter, r *http.Request) {
 	if cov.CoverageLedger, err = as.CoverageLedger(taskID); err != nil {
 		log.Printf("[coverage] ledger query failed for task %d: %v", taskID, err)
 		writeErr(w, 500, "coverage ledger query failed")
+		return
+	}
+	if cov.Methodologies, err = as.MethodologyCoverage(taskID); err != nil {
+		log.Printf("[coverage] methodology query failed for task %d: %v", taskID, err)
+		writeErr(w, 500, "methodology coverage query failed")
 		return
 	}
 	writeJSON(w, 200, cov)

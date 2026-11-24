@@ -27,6 +27,7 @@ import { Input } from "@/components/ui/input";
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
 import { Progress } from "@/components/ui/progress";
 import { Switch } from "@/components/ui/switch";
+import { MethodologyCoverage } from "./methodology-coverage";
 import { api } from "@/lib/api";
 import { taskAssetTypeLabel } from "@/lib/task-assets";
 import type {
@@ -40,6 +41,7 @@ import type {
   TaskConstraint,
   TaskGoal,
   TaskNode,
+  TaskCoverage,
   TaskScopeRow,
 } from "@/lib/types";
 import { setVisibleInterval } from "@/lib/polling";
@@ -112,16 +114,7 @@ export function OverviewTab({ taskId }: { taskId: string }) {
   const [stats, setStats] = React.useState<Stats | null>(null);
   const [intents, setIntents] = React.useState<TaskNode[]>([]);
   const [findings, setFindings] = React.useState<Finding[]>([]);
-  const [coverage, setCoverage] = React.useState<{
-    enabled: boolean;
-    scope_rows: number;
-    denominator: number;
-    tested: number;
-    pct: number | null;
-    by_type: { type: string; total: number; tested: number }[];
-    gaps?: { kind: string; surface?: string; risk_area: string }[];
-    completeness?: { complete: boolean; state: string; caveat: string };
-  } | null>(null);
+  const [coverage, setCoverage] = React.useState<TaskCoverage | null>(null);
   // Intent ids currently re-running ("__all__" means the batch); used to disable buttons + spinners.
   const [rerunning, setRerunning] = React.useState<Set<string>>(new Set());
   // Test scope list + add-form state.
@@ -716,7 +709,7 @@ export function OverviewTab({ taskId }: { taskId: string }) {
         </CardContent>
       </Card>
       <TaskInterceptRulesCard taskId={taskId} />
-      {coverage && coverage.enabled && (coverage.scope_rows > 0 || (coverage.gaps?.length ?? 0) > 0) && (
+      {coverage && coverage.enabled && (coverage.scope_rows > 0 || (coverage.gaps?.length ?? 0) > 0 || !!coverage.methodologies?.length) && (
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2 text-base">
@@ -765,6 +758,7 @@ export function OverviewTab({ taskId }: { taskId: string }) {
                 </ul>
               </div>
             )}
+            {!!coverage.methodologies?.length && <MethodologyCoverage scores={coverage.methodologies} />}
           </CardContent>
         </Card>
       )}

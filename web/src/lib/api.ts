@@ -67,6 +67,7 @@ import type {
   LLMTask,
   MCPServer,
   MCPTool,
+  MethodologySummary,
   MissingSkill,
   ModelTokenStat,
   NotificationChannel,
@@ -119,6 +120,7 @@ import type {
   UsageStats,
   WorkspaceFile,
   WorkspaceListing,
+  TaskCoverage,
 } from "@/lib/types";
 
 // Combined file data per attachment upload; matches maxChatUpload in server/chatupload.go.
@@ -311,6 +313,7 @@ export const api = {
     seedFirstIntent?: boolean;
     planHeartbeatSeconds?: number;
     coverageEnabled?: boolean;
+    methodologies?: string[]; // empty = automatic (derived from the goal and description)
     interceptRules?: AssetInterceptRuleInput[];
     credentials?: TaskCredentialInput[];
   }) =>
@@ -327,9 +330,11 @@ export const api = {
       seed_first_intent: input.seedFirstIntent ?? false,
       plan_heartbeat_seconds: input.planHeartbeatSeconds ?? 0, // 0 = the backend normalizes to the default 600 (10min)
       coverage_enabled: input.coverageEnabled ?? true, // on by default; false disables the asset coverage feature
+      methodologies: input.methodologies ?? [],
       intercept_rules: input.interceptRules ?? [], // task-level asset interception rules
       credentials: input.credentials ?? [], // test accounts declared at creation; an empty password = the agent generates and records it (#3)
     }),
+  methodologies: () => get<MethodologySummary[]>("/methodologies").then((r) => arr(r)),
   taskCategories: () => get<{ categories: TaskCategory[] }>("/task-categories").then((r) => arr(r.categories)),
   updateTask: (id: string, input: { name?: string; pinned?: boolean }) => patch<Task>(`/tasks/${id}`, input),
   renameTask: (id: string, name: string) => patch<Task>(`/tasks/${id}`, { name }),
@@ -429,17 +434,7 @@ export const api = {
   stats: (task?: string) => get<Stats>(`/stats${tq(task)}`),
   // Asset test coverage (rough estimate, for reference): share of in-scope assets touched by facts + total/tested per type.
   taskCoverage: (id: string) =>
-    get<{
-      enabled: boolean; // whether the asset coverage feature is on; when false the other fields are zero values
-      scope_rows: number;
-      denominator: number;
-      tested: number;
-      pct: number | null;
-      by_type: { type: string; total: number; tested: number }[];
-      // coverage ledger (absent when the feature is off): gaps = open items; an unexamined class is never clean
-      gaps?: { kind: string; surface?: string; risk_area: string }[];
-      completeness?: { complete: boolean; state: string; caveat: string };
-    }>(`/tasks/${id}/coverage`),
+    get<TaskCoverage>(`/tasks/${id}/coverage`),
   // Asset coverage graph: every in-scope asset + root-domain/company nodes used for connection, with tested/in_scope.
   taskCoverageGraph: (id: string) => get<CoverageGraphData>(`/tasks/${id}/coverage-graph`),
   // Global llm_usage aggregate (the dashboard's new token view): totals per profile + daily buckets.

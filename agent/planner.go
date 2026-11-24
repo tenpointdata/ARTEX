@@ -530,6 +530,7 @@ func (p *Planner) Plan(ctx context.Context, taskID int64, as *db.AssetStore, ts 
 	// wrap-up round. Its agent-reported gap lines are framed with this message's env.
 	budgetRound, _ := ctx.Value(budgetRoundKey{}).(BudgetRound)
 	situational += tsx.coverageLedgerBlock(tc.Final || budgetRound.WrapUp, env)
+	situational += tsx.methodologyBlock()
 	// The main run directory <workDir>/tasks/<taskID>/main; create it first.
 	taskDir := ensureRunDir(p.workDir, taskID, 0)
 	ctx = intercept.WithReviewContext(ctx, taskDir, intercept.ReviewBackground{})
