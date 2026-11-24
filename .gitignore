@@ -53,10 +53,9 @@ Thumbs.db
 # event logs produced by scheduler runs/simulations (test artifacts, not committed)
 *-events.csv
 
-# bench benchmark related (local artifacts, not committed)
-/bench/
-/Dockerfile.bench
-/Dockerfile.bench.v2
+# bench instance secrets (bench/.env, a copied bench/jwt.key); the template is committed
+/bench/*
+!/bench/.env.example
 
 # scripts/backup.sh output (database dumps, data archives)
 backups/
