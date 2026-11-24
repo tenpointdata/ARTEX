@@ -84,6 +84,18 @@ Linux-root tests, the Docker egress iptables rules, the Postgres-backed tests an
 - Per-run executor HOME; MCP servers run as uid 10002 (`ARTEX_EXEC_MCP_UID`). The workspace file
   manager uses `os.Root`.
 
+**2026-11-24: full Docker image verified (card `c-a6891b`).** The complete image (bbot, chromium,
+Playwright) built from `1abe24f` with the committed Dockerfile on Docker Desktop arm64 in 34 min. The
+bbot layer's own dry-run grep passed: trufflehog installed cleanly this time, with no ERRR. Run through
+`docker-compose.yml` with named volumes, it logs `[artex] egress: installed for uid 10001 (ipv4)…(ipv6)`
+and the isolation self-test passes. Checked with `scripts/docker-egress-probe.sh` (new): the executor
+gets REJECT on 169.254.169.254, 127.0.0.1:8787, the container IP's :8787 and host.docker.internal; root
+reaches all of them except metadata, which Docker Desktop doesn't serve (timeout). Both reach the LAN
+router and example.com. `scripts/docker-login-probe.js` (new, uses the image's Playwright) passes
+login, HttpOnly + SameSite=Strict cookie, token hidden from scripts, Sign out → /login and 401. Replaying
+the pre-logout cookie still gets 200 because revocation (`c-a0af33`) is not on main yet. Not re-run on
+the newer main (`-exec-uid-range`, #18).
+
 ## Triage (next handful)
 
 **Agents' lane**
@@ -121,6 +133,12 @@ Linux-root tests, the Docker egress iptables rules, the Postgres-backed tests an
 - **Verify (reproduces CI):** `scripts/verify.sh` (fast set, no Docker); `--full` adds `go test -race`
   + web static build; `--security` runs `govulncheck ./...`.
 - **Benchmark harness:** `docker-compose.bench.yml` + `scripts/benchmark`.
+- **Container egress/login check:** after `docker compose up`, run
+  `scripts/docker-egress-probe.sh <artex container> [host port] [LAN url]`, then set the admin
+  password and run `scripts/docker-login-probe.js` inside the container (usage in its header).
+  On Docker Desktop, use named volumes for data/keys/skills (card `c-775dc2`); a separate
+  `docker compose -p <name>` project with its own ports keeps a verification stack apart from a
+  running one.
 
 ## Open work
 
