@@ -1,0 +1,10 @@
+{
+  "id": "10042",
+  "key": "%s",
+  "fields": {
+    "summary": %s,
+    "labels": %s,
+    "status": {"name": "%s", "statusCategory": {"id": 1, "key": "%s", "name": "%s"}},
+    "resolution": %s
+  }
+}
