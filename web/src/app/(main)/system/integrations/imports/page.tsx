@@ -287,7 +287,7 @@ function ImportsTable({ imports, loaded }: { imports: ScanImport[]; loaded: bool
             <TableCell className="text-right tabular-nums">
               {im.findings_new > 0 ? (
                 <Link
-                  className="text-primary hover:underline"
+                  className="text-primary underline underline-offset-2"
                   href={importFindingsHref(im.id)}
                   aria-label={t("Show the {count} new findings of import #{id}", { count: im.findings_new, id: im.id })}
                 >
