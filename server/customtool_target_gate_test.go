@@ -615,8 +615,8 @@ func TestBypass_CustomScriptToolTargetNotGated(t *testing.T) {
 }
 
 // A task with the gate off (the default) runs as before: a worker's WebFetch
-// and the custom tools reach their targets, and the gate writes no row and
-// resolves no name.
+// and the custom tools reach their targets, and the gate writes no row. Only the
+// always-on metadata check resolves a name: once per platform connection.
 func TestGateOffTaskIsUnchanged(t *testing.T) {
 	g := newGateServer(t)
 	task := g.newTask(t, db.TaskCreateOptions{})
@@ -656,7 +656,10 @@ func TestGateOffTaskIsUnchanged(t *testing.T) {
 	if n := targetRowCount(t, g.m.pg, task.ID); n != 0 {
 		t.Fatalf("%d target rows, want none", n)
 	}
-	if n := res.lookups(); n != 0 {
-		t.Fatalf("%d lookups, want none", n)
+	// The always-on checks (intercept dialUngated) resolve each name the platform
+	// itself connects to once, fresh, to hold its addresses to the metadata deny:
+	// one lookup per connection. A command's declared target is not resolved.
+	if n, want := res.lookups(), int(hits.Load()); n != want {
+		t.Fatalf("%d lookups, want %d (one per platform connection, none for the command)", n, want)
 	}
 }
