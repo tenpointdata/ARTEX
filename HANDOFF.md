@@ -75,6 +75,26 @@ intent's `report_finding` binds the control capture; a mutation with the local s
 `scripts/verify.sh` (see Deltas for the result). The Helm template was rendered (`alpine/helm`). Not
 checked: a real multi-host run. Gap carded: `c-7ad4da` (workers read the capture switch only at
 start-up).
+**2026-11-24 — E7 distributed workers + Helm (`c-d60149`, in review)** on `ej/20261124-150525-1a95b3`; design
+and limits in `docs/DISTRIBUTED.md`. `-role all|control|worker` (`server/node.go`): worker nodes are the same
+binary and `server.New` wiring (guard, intercept rules, LLM reviewer, target gate, budgets, isolation,
+egress filter), run only intent worker loops (`server/worker_node.go`), and serve only `GET /healthz`. They
+claim through the existing fenced lease. Control state moved to Postgres (migration **0023**: `worker_nodes`,
+`work_signals`, `tasks.dispatch_closed`, `proxy_scope_tokens`): pause, queued, terminal, deadline, the
+settle/delete fence and target gate are read per claim or call (fail closed); budgets are published by the
+control node and spend is synced every 2 s; intercept rules follow a DB revision and ask approvals poll
+their row; kill/pause/cancel/steer go through `work_signals`; the noise governor is split across live nodes.
+Worker traffic goes through the control node's recording proxy with DB-resolved per-task tokens (token-less
+remote clients refused; CA cert published). `GET /api/settings/nodes` lists nodes. Helm chart
+`deploy/helm/artex` (control + worker Deployment with hard host anti-affinity) and
+`docker-compose.distributed.yml`. Verified against Postgres 17: two worker nodes ran one task's intents, each
+blocked by a rule added on the control node after they started and seeing the control's gate switch
+(`TestTwoWorkerNodesShareOneTaskWithIdenticalGating`); kill/pause/no-budget/no-control
+(`TestWorkerNodeFollowsControlState`); proxy path recorded on the control node, forged and deleted tokens
+refused (`TestWorkerNodeUsesControlRecordingProxy`); `helm lint`/`template` clean. An opus adversarial
+review found 12 issues; H1–M9, L10, L11 fixed (`c0210dd5`). **Not verified:** a real install on two hosts
+(`c-8cfbfe`). **Gaps:** worker findings cannot bind captured traffic (`c-3b781a`, now fixed on its branch, see above), transcripts are per host
+(`c-29ff19`), smaller items `c-18f7a8`.
 
 **2026-11-24 — SSE 401 after console login (`c-13e86c`, fixed; pre-E5).** Streams are same-origin only
 (`web/src/lib/sse.ts`), dev gzip off, `openSSE` writes `: open`. Test `server/activity_stream_auth_pg_test.go`;
@@ -244,7 +264,12 @@ body, through the versioned prompt API, and the starting bodies are restored aft
   pre-registration, adopted-lesson retire sync. Done = Postgres tests for each.
 - *(unclaimed)* — **RSI gate web UI** (M), card `c-936308`. Done = adopt/rollback from a proposals table in ≤2 clicks + password.
 
+- *(unclaimed)* — **E7: evidence and traffic tools on worker nodes** (M), card `c-3b781a`. Done = a
+  finding recorded on a worker node binds its captured exchange, by a two-manager test.
+
 **Human lane**
+- **E7 live install on two hosts** (card `c-8cfbfe`): `helm install` on a ≥2-node cluster, a task whose
+  intents run on both worker pods, capability set confirmed, worker egress deny of Postgres/control API.
 - **First live run through the RSI gate** (card `c-772190`, after `c-f1518c`): propose → held-out
   suite → evidence → adopt (password) → rollback on the bench instance with `ARTEX_RSI_LOOP=on`.
 - **E8 first live held-out run** (card `c-f1518c`): needs a bench instance, an LLM, a judge key and a
@@ -271,6 +296,10 @@ body, through the versioned prompt API, and the starting bodies are restored aft
 - **Web deps:** `cd web && npm ci`, then `npx tsc --noEmit` (clean) and `npm run lint` (84 known errors, `c-834a5a`). **Embedded-UI build:** `./build.sh`.
 - **Run (Docker):** `cp .env.example .env` (set `POSTGRES_PASSWORD`), `docker compose up -d --build`,
   open http://localhost:8787, setup token via `docker compose logs artex | grep "Setup token"`.
+- **Distributed (E7):** one `-role control` node plus `-role worker` nodes sharing Postgres and
+  `ARTEX_SECRET_KEY`; workers need `ARTEX_CONTROL_PROXY`. Helm: `deploy/helm/artex` (lint with
+  `docker run --rm -v "$PWD/deploy/helm/artex:/chart" alpine/helm:3 lint /chart`); local: `docker compose -f
+  docker-compose.yml -f docker-compose.distributed.yml up -d --build`. See `docs/DISTRIBUTED.md`.
 - **Verify (reproduces CI):** `scripts/verify.sh` (fast set, no Docker); `--full` adds `go test -race`
   + web static build; `--security` runs `govulncheck ./...`.
 - **Benchmark harness:** `scripts/benchmark` against the subject instance `docker-compose.bench.yml`
@@ -301,7 +330,9 @@ Card ids in brackets:
   (role-aware controls on existing pages), `c-7c4715` (client_read console, in review), `c-601ec6` (chain paging).
 - **TEST** [`c-3157b4`] `TestGateOffTaskIsUnchanged` fails on main with Postgres (also fails before E5).
 - **E6** [`c-cb0093`] Cost/observability dashboard + OpenTelemetry export, building on existing context telemetry.
-- **E7** [`c-d60149`] Distributed/remote workers (queue-backed intents) for larger engagements; Helm chart.
+- **E7** [`c-d60149`] Distributed workers + Helm: built, in review (see Current state). Follow-ups:
+  `c-3b781a` (evidence on workers), `c-29ff19` (transcripts across hosts), `c-8cfbfe` (live two-host
+  install), `c-18f7a8` (browser MCP relay, finding wake-ups, proxy TLS, smaller gaps).
 - **E8** [`c-5487e8`] Planner/worker evaluation suite (regression targets, prompt-version A/B via the benchmark gate).
 - **E9** [`c-73af97`] Frontend/UX pass (tables over cards, fewer-clicks triage workflow, live engagement dashboard).
 - **SEC** [`c-517c2d`] Live Playwright task check of the scope relay (human/bench: needs an LLM key and an authorized target).
@@ -388,6 +419,14 @@ Card ids in brackets:
   rides in agent processes' proxy URL, so an agent's shell could have recorded or bound evidence past
   the tool-layer checks. Record/bind/assess run the unchanged control-side code; every agent-side check
   still runs on the worker first.
+- **2026-11-24** — E7 (`c-d60149`): the queue is the existing `exploration_nodes` lease, not a broker.
+  It already had atomic claims, fencing tokens and lease takeover, so a broker would have added a
+  second source of truth. Worker nodes are the same binary and wiring, so the gating is identical by
+  construction; every control decision a single process kept in memory is now read from Postgres, and
+  a read failure blocks the claim. Worker traffic is recorded by the control node's proxy (tokens
+  stored only as SHA-256), not by per-host stores. A worker never falls back to its own budget env,
+  and claims nothing without a live control node or while a `role=all` node shares the database.
+  Migration **0023** — renumber if another branch lands 0023 first.
 
 - **2026-11-24** — c-13e86c: SSE streams are same-origin only, with no cross-origin override. The cookie is
   the only credential a script-free EventSource can present, and the backend's CORS answers `*`, which a
@@ -543,8 +582,8 @@ Card ids in brackets:
 - **2026-11-24 16:09 MST** · claude-code · `ej/20261124-150525-1a95b3` `ca784d2`→`1ab5ed6` (8 commits) · `h-666bdf` — E7 (c-d60149) built, in review: -role all|control|worker. Worker nodes are the same binary/wiring, claim intents through the existing fenced Postgres lease, and read every control decision from the DB, failing closed: pause, queued, terminal, deadline, settle/delete fence, target gate, published budgets with spend synced every 2 s, intercept rule revision, polled ask approvals, work_signals for kill/pause/cancel/steer, noise governor split across nodes, and a required live control node. Worker traffic goes through the control node's recording proxy with DB-resolved per-task tokens. Migration 0023, GET /api/settings/nodes, a Helm chart (deploy/helm/artex), docker-compose.distributed.yml and docs/DISTRIBUTED.md. An opus adversarial review found 12 issues; H1–M9, L10 and L11 were fixed. **Next:** c-8cfbfe: real helm install on a 2+ node cluster (human or infra). c-3b781a: findings made on worker nodes must bind their captured traffic, the largest functional gap. c-29ff19: transcripts across hosts. c-18f7a8: browser MCP relay on workers, finding wake-ups, TLS for the control proxy, delete-drain ack, LLM profile reload, proxy scope default. **Decided:** The queue is the existing exploration_nodes lease, not a broker: it already had atomic claims, fencing tokens and takeover. Worker nodes run the same server.New wiring, so gating is identical by construction. In-memory control state became DB reads that block claims on failure. Worker traffic is recorded by the control node's proxy, and tokens are stored only as SHA-256. Workers never fall back to their own budget env, and claim nothing without a live control node or while a role=all node shares the database. Migration 0023: renumber if another branch lands 0023 first. **Issues:** opened #c-18f7a8, #c-29ff19, #c-3b781a, #c-8cfbfe.
 - **2026-11-24 16:07 MST** · claude-code · `ej/20261124-150533-1ba29e` `ca784d2`→`6e1aa4c` (16 commits) · `h-59c24d` — E10 (c-72dd9d, now in review): code-security lane. This branch merges the E2 backend branch (ej/20261124-055326-6bcfa9), so E2 lands with it. SARIF findings get a lane (runtime/sast/sca). A task import with asset_ids writes an exploration fact that yields a finding node per new finding, anchored to runtime assets already in the task's scope. GET /api/report lists code and runtime findings together, with a Source line and per-lane counts; imported claims are not counted as confirmed or toward findings_total. Migrations: E2's unreleased 0015 is renumbered to 0023 (main already has 0016–0022), and 0024 adds the lane columns. Also fixed the E2×E5 client_read leak on findings/{id}/integrations. Four review findings were fixed: anchor scope, fact anchors inflating coverage, per-task dedup, and from_intent. **Next:** c-5c4009: tracker config RBAC (admin vs operate). c-d059ae: lane in the Scanner imports UI, findings table and exports (after the E2 UI branch lands). The E2 branches still carrying 0015 (…132955-7aef3f, …135159-6d9961) must merge main after this lands. c-c978e3: SAST-guided runtime verification. **Decided:** - Code findings reuse the E2 SARIF import and provenance table (with a lane column) rather than a separate SAST store. - Task imports join the exploration graph through a fact that yields finding nodes; no new node kind or edge relation is needed. - Code is not an asset type. Findings anchor to existing runtime assets, which must already be in the task's scope or carry the task in task_ids. - Imported findings stay unverified leads. - Renumbered E2's 0015 to 0023 because main's loader refuses older pending versions. **Issues:** opened #c-5c4009, #c-c978e3, #c-d059ae.
 - **2026-11-24 15:58 MST** · claude-code · `ej/20261124-150516-d78c96` `f1ec47a`→`9fdfa3b` (4 commits) · `h-0548f2` — c-2d91eb (E2 UI follow-ups, now in review; board cards c-1198a2 and c-119206 opened) on a branch that merges the unmerged E2 UI + backend branch (ej/20261124-132955-7aef3f), so landing it lands all of E2. (1) Findings filter by import: db.FindingFilter.ImportID (an EXISTS on the finding_import_sources primary key), parsed from ?import_id= in the shared filter, so it applies to the list, groups, asset tree and export. The findings page shows an "Import #N" chip that clears it, and each Past imports row's New findings count links to its findings. (2) A committed browser e2e: scripts/e2e/integrations.sh (throwaway Postgres, the backend, a Next production build, Playwright) runs integrations-e2e.js against fake-github.js. 24/24 checks passed locally, including exactly the import's findings (3 of 7). (3) The imports list pages: limit/offset → {imports, total}, with TablePagination. Also fixed an E2×E5 merge gap: GET /findings/{id}/integrations was open to client_read with no binder; it now needs read, and tracker CRUD needs admin. Verified: db and server PG tests (only the known environment failures), verify.sh --web-only, and the e2e. **Next:** Land ej/20261124-150516-d78c96 (it carries the E2 backend, UI and these follow-ups). c-119206: role-gate the E2 UI controls. c-1198a2: wire scripts/e2e/integrations.sh into CI after c-cc25b6's pinned ci.yml lands. The E2 backend follow-ups c-da9198 and c-ea60a0 are unchanged. **Decided:** Merged the unmerged E2 UI branch rather than waiting. import_id matches the findings an import created; a dedup re-match does not claim them. Migration 0015 was not edited for an index (its checksum is enforced); the EXISTS on the primary key is enough. The import filter lives in the URL, not in saved preferences. E2 under E5: finding integrations need read, and tracker CRUD needs admin like notification channels; push, sync and import stay operate. The e2e uses next build + next start instead of embedding the UI. The CI job is deferred until the SHA-pinning branch lands.
+- **2026-11-24 15:56 MST** · claude-code · `ej/20261124-141024-67b6b6` at `81edb00`, no commits · `h-f62f2d` — c-4c8fd6 (E6 live check, now in review): built the E6 branch into an isolated compose stack (local Ollama with prices, nginx target on its own network, OTel collector via host.docker.internal). The cost page in headless Chromium lists tasks with a correct EUR cost; Task/Provider/Role/Model regroup without a reload; the URL keeps by/days. The collector got 51 spans = 51 ledger rows, one trace per task, and all four metrics. The egress filter refuses the collector to uid 10001 while the server exports. Gap: no single trace with planner and worker together (the local model never finished a planner intent). No code changed. **Next:** Land ej/20261124-123231-b78990 (E6, not on main yet) with c-f4a69d. c-990198: fix wall time (first_ts = min(ts - latency)). c-7361b4: goals role calling after a terminal status and 32k runaway outputs. Optionally repeat the trace check with a hosted model to see planner+worker spans in one trace. **Decided:** Ran the check from the unmerged E6 branch in an isolated stack (artex-e6check, port 18797), not on the running artex-artex-1 instance and without merging E6 into this branch: E6 is in review, and merging it here would land it on main uncontrolled. Used the local Ollama (keyless) after reading the blend gateway key from the keychain was denied. The target was an nginx container the stack itself ran, the only scope entry. The stack, volumes and image were removed afterwards. **Issues:** opened #c-7361b4, #c-990198.
 - _Older hand-offs, a line each; `ej handoff log` has them whole:_
-- **2026-11-24 15:56 MST** · claude-code · `h-f62f2d` — c-4c8fd6 (E6 live check, now in review): built the E6 branch into an isolated compose stack (local Ollama with prices, nginx target on its own network, OTel collector via host.docker.internal). **Next:** Land ej/20261124-123231-b78990 (E6, not on main yet) with c-f4a69d. **Issues:** opened #c-7361b4, #c-990198.
 - **2026-11-24 15:30 MST** · claude-code · `h-124b6f` — c-f4a69d (E6 follow-up, now in review; card c-888292 opened): the Cost & efficiency view now includes archived tasks. **Next:** c-4c8fd6: check the cost page in a browser against real LLM traffic, including an archived task.
 - **2026-11-24 15:29 MST** · claude-code · `h-0c292e` — E9 (c-73af97). **Next:** Land this branch. **Issues:** opened #c-45c921, #c-4b7989, #c-f729e8.
 - **2026-11-24 15:21 MST** · claude-code · `h-683872` — c-92bb52 (E5 UI follow-up, closed; c-4ee114 opened): every existing web page now hides or disables the mutating controls the session's role lacks, per server/rbac_policy.go. **Next:** c-4ee114: re-probe with seeded rows (MCP, channels, LLM profiles, pending approvals, traffic exchange sheet, files, skills, hooks), hide the assets checkboxes without operate, switch credentials-tab…
@@ -555,6 +594,7 @@ Card ids in brackets:
 - **2026-11-24 13:46 MST** · claude-code · `h-7f6f23` — c-869050 (now in review): web UI for E5. **Next:** c-92bb52: gate mutating controls on existing pages by role (reviewer currently sees Interception Rules edit controls). **Issues:** opened #c-601ec6, #c-7c4715, #c-92bb52.
 - **2026-11-24 13:36 MST** · claude-code · `h-59bfe6` — c-9b48b7: confirmed go-mitmproxy keep-alive host pinning is still unfixed through v1.9.5 (= upstream main 07e0ca5), and no upstream report exists. **Next:** Ian: approve filing (human lane).
 - **2026-11-24 13:26 MST** · claude-code · `h-4efcbc` — c-965b0e done and c-775dc2 landed: merged the unmerged branch ej/20261123-192351-fab3f4 (named volumes, exit 78, start.sh idle hold e1d7a27) and added an image HEALTHCHECK that is unhealthy while start.sh holds on an isolation refusal (root-only marker /run/a… **Next:** Run docker-compose.bind.yml on a real Linux host (human lane).
+- **2026-11-24 13:25 MST** · me · `h-7df71f` — c-7e0087 (now in review): each ARTEX server's agent egress floor has its own chain, ARTEX_AGENT_FLOOR_<exec uid>, with jumps tagged artex-floor-<exec uid>. **Next:** Land c-b73542 (ej/20261124-113533-f16c00), then c-02e554 (ej/20261124-122709-d136a7), then this branch.
 <!-- /composite:deltas -->
 
 _(written by `merge_handoff`)_

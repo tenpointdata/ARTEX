@@ -2,7 +2,9 @@ package server
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -2285,4 +2287,36 @@ func (m *Manager) configureNodeProxy() error {
 		m.controlRPC = newControlRPC(api, m.node.NodeID, pgdb.NodeRPCKey)
 	}
 	return nil
+}
+
+// reloadSharedEgress re-reads the settings that decide a worker node's egress
+// path (the capture switch, the global proxy, web search and its proxy), which
+// the control node's API changes in its own memory and in the settings rows
+// only. It updates this process and returns a fingerprint of the values; an
+// error leaves the previous values in place.
+func (m *Manager) reloadSharedEgress() (string, error) {
+	keys := []string{settingTrafficCapture, settingGlobalProxy, settingWebSearchOn, settingWebSearchBackend, settingWebSearchProxy}
+	vals := make(map[string]string, len(keys))
+	for _, k := range keys {
+		v, _, err := m.pg.GetSetting(k)
+		if err != nil {
+			return "", err
+		}
+		vals[k] = v
+	}
+	m.mu.Lock()
+	isTrue := func(v string) bool { v = strings.TrimSpace(v); return v == "true" || v == "1" }
+	m.trafficOn = isTrue(vals[settingTrafficCapture])
+	m.globalProxy = strings.TrimSpace(vals[settingGlobalProxy])
+	m.webSearchOn = isTrue(vals[settingWebSearchOn])
+	if b := vals[settingWebSearchBackend]; b != "" {
+		m.webSearchBackend = b
+	}
+	m.webSearchProxy = vals[settingWebSearchProxy]
+	m.mu.Unlock()
+	sum := sha256.New()
+	for _, k := range keys {
+		fmt.Fprintf(sum, "%s=%s\x00", k, vals[k])
+	}
+	return hex.EncodeToString(sum.Sum(nil)), nil
 }

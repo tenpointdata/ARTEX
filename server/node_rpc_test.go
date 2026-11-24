@@ -153,6 +153,7 @@ func TestWorkerNodeFindingBindsControlCapture(t *testing.T) {
 	if err := publishBudgets(pg); err != nil {
 		t.Fatal(err)
 	}
+	keepControlLive(t, pg)
 	node := NodeConfig{Role: RoleWorker, NodeID: "node-ev", Host: "node-ev", Workers: 1,
 		ControlProxy: control.traffic.ProxyAddr(), ControlAPI: api.URL}
 	worker, err := NewManagerForNode(t.TempDir(), "", node)

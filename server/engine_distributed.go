@@ -98,14 +98,19 @@ func (e *Engine) syncBudget(taskID string, l *agent.BudgetLedger) {
 }
 
 // budgetConfig is the run budget this process meters: the environment, or on
-// a worker node the configuration the control node published.
-func (e *Engine) budgetConfig() (task, intent agent.Budget) {
-	if e.node.Role == RoleWorker && e.m != nil && e.m.pg != nil {
-		if task, intent, ok := readPublishedBudgets(e.m.pg); ok {
-			return task, intent
+// a worker node the configuration the control node published, as last read by
+// the dispatcher. ok is false on a worker node that has not read it yet; it
+// then claims nothing (workerDispatchOnce blocks the node) and never falls back
+// to its own environment, which usually sets no budget.
+func (e *Engine) budgetConfig() (task, intent agent.Budget, ok bool) {
+	if e.node.Role == RoleWorker {
+		if e.wnode == nil {
+			return task, intent, false
 		}
+		return e.wnode.publishedBudgets()
 	}
-	return agent.BudgetsFromEnv()
+	task, intent = agent.BudgetsFromEnv()
+	return task, intent, true
 }
 
 // remoteWorkSignal delivers a work control request to the node holding the
@@ -160,6 +165,7 @@ func (e *Engine) remoteSettleLoop(ctx context.Context, t *Task) {
 			return
 		case <-tick.C:
 		}
+		e.budgetWatch(t)
 		settled, next, err := t.Store.SettledIntentsSince(since)
 		if err == nil {
 			first := since.IsZero()
@@ -198,4 +204,79 @@ func liveTargetGate(pg *db.DB, taskID int64) func() bool {
 		}
 		return c.TargetGate
 	}
+}
+
+// leaseSilence is how long a distributed node's run may go without renewing
+// its claim before it stops on its own: two thirds of the lease, so it stops
+// before another node may take the intent over. 0 (RoleAll) keeps the old
+// behaviour of retrying until the claim is rejected.
+func (e *Engine) leaseSilence() time.Duration {
+	if !e.distributed() {
+		return 0
+	}
+	return db.IntentClaimTTL * 2 / 3
+}
+
+// confirmRemoteClaim closes the gap between a worker node's pre-claim check and
+// its claim: the claim UPDATE does not look at the task row, so the control
+// state is read again after it, and a task that stopped being claimable in
+// between gets the intent back (open). It also discards work signals left
+// from an earlier run of the intent. Always true outside RoleWorker.
+func (e *Engine) confirmRemoteClaim(t *Task, name string, intentID int64, token string) bool {
+	if e.node.Role != RoleWorker {
+		return true
+	}
+	if err := e.m.pg.DropWorkSignals(intentID); err != nil {
+		log.Printf("[worker %s] intent #%d: drop stale work signals: %v", name, intentID, err)
+	}
+	if e.workerClaimAllowed(t) {
+		return true
+	}
+	if err := t.Store.SettleIntentClaim(intentID, token, "open"); err != nil {
+		log.Printf("[worker %s] task %s intent #%d: return claim after a control change: %v", name, t.ID, intentID, err)
+	}
+	return false
+}
+
+// syncServedBudgets raises every live ledger of this process to the spend all
+// nodes recorded, so a running intent's meter sees the others' spend within
+// one poll instead of only at its next claim.
+func (e *Engine) syncServedBudgets() {
+	e.budgets.Range(func(k, v any) bool {
+		if l, ok := v.(*agent.BudgetLedger); ok && l != nil {
+			e.syncBudget(k.(string), l)
+		}
+		return true
+	})
+}
+
+// budgetWatch runs on the control node per task (from remoteSettleLoop): with
+// remote spend synced, a budget that can no longer pay for a worker wakes the
+// planner, whose round starts the forced wrap-up (budgetStop) at once instead
+// of at the next settlement or heartbeat.
+func (e *Engine) budgetWatch(t *Task) {
+	l := e.budgetFor(t.ID)
+	if l == nil || e.isSettling(t.ID) {
+		return
+	}
+	e.syncBudget(t.ID, l)
+	if !l.State().Dispatch {
+		t.Notify()
+	}
+}
+
+// remoteDrainDeadline is when a delete or archive may assume worker nodes have
+// stopped writing for the task (zero time outside a distributed deployment).
+// BeginDelete set the 'deleting' fence and revoked the remote claims; a claim
+// that landed in between is revoked here. A worker node reads the fence every
+// distributedPoll and stops the task's runs, so the drain waits two polls and
+// a margin. A node cut off from the database cannot write either.
+func (s *Server) remoteDrainDeadline(taskID string) time.Time {
+	if !s.engine.distributed() {
+		return time.Time{}
+	}
+	if t, ok := s.m.Task(taskID); ok {
+		s.engine.revokeRemoteClaims(t)
+	}
+	return time.Now().Add(2*distributedPoll + time.Second)
 }

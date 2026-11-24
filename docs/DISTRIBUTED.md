@@ -49,11 +49,14 @@ when that read fails.
 | Ask approval decided by a human | in-memory channel | the waiter also polls its `intercept_pending` row every 2 s | keep waiting (a read error is not a decision) |
 | Target approvals, pins, block rules, authorization artifact | read from Postgres per call | the same | as before (deny) |
 | Target-gate switch | `atomic.Bool` updated by the API | read from `tasks.target_gate` on every gated call | gate **on** |
-| Task pause / queued / terminal | in-memory flags | `GetTaskControl` before every claim; pause cancels running intents (polled every 2 s) | no claim |
+| Task pause / queued / terminal / deadline passed | in-memory flags | `GetTaskControl` before every claim and again right after it (a claim that lost the race goes back to open); pause or queued cancels running intents (polled every 2 s) | no claim; after 15 failed polls (~30 s) the node pauses the task locally |
 | Timeout or budget settle | `settling` flag | `tasks.dispatch_closed='settling'`: no new claim; running intents finish under the deadline / zero-budget wrap-up | no claim |
-| Delete | in-memory barrier | `dispatch_closed='deleting'`, remote claims revoked; the node stops the task | no claim |
-| Run budget | env `ARTEX_*_BUDGET_*`, ledger seeded from `llm_usage` | the control node publishes its budget in `settings.distributed_run_budgets`; every node syncs spend from `llm_usage` before each dispatch decision | no claim |
-| Noise governor | one governor | each live node runs `egress.Share(profile, liveNodes)`; the profile follows `settings.noise_profile` | keep the last share |
+| Delete | in-memory barrier | `dispatch_closed='deleting'`, remote claims revoked; the node stops the task; the control drain waits two polls for workers to stop writing | no claim |
+| Run budget | env `ARTEX_*_BUDGET_*`, ledger seeded from `llm_usage` | the control node publishes its budget in `settings.distributed_run_budgets`; a worker uses the last value it read, never its own env; every node syncs spend from `llm_usage` every 2 s (running intents' meters included) and the control node starts the wrap-up as soon as the synced budget cannot pay for a worker | no claim until a budget was read |
+| Noise governor | one governor | each live node runs `egress.Share(profile, liveNodes)`; the profile follows `settings.noise_profile` | keep the current governor |
+| Capture switch, global proxy, web search | in memory, set by the API | re-read every poll; a change blocks claims for that poll and rebuilds the task agents on the new path | no claim |
+| Claim lease | renewed every 15 s, lost on rejection | also cancelled after 60 s without a successful renewal, before another node may take it over at 90 s | run cancelled |
+| Control node alive | n/a | a worker claims only while a live `control` node is in `worker_nodes` (planner, deadline coordinator and settle run there) | no claim |
 | kill_work / steer_work / work pause and cancel | in-memory work map | `work_signals`, consumed by the node holding the claim (polled every 2 s); work pause/cancel waits until the intent leaves `running` | signal stays queued |
 | Settle drain | local in-flight count | plus live remote claims (`LiveRemoteRunningIntents`); when the grace expires, remote claims are revoked | counted as running |
 
@@ -175,3 +178,16 @@ These are known and carded on the ARTEX board:
 - **The capture switch is read at start-up on a worker node.** A worker node
   reads `traffic_capture` when it starts, so after the switch is flipped on the
   control node, restart the worker nodes.
+- **A browser MCP (stdio Playwright) on a worker node has no usable proxy.**
+  The shared MCP row names the control node's loopback proxy, which a worker
+  cannot reach, so its dials fail (closed). A worker-side credential relay is
+  needed.
+- **The compose overlay changes how the host reaches the capture proxy.** The
+  overlay binds the control proxy to `0.0.0.0` inside the container. A
+  host-side client (for example the browser extension through the published
+  `127.0.0.1:8788`) then arrives from the Docker gateway address and is
+  refused without a scope token.
+- **A worker node needs the control node to start first.** It exits at start
+  (and is restarted) until it can read the control node's published CA
+  certificate. It claims nothing until a control node has published its run
+  budget.
