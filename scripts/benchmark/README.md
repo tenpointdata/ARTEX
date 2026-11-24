@@ -211,7 +211,8 @@ What it holds fixed and checks:
   so the suite refuses to start while any task is running or queued
   (`--allow-busy` overrides knowingly) and never runs two tasks at once. Run it
   on a bench instance with the RSI lesson library `off` (`ARTEX_RSI_LESSONS`),
-  or a lesson learned in one arm leaks into the other.
+  or a lesson learned in one arm leaks into the other. Arms that pin lessons
+  need `ARTEX_RSI_LESSONS=bench` instead (see "Benchmark gate").
 - **Per-gate results with denominators.** Gates: `detected`, `component`,
   `class`, `keywords`, `proof` (over ground-truth entries of judged runs, with
   the "over detected" view alongside) and `flag_captured` (over drost runs).
@@ -227,6 +228,62 @@ What it holds fixed and checks:
 Output: `benchmark-results/suite-<suite>/<run-id>/` with `baseline.json` and
 `candidate.json` (stamp + per-run records, written after every run), the
 per-run directories under `runs/`, `comparison.json` and `report.md`.
+
+## Benchmark gate (E3, RSI Loop C)
+
+The gate turns suite output into an adoptable proposal without letting the loop
+adopt anything. `rsi_submit.py` talks to `/api/rsi/*` (same `ARTEX_TOKEN` /
+`ARTEX_JWT_KEY` handling as the runner) and has no adopt command: adoption needs
+the owner's password (step-up), through the API or the UI, and is not scriptable.
+The server needs `ARTEX_RSI_LOOP` on (otherwise proposals answer 409).
+
+```bash
+cd scripts/benchmark
+# 1. propose: a prompt body (the arm's role spec must be source "file") ...
+python3 rsi_submit.py propose --arm arms/planner-v2.json --round 1 --target planner \
+    --rationale "planner stops after the first finding on multi-step targets"
+#    ... or a lesson set (arm: {"name": "lessons-v1", "lessons": [12, 15]}, prompts all "current")
+python3 rsi_submit.py propose --arm arms/lessons-v1.json --round 1 --lessons --rationale "..."
+
+# 2. run the held-out suite for that same arm file against arms/baseline.json
+python3 eval_suite.py run --suite suites/heldout-v1.json --baseline arms/baseline.json \
+    --candidate arms/planner-v2.json --subject-model deepseek-chat --replicates 3 --seed 7
+
+# 3. attach the evidence; exits 1 unless the gate's verdict passed
+python3 rsi_submit.py evidence <proposal_id> benchmark-results/suite-heldout-v1/<run-id>
+python3 rsi_submit.py status
+```
+
+4. **Owner adoption**: the owner reviews `report.md` and the verdict, then adopts
+   the proposal with their password. A prompt body becomes a new `agent_prompts`
+   version; a lesson set is adopted through the lesson library's owner actions.
+5. **Rollback**: a one-step pointer change back to the previous `agent_prompts`
+   version (prompt bodies) or the previous lesson status (lessons); neither
+   needs a deploy.
+
+Binding: the server ties evidence to the proposal. For a prompt body,
+`candidate.stamp.prompt_sha[target]` must equal the sha256 (first 16 hex) of the
+proposed body and every other role must match the baseline. For lessons,
+`candidate.stamp.lesson_ids` must equal the proposal's sorted ids and
+`baseline.stamp.lesson_ids` must be `[]`. A proposal that does not match the
+files it was run from is rejected, so edit the arm file, not the proposal.
+
+Lesson arms. An arm may carry `"lessons": [ids]` (positive integers, deduplicated
+and sorted on load). Run the instance with `ARTEX_RSI_LESSONS=bench`: every new
+task's planner and worker then get exactly the pinned lessons, none when the list
+is empty. The suite pins each arm's set through `/api/rsi/bench-lessons`, reads it
+back (a mismatch aborts), stamps `lesson_ids` and `lessons_block_sha` per arm and
+restores the starting pin when it ends. The baseline arm must not carry lessons
+(it is the non-evolving side of the paired comparison). These two stamps differ
+between arms by design, so they are not among the invariants `compare` enforces,
+but each must stay constant across one arm's runs. Suites with no lesson arm never
+call the endpoint.
+
+What is outside the gate: skills and tool descriptions are adopted only through a
+git PR with review, never through this path. The immutable surfaces of `RSI.md`
+(gates, scope and authorization checks, injection defenses, tool allowlists and
+the code-owned prompt tails, including the lesson block itself) are outside every
+arm: a suite can vary only the editable prompt body and the pinned lesson ids.
 
 ## What this does not measure
 

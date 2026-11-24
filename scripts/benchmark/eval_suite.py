@@ -111,6 +111,18 @@ def assert_idle(api) -> None:
                          + "; run the suite on a dedicated bench instance (or pass --allow-busy knowingly)")
 
 
+def stamp_applied(stamp: dict, name: str, applied: dict) -> None:
+    """Record what the server reports for an arm; it must not change between that arm's runs.
+    lesson_ids / lessons_block_sha differ between arms by design, so they are not suite invariants."""
+    seen = stamp["prompt_sha"]
+    for r, h in applied["prompt_sha"].items():
+        if seen.setdefault(r, h) != h:
+            raise SystemExit(f"arm {name}: {r} prompt changed between runs ({seen[r]} -> {h})")
+    for key in ("lesson_ids", "lessons_block_sha"):
+        if stamp.setdefault(key, applied[key]) != applied[key]:
+            raise SystemExit(f"arm {name}: {key} changed between runs ({stamp[key]} -> {applied[key]})")
+
+
 def write_arm(out_dir: pathlib.Path, stamp: dict, records: list[dict]) -> dict:
     data = {"stamp": stamp, "records": records}
     (out_dir / f"{stamp['role']}.json").write_text(json.dumps(data, indent=2))
@@ -128,6 +140,9 @@ def cmd_run(opts) -> None:
     base, cand = arms.load_arm(opts.baseline), arms.load_arm(opts.candidate)
     if base["name"] == cand["name"]:
         raise SystemExit("baseline and candidate arms need different names")
+    if base["lessons"]:
+        raise SystemExit("the baseline arm must not pin lessons: the baseline does not evolve "
+                         "(RSI.md, paired evolving/non-evolving comparison)")
     for arm in (base, cand):
         arms.check_held_out(arm, target_ids)
 
@@ -160,17 +175,14 @@ def cmd_run(opts) -> None:
     records: dict[str, list[dict]] = {name: [] for name in by_name}
     targets = {t["id"]: t for t in suite["targets"]}
     plan = schedule(target_ids, list(by_name), opts.replicates, opts.seed)
-    switch = arms.PromptSwitch(api)
+    switch = arms.PromptSwitch(api, lessons=bool(cand["lessons"]))
     switch.snapshot()
     try:
         for i, (rep, tid, name) in enumerate(plan, 1):
             role, arm = by_name[name]
             print(f"[suite] {i}/{len(plan)} replicate {rep} target {tid} arm {name} ({role})")
-            prompt_sha = switch.apply(arm)
-            seen = stamps[name]["prompt_sha"]
-            for r, h in prompt_sha.items():
-                if seen.setdefault(r, h) != h:
-                    raise SystemExit(f"arm {name}: {r} prompt changed between runs ({seen[r]} -> {h})")
+            applied = switch.apply(arm)
+            stamp_applied(stamps[name], name, applied)
             run_id = f"{suite_run}-r{rep}-{slug(name)}-{slug(tid)}"
             args = run_bench.build_parser().parse_args(
                 run_argv(targets[tid], opts, run_id, out_dir / "runs", common["ground_truth_versions"][tid]))
