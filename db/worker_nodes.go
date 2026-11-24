@@ -76,13 +76,13 @@ FROM worker_nodes ORDER BY 8 DESC, role, node_id`, NodeTTL.Seconds())
 	return out, rows.Err()
 }
 
-// LiveExecutingNodes counts live nodes that run intent workers (workers > 0).
-// The noise governor divides its limits by it so N nodes stay within one
-// profile's budget. Never less than 1.
-func (d *DB) LiveExecutingNodes() (int, error) {
+// LiveNodes counts live nodes. Every node paces target traffic (a control
+// node with no workers still paces its capture proxy), so the noise governor
+// divides its limits by it and N nodes stay within one profile. Never below 1.
+func (d *DB) LiveNodes() (int, error) {
 	var n int
 	err := d.QueryRow(`SELECT count(*) FROM worker_nodes
-WHERE workers > 0 AND last_seen_at >= now() - $1 * INTERVAL '1 second'`, NodeTTL.Seconds()).Scan(&n)
+WHERE last_seen_at >= now() - $1 * INTERVAL '1 second'`, NodeTTL.Seconds()).Scan(&n)
 	if err != nil {
 		return 1, err
 	}
@@ -163,40 +163,29 @@ ORDER BY id`)
 	return out, rows.Err()
 }
 
-// LiveRunningIntents counts a task's intents in 'running' whose claim lease is
-// live (any node). The control node's settle and delete drains wait on it so
-// remote work is counted, not only this process's in-flight operations.
-func (d *DB) LiveRunningIntents(explorationID int64) (int64, error) {
+// LiveRemoteRunningIntents counts a task's intents in 'running' whose claim is
+// held by a worker node ("<node>/work#N") and whose lease is live. The control
+// node's settle drain waits on it, so remote work counts, not only this
+// process's in-flight operations.
+func (d *DB) LiveRemoteRunningIntents(explorationID int64) (int64, error) {
 	var n int64
 	err := d.QueryRow(`SELECT count(*) FROM exploration_nodes
-WHERE exploration_id=$1 AND kind='intent' AND state='running'
+WHERE exploration_id=$1 AND kind='intent' AND state='running' AND owner LIKE '%/work#%'
   AND last_heartbeat_at >= now() - $2 * INTERVAL '1 second'`, explorationID, IntentClaimTTL.Seconds()).Scan(&n)
 	return n, err
 }
 
-// RevokeRemoteIntentClaims fences every running claim of the exploration whose
-// owner does not start with localPrefix: the unclaim token is cleared and the
+// RevokeRemoteIntentClaims fences every running claim of the exploration held
+// by a worker node ("<node>/work#N"): the unclaim token is cleared and the
 // intent returns to open, so the remote holder's next heartbeat fails and it
 // stops (AbortWorkClaimLost) and every fenced write it attempts is rejected.
-func (d *DB) RevokeRemoteIntentClaims(explorationID int64, localPrefix string) (int64, error) {
+func (d *DB) RevokeRemoteIntentClaims(explorationID int64) (int64, error) {
 	res, err := d.Exec(`UPDATE exploration_nodes SET state='open', unclaim_token=NULL, completed_at=NULL
-WHERE exploration_id=$1 AND kind='intent' AND state='running' AND COALESCE(owner,'') NOT LIKE $2 || '%'`,
-		explorationID, localPrefix)
+WHERE exploration_id=$1 AND kind='intent' AND state='running' AND owner LIKE '%/work#%'`, explorationID)
 	if err != nil {
 		return 0, err
 	}
 	return res.RowsAffected()
-}
-
-// IntentClaimOwner returns the owner of a running intent ("" when it is not running).
-func (s *ExplorationStore) IntentClaimOwner(id int64) (string, error) {
-	var owner sql.NullString
-	err := s.db.QueryRow(`SELECT owner FROM exploration_nodes WHERE id=$1 AND exploration_id=$2 AND kind='intent' AND state='running'`,
-		id, s.expID).Scan(&owner)
-	if err == sql.ErrNoRows {
-		return "", nil
-	}
-	return owner.String, err
 }
 
 // IntentState returns an intent's current state ("" when it does not exist).
@@ -209,27 +198,65 @@ func (s *ExplorationStore) IntentState(id int64) (string, error) {
 	return st, err
 }
 
-// SettledIntentsSince returns the ids of the exploration's intents that reached
-// a terminal state at or after since, with the newest completion time seen.
-func (s *ExplorationStore) SettledIntentsSince(since time.Time) ([]int64, time.Time, error) {
-	rows, err := s.db.Query(`SELECT id, completed_at FROM exploration_nodes
+// SettledIntent is an intent that reached a terminal state.
+type SettledIntent struct {
+	ID    int64
+	Owner string // the claim owner that settled it
+}
+
+// SettledIntentsSince returns the exploration's intents that reached a terminal
+// state after since, with the newest completion time seen.
+func (s *ExplorationStore) SettledIntentsSince(since time.Time) ([]SettledIntent, time.Time, error) {
+	rows, err := s.db.Query(`SELECT id, COALESCE(owner,''), completed_at FROM exploration_nodes
 WHERE exploration_id=$1 AND kind='intent' AND completed_at > $2 ORDER BY completed_at`, s.expID, since)
 	if err != nil {
 		return nil, since, err
 	}
 	defer rows.Close()
-	var ids []int64
+	var ids []SettledIntent
 	latest := since
 	for rows.Next() {
-		var id int64
+		var si SettledIntent
 		var at time.Time
-		if err := rows.Scan(&id, &at); err != nil {
+		if err := rows.Scan(&si.ID, &si.Owner, &at); err != nil {
 			return nil, since, err
 		}
-		ids = append(ids, id)
+		ids = append(ids, si)
 		if at.After(latest) {
 			latest = at
 		}
 	}
 	return ids, latest, rows.Err()
+}
+
+// LiveNodeWithRole reports whether a live node other than self has role.
+// A worker node refuses to claim while a live RoleAll node exists: that
+// process keeps its control state in memory only.
+func (d *DB) LiveNodeWithRole(role, self string) (bool, error) {
+	var ok bool
+	err := d.QueryRow(`SELECT EXISTS (SELECT 1 FROM worker_nodes WHERE role=$1 AND node_id<>$2
+  AND last_seen_at >= now() - $3 * INTERVAL '1 second')`, role, self, NodeTTL.Seconds()).Scan(&ok)
+	return ok, err
+}
+
+// LatestActivityID is the newest activity id of the exploration (0 = none).
+func (s *ExplorationStore) LatestActivityID() (int64, error) {
+	var id int64
+	err := s.db.QueryRow(`SELECT COALESCE(max(id),0) FROM activity WHERE exploration_id=$1`, s.expID).Scan(&id)
+	return id, err
+}
+
+// RunningIntentClaim returns the task and claim owner of a running intent;
+// ok is false when the intent is not running.
+func (d *DB) RunningIntentClaim(intentID int64) (taskID int64, owner string, ok bool, err error) {
+	var o sql.NullString
+	err = d.QueryRow(`SELECT t.id, n.owner FROM exploration_nodes n JOIN tasks t ON t.exploration_id = n.exploration_id
+WHERE n.id=$1 AND n.kind='intent' AND n.state='running'`, intentID).Scan(&taskID, &o)
+	if err == sql.ErrNoRows {
+		return 0, "", false, nil
+	}
+	if err != nil {
+		return 0, "", false, err
+	}
+	return taskID, o.String, true, nil
 }

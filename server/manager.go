@@ -80,7 +80,10 @@ type Task struct {
 	llmMu                sync.RWMutex
 	// targetGate is the task's opt-in to the approval gate for asset targets.
 	// Atomic: it is switched through the API while tool calls read it.
-	targetGate  atomic.Bool
+	targetGate atomic.Bool
+	// gateLive, when set (worker nodes, E7), replaces targetGate as the gate
+	// switch: it reads the task row on every call, failing closed.
+	gateLive    func() bool
 	interceptor *intercept.Interceptor // owner of the target gate, handed to the scope
 
 	assessmentIdentity config.AssessmentIdentity // assigned by the manager before publishing the task
@@ -1069,8 +1072,12 @@ func (m *Manager) taskFromPG(pt *pgdb.Task) *Task {
 // Enabled reads the task's opt-in flag on every call, so a switch through the
 // API takes effect on the next tool call.
 func (t *Task) targetScope(wait time.Duration) intercept.TargetScope {
+	enabled := t.targetGate.Load
+	if t.gateLive != nil {
+		enabled = t.gateLive
+	}
 	return intercept.TargetScope{
-		TaskID: t.ID, Enabled: t.targetGate.Load, WaitBound: wait, Interceptor: t.interceptor,
+		TaskID: t.ID, Enabled: enabled, WaitBound: wait, Interceptor: t.interceptor,
 		AssessmentIdentity: t.assessmentIdentity,
 	}
 }
@@ -2151,4 +2158,13 @@ func (t *Task) drainTriggers() []agent.TriggerEvent {
 	ev := t.pendingTriggers
 	t.pendingTriggers = nil
 	return ev
+}
+
+// forgetTaskHandle drops a task from the in-memory map only (a worker node
+// stops serving a task that ended or was deleted elsewhere; nothing on disk
+// or in the database is touched).
+func (m *Manager) forgetTaskHandle(id string) {
+	m.mu.Lock()
+	delete(m.tasks, id)
+	m.mu.Unlock()
 }
