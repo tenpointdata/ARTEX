@@ -117,32 +117,13 @@ with `ARTEX_RSI_LESSONS=off`. Verified on Docker Desktop arm64: `up --build` bri
 isolation self-test passes, egress filter installed, UI 200, `ARTEX_RSI_LESSONS=off` in the container.
 No benchmark run was made against it.
 
-**2026-11-24 — E5 engagement governance (card `c-669406`)** is on branch `ej/20261124-055929-bd2253`. It
-is tested against Postgres 17 on macOS; see `docs/GOVERNANCE.md`.
-- **Roles.** `admin`, `operator`, `reviewer` and `client_read` work over the existing JWT. The users
-  are in `artex_users` and managed at `/api/users`. The policy table is `server/rbac_policy.go`,
-  enforced in `requireAuth`. `ARTEX` stays the break-glass admin.
-- **Authorization artifact.** Each task can have a versioned, immutable artifact covering scope, time
-  window and technique classes (`/api/tasks/{id}/authorization`). It is enforced only inside the
-  existing target gate (`intercept/authorization.go`, called from `CheckTargets`/`run`,
-  `CheckUngated`/`ungated`, and the dial and redirect paths). A spawned child task inherits it.
-- **Audit chain.** `audit_chain` is hash-chained and written by row triggers on `intercept_pending`,
-  `artex_users` and `engagement_authorizations`. Logins and refusals by role are appended too.
-  `GET /api/intercept/history/chain` lists it and `/chain/verify` checks it.
-- **Migration numbering.** Migration **0016** holds the schema, because 0015 is taken by the E2
-  integrations branch. If E2 has not merged when this branch lands, renumber whichever merges second.
-  The loader fails closed on a pending version older than one already applied.
-- **Tests.** With `ARTEX_PG_DSN`, all of `go test ./...` passes except three tests:
-  - `TestGateOffTaskIsUnchanged`, which also fails on base `1abe24f` (card `c-3157b4`);
-  - `TestConnectWithoutPasswordRealPG`, because the local Postgres uses trust auth;
-  - the SOCKS5 UDP test, because macOS cannot bind 127.0.0.2.
-- **Head-lock contention fixed (card `c-ba9f64`).** Migration **0018** recreates the three audit row
-  triggers as `DEFERRABLE INITIALLY DEFERRED` constraint triggers, so `audit_chain_head` is locked
-  only at commit. A task archive no longer stalls gate decisions or logins, and the
-  write-then-lock deadlock is gone. 0018 rather than 0017 because the E1 branch
-  (`ej/20261124-083744-02fa3c`) takes 0017. Tests: `db/audit_chain_concurrency_test.go` (both
-  concurrency tests fail without 0018). This branch merged the E5 branch in, so it carries E5 too.
-- **Web UI:** see the c-869050 entry above.
+**2026-11-24 — E5 engagement governance (card `c-669406`)** is on `main` (#31); see `docs/GOVERNANCE.md`.
+Roles `admin`/`operator`/`reviewer`/`client_read` over the JWT (`artex_users`, `/api/users`, policy in
+`server/rbac_policy.go`, enforced in `requireAuth`; `ARTEX` is the break-glass admin). The per-task
+authorization artifact is enforced only inside the target gate (`intercept/authorization.go`). `audit_chain`
+is hash-chained by deferred row triggers (migrations 0016, 0018); `/api/intercept/history/chain[/verify]`.
+With `ARTEX_PG_DSN`, `go test ./...` fails only `TestGateOffTaskIsUnchanged` (`c-3157b4`),
+`TestConnectWithoutPasswordRealPG` (trust auth) and the macOS SOCKS5 UDP test.
 
 **2026-11-24 — client_read bound to companies (card `c-5b5421`, in review)** is on branch
 `ej/20261124-110647-182fa9`. That branch merged the E5 branch (PR #16) in, so it carries E5 too.
