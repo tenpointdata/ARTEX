@@ -9,10 +9,9 @@ import (
 
 // sharedHeaders apply to every response, API included.
 var sharedHeaders = map[string]string{
-	"X-Content-Type-Options":  "nosniff",
-	"Referrer-Policy":         "same-origin",
-	"X-Frame-Options":         "SAMEORIGIN",
-	"Content-Security-Policy": "frame-ancestors 'self'",
+	"X-Content-Type-Options": "nosniff",
+	"Referrer-Policy":        "same-origin",
+	"X-Frame-Options":        "SAMEORIGIN",
 }
 
 // consoleOnlyHeaders must stay off the API: they are document headers.
@@ -33,6 +32,21 @@ func TestSharedHeadersEverywhere(t *testing.T) {
 			if got := sent.Get(name); got != want {
 				t.Errorf("%s: %s = %q, want %q", path, name, got, want)
 			}
+		}
+	}
+}
+
+// The API gets the deny-everything policy; the console documents get the real one.
+func TestCSPByLayer(t *testing.T) {
+	handler := (&Server{}).Handler()
+	for path, want := range map[string]string{
+		"/api/health": "default-src 'none'; frame-ancestors 'none'",
+		"/":           consoleCSP(nil),
+	} {
+		res := httptest.NewRecorder()
+		handler.ServeHTTP(res, httptest.NewRequest(http.MethodGet, path, nil))
+		if got := res.Result().Header.Get("Content-Security-Policy"); got != want {
+			t.Errorf("%s: CSP = %q, want %q", path, got, want)
 		}
 	}
 }

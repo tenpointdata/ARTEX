@@ -2724,5 +2724,6 @@
   "Search company…": "搜索企业…",
   "Failed to load companies": "加载企业失败",
   "No company found": "未找到企业",
-  "Manage companies": "管理企业"
+  "Manage companies": "管理企业",
+  "Remote image blocked ({host}): click to open": "已拦截远程图片（{host}）：点击打开"
 }

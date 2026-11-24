@@ -2724,5 +2724,6 @@
   "Search company…": "Şirket ara…",
   "Failed to load companies": "Şirketler yüklenemedi",
   "No company found": "Şirket bulunamadı",
-  "Manage companies": "Şirketleri yönet"
+  "Manage companies": "Şirketleri yönet",
+  "Remote image blocked ({host}): click to open": "Uzak görsel engellendi ({host}): açmak için tıklayın"
 }
