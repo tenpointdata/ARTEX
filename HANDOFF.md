@@ -327,6 +327,14 @@ Card ids in brackets:
 
 ## Decisions
 
+- **2026-11-24** — c-5018f6: a wrong current password on `POST /api/auth/change-password` answers
+  **403**, not 401 (`server/auth.go` `authChangePassword`), matching `authInit`. `web/src/lib/api.ts`
+  `http()` reads every 401 as an expired session and redirects to `/login`, so a 401 signed the user
+  out over a typo. The server side was changed rather than exempting the route in `http()`, so a really
+  expired session still redirects from every route. Still open: the unmerged c-f4115c branch
+  (`ej/20261124-133353-5aceb1`) adds `changeUserPassword` with its own
+  `writeErr(w, 401, "Current password is wrong")`, and `server/user_password_pg_test.go` pins that 401.
+  Whoever merges it must flip both to 403.
 - **2026-11-24** — E3 (c-d25ff9): "one explicit owner action" is an owner-password step-up on adopt,
   because on single-user ARTEX a bearer token minted from `jwt.key` (what the loop holds) is the same
   identity as the owner. The server recomputes every verdict from raw records rather than accepting the

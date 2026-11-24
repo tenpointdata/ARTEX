@@ -86,6 +86,19 @@ func TestChangePasswordRevokesOldTokenAndKeepsItWhenSaveFails(t *testing.T) {
 		t.Fatal("token from init was rejected")
 	}
 
+	// A wrong current password is 403 (not 401, which the UI reads as an
+	// expired session) and leaves the session valid.
+	wrong := httptest.NewRequest("POST", "/api/auth/change-password", strings.NewReader(`{"old_password":"not-the-password","new_password":"correct-horse-2"}`))
+	wrong.Header.Set("Authorization", "Bearer "+issued.Token)
+	w = httptest.NewRecorder()
+	s.authChangePassword(w, wrong)
+	if w.Code != 403 || !strings.Contains(w.Body.String(), "Current password is wrong") {
+		t.Fatalf("wrong current password: status=%d body=%s, want 403", w.Code, w.Body.String())
+	}
+	if !s.sessionOK(issued.Token) {
+		t.Fatal("a wrong current password revoked the session")
+	}
+
 	change := httptest.NewRequest("POST", "/api/auth/change-password", strings.NewReader(`{"old_password":"correct-horse-1","new_password":"correct-horse-2"}`))
 	change.Header.Set("Authorization", "Bearer "+issued.Token)
 	w = httptest.NewRecorder()

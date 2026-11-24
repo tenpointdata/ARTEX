@@ -576,7 +576,9 @@ func (s *Server) authChangePassword(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := bcrypt.CompareHashAndPassword([]byte(hash), []byte(req.OldPassword)); err != nil {
-		writeErr(w, 401, "Current password is wrong")
+		// 403, not 401: the frontend treats any 401 as an expired session and
+		// redirects to /login, which would sign the user out over a typo.
+		writeErr(w, 403, "Current password is wrong")
 		return
 	}
 	newHash, err := bcrypt.GenerateFromPassword([]byte(req.NewPassword), bcrypt.DefaultCost)

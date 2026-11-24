@@ -108,8 +108,8 @@ func TestChangePasswordRateLimitReturns429WithRetryAfter(t *testing.T) {
 	_, _, post := changePasswordServer(t, clk)
 	const ip = "192.0.2.40:40000"
 	for i := 0; i < loginMaxAttempts; i++ {
-		if w := post(ip, "wrong-password-xx", "correct-horse-9"); w.Code != 401 {
-			t.Fatalf("attempt %d: status=%d want 401; body=%s", i+1, w.Code, w.Body.String())
+		if w := post(ip, "wrong-password-xx", "correct-horse-9"); w.Code != 403 {
+			t.Fatalf("attempt %d: status=%d want 403; body=%s", i+1, w.Code, w.Body.String())
 		}
 	}
 	w := post(ip, changePasswordOK, "correct-horse-9")
@@ -132,8 +132,8 @@ func TestChangePasswordRateLimitFollowsStolenTokenAcrossIPs(t *testing.T) {
 	_, _, post := changePasswordServer(t, clk)
 	for i := 0; i < loginMaxAttempts; i++ {
 		remote := fmt.Sprintf("198.51.100.%d:40000", i+1)
-		if w := post(remote, "wrong-password-xx", "correct-horse-9"); w.Code != 401 {
-			t.Fatalf("attempt %d from %s: status=%d want 401; body=%s", i+1, remote, w.Code, w.Body.String())
+		if w := post(remote, "wrong-password-xx", "correct-horse-9"); w.Code != 403 {
+			t.Fatalf("attempt %d from %s: status=%d want 403; body=%s", i+1, remote, w.Code, w.Body.String())
 		}
 	}
 	if w := post("203.0.113.9:40000", changePasswordOK, "correct-horse-9"); w.Code != 429 {
@@ -146,8 +146,8 @@ func TestChangePasswordSuccessResetsCounter(t *testing.T) {
 	s, tok, post := changePasswordServer(t, clk)
 	const ip = "192.0.2.41:40000"
 	for i := 0; i < loginMaxAttempts-1; i++ {
-		if w := post(ip, "wrong-password-xx", "correct-horse-9"); w.Code != 401 {
-			t.Fatalf("attempt %d: status=%d want 401; body=%s", i+1, w.Code, w.Body.String())
+		if w := post(ip, "wrong-password-xx", "correct-horse-9"); w.Code != 403 {
+			t.Fatalf("attempt %d: status=%d want 403; body=%s", i+1, w.Code, w.Body.String())
 		}
 	}
 	if w := post(ip, changePasswordOK, "correct-horse-2"); w.Code != 200 {
@@ -181,8 +181,8 @@ func TestChangePasswordSuccessResetsCounter(t *testing.T) {
 		return rec
 	}
 	for i := 0; i < loginMaxAttempts; i++ {
-		if w := post2("wrong-password-xx", "correct-horse-9"); w.Code != 401 {
-			t.Fatalf("after reset attempt %d: status=%d want 401; body=%s", i+1, w.Code, w.Body.String())
+		if w := post2("wrong-password-xx", "correct-horse-9"); w.Code != 403 {
+			t.Fatalf("after reset attempt %d: status=%d want 403; body=%s", i+1, w.Code, w.Body.String())
 		}
 	}
 	if w := post2("wrong-password-xx", "correct-horse-9"); w.Code != 429 {
@@ -205,7 +205,7 @@ func TestChangePasswordUnauthenticatedDoesNotCount(t *testing.T) {
 			t.Fatalf("unauthenticated attempt %d: status=%d want 401; body=%s", i+1, w.Code, w.Body.String())
 		}
 	}
-	if w := post(ip, "wrong-password-xx", "correct-horse-9"); w.Code != 401 {
+	if w := post(ip, "wrong-password-xx", "correct-horse-9"); w.Code != 403 {
 		t.Fatalf("counted unauthenticated attempts: status=%d body=%s", w.Code, w.Body.String())
 	}
 }
