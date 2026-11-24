@@ -797,6 +797,11 @@ func (s *Server) dropTaskAgents(id string) {
 	if s.m.traffic != nil {
 		s.m.traffic.ForgetScope(id)
 	}
+	if s.m.remoteProxy != nil {
+		if n, err := strconv.ParseInt(id, 10, 64); err == nil {
+			s.m.remoteProxy.Forget(n)
+		}
+	}
 }
 
 func (s *Server) agentsForTask(t *Task) *taskAgentBundle {
