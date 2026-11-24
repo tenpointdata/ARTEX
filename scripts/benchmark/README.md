@@ -19,7 +19,7 @@ benchmark harness (Apache-2.0).
 | `suite_stats.py` | Pure aggregation: per-gate rates with denominators, Wilson/Newcombe intervals, paired table |
 | `arms.py`, `arms/*.json` | Prompt-version arms and the server-side prompt switch (apply, read back, restore) |
 | `suites/*.json` | Target sets: `heldout-v1` (adoption evidence) and `dev-v1` (proposing and debugging), disjoint |
-| `ground_truth/dvga.json` | Damn Vulnerable GraphQL Application 2.2.0 ground truth (11 entries, DoS classes excluded) |
+| `ground_truth/dvga.json` | Damn Vulnerable GraphQL Application 2.2.0 ground truth (v2, 12 entries hand-verified against the 2.2.0 source, each citing its resolver/helper; DoS classes excluded) |
 | `benchmark-results/` | Output (gitignored): one directory per run with `report.md` + `results.json` |
 
 ## Scoring

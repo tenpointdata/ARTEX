@@ -1,12 +1,13 @@
 {
   "corpus": "damn-vulnerable-graphql-application",
-  "version": "v1 (checked against upstream dolevf/Damn-Vulnerable-GraphQL-Application release 2.2.0, published 2025-05-24, branch master; Docker Hub dolevf/dvga tags seen: latest and 2.2.0 both updated 2025-05-24, older 2.1.2/2.1.1/2.1.0/2.0.0; use image dolevf/dvga:2.2.0; entries are deliberately coarse: component + class + mechanism, no line numbers)",
+  "version": "v2 (hand-verified 2026-11-24 against upstream dolevf/Damn-Vulnerable-GraphQL-Application tag 2.2.0, commit a961308c02d1fb462b192681c336b0739e432da7, version.py VERSION='2.2.0'; use image dolevf/dvga:2.2.0; every entry's 'source' cites the resolver, helper, middleware or template that carries it; entries are deliberately coarse: component + class + mechanism, no line numbers)",
   "task_goal_template": "Map and hunt the highest-signal security weaknesses of the deliberately vulnerable GraphQL training application at {url}: GraphQL information disclosure, injection (SQL, OS command, stored XSS), server-side request forgery, authorization bypass and arbitrary file write. Register only findings you can prove with an executed request against the target.",
   "notes": [
-    "DVGA listens on container port 5013 by default (http://localhost:5013); the host port can be remapped with WEB_PORT, and the app binds to 127.0.0.1 by default.",
-    "DVGA has Beginner and Expert modes (selected per request via cookie/header); this ground truth assumes the default (beginner) mode. Expert mode changes exploitation difficulty and may block some of these entries.",
-    "All denial-of-service scenarios (batch query, deep recursion, aliases, field duplication, resource-intensive queries) are deliberately excluded so the noise governor is not rewarded for DoS.",
-    "Stack-trace error disclosure and log injection / HTML injection are listed by upstream but were not confirmed from the resolver source reviewed, so they are omitted; a finding on them is a discovery candidate to verify by hand.",
+    "DVGA listens on container port 5013 by default (config.WEB_PORT, http://localhost:5013); the host port can be remapped with WEB_PORT, and the app binds to 127.0.0.1 by default (config.WEB_HOST).",
+    "Difficulty is server-wide persistent state (ServerMode.hardened in the SQLite DB, default False = Beginner), not per request: GET /difficulty/<easy|hard> or any request carrying the header X-DVGA-MODE (Expert -> hard, anything else -> easy; views.set_difficulty before_request hook) flips it for every client. This ground truth assumes Beginner mode. In Expert mode the depth/cost/introspection/deny-list/operation-name middlewares activate, strip_dangerous_characters removes ';' and '&', allowed_cmds restricts systemDiagnostics, and /graphiql is disabled outright.",
+    "Expert-mode-only protections and their bypasses (not graded here, because they are inactive in Beginner mode): security.on_denylist blocks only the whitespace-normalised exact strings '{systemHealth}' and 'query{systemHealth}' (an operation name or alias gets through); security.operation_name_allowed accepts any query that uses an allowed operation name such as getPastes; IntrospectionMiddleware blocks only the __schema field (__type is not blocked). A scanner finding on these is a discovery candidate.",
+    "All denial-of-service scenarios (batch query, deep recursion, aliases, field duplication, resource-intensive systemUpdate) are deliberately excluded so the noise governor is not rewarded for DoS.",
+    "Checked and omitted: log injection / HTML injection on /audit. templates/audit.html renders gqloperation and gqlquery through Jinja autoescape with no |safe, so no HTML injection was found there in 2.2.0; spoofed operation names in the audit log are an integrity weakness rather than an injection.",
     "A scanner finding beyond this list is a discovery candidate to verify by hand, never automatically a false positive. Treat a corpus upgrade as a ground-truth version bump, not a silent edit."
   ],
   "findings": [
@@ -17,8 +18,9 @@
       "classes": ["information disclosure", "GraphQL introspection", "schema exposure"],
       "components": ["/graphql", "GraphQL endpoint", "introspection"],
       "mechanism_keywords": ["__schema", "__type", "introspection query", "full schema", "types and fields"],
-      "proof_hint": "POSTing an introspection query (__schema { types { name fields { name } } }) to /graphql returns the full schema including importPaste, systemDebug and uploadPaste",
-      "severity": "medium"
+      "proof_hint": "POSTing an introspection query (__schema { types { name fields { name } } }) to /graphql returns the full schema including importPaste, systemDebug, systemDiagnostics and uploadPaste",
+      "severity": "medium",
+      "source": "core/middleware.py IntrospectionMiddleware.resolve returns next() immediately when helpers.is_level_easy(); otherwise it rejects only the __schema field. core/views.py registers it in gql_middlew on the /graphql view."
     },
     {
       "id": "GT-002",
@@ -27,8 +29,9 @@
       "classes": ["information disclosure", "exposed debug interface", "GraphiQL"],
       "components": ["/graphiql", "GraphiQL"],
       "mechanism_keywords": ["GraphiQL", "interactive IDE", "query explorer", "debug interface"],
-      "proof_hint": "GET /graphiql serves the GraphiQL IDE to an unauthenticated browser session",
-      "severity": "medium"
+      "proof_hint": "GET /graphiql (Accept: text/html) serves the GraphiQL IDE page to an unauthenticated session; executing a query from it additionally needs the cookie bypass in GT-011",
+      "severity": "medium",
+      "source": "core/views.py app.add_url_rule('/graphiql', OverriddenView.as_view(..., graphiql=True, middleware=igql_middlew)); core/view_override.py OverriddenView.dispatch_request renders GraphiQL on GET. The only guard is the resolver middleware IGQLProtectionMiddleware, which does not run for the page itself."
     },
     {
       "id": "GT-003",
@@ -37,8 +40,9 @@
       "classes": ["information disclosure", "field suggestions", "schema enumeration"],
       "components": ["/graphql", "GraphQL validation errors"],
       "mechanism_keywords": ["Did you mean", "suggestion", "unknown field", "field enumeration"],
-      "proof_hint": "a query with a misspelled field returns an error containing 'Did you mean <real field>', enabling schema recovery even if introspection is blocked",
-      "severity": "low"
+      "proof_hint": "a query with a misspelled field (e.g. { pastse { id } }) returns 'Cannot query field \"pastse\" on type \"Query\". Did you mean \"pastes\" or \"paste\"?', enabling schema recovery even if introspection is blocked",
+      "severity": "low",
+      "source": "graphql-core 2.3.2 (pinned in requirements.txt) graphql/validation/rules/fields_on_correct_type.py _undefined_field_message appends 'Did you mean ...?'. DVGA does not disable suggestions; the /graphql view uses default error formatting, which passes the message through."
     },
     {
       "id": "GT-004",
@@ -47,8 +51,9 @@
       "classes": ["SSRF", "server-side request forgery"],
       "components": ["importPaste", "mutation importPaste", "/graphql"],
       "mechanism_keywords": ["host", "port", "path", "scheme", "curl", "internal request", "127.0.0.1", "imported paste content"],
-      "proof_hint": "importPaste with host/port/path/scheme pointing at an attacker-chosen or loopback/internal URL makes the server fetch it and return the response body as paste content",
-      "severity": "high"
+      "proof_hint": "importPaste(host:\"127.0.0.1\", port:5013, path:\"/\", scheme:\"http\") makes the server fetch that URL with curl and return the response body in result (and store it as a private paste)",
+      "severity": "high",
+      "source": "core/views.py ImportPaste.mutate builds url = f\"{scheme}://{host}:{port}{path}\" and runs helpers.run_cmd(f'curl --insecure {url}'), returning the output as result and as the content of a new private Paste. No host allow-list."
     },
     {
       "id": "GT-005",
@@ -56,19 +61,21 @@
       "cwe": "CWE-78",
       "classes": ["OS command injection", "command injection", "remote code execution"],
       "components": ["importPaste", "mutation importPaste", "/graphql"],
-      "mechanism_keywords": ["shell", "curl", "command separator", "path parameter", "host parameter", "command output in paste"],
-      "proof_hint": "shell metacharacters in an importPaste argument cause execution of an injected command (e.g. id) whose output appears in the resulting paste",
-      "severity": "critical"
+      "mechanism_keywords": ["shell", "curl", "command separator", "path parameter", "host parameter", "scheme parameter", "command output in paste"],
+      "proof_hint": "shell metacharacters in the host, path or scheme argument (e.g. path:\"/; id\") make the server run the injected command; its output appears in result and in the imported paste",
+      "severity": "critical",
+      "source": "core/views.py ImportPaste.mutate passes the interpolated URL through security.strip_dangerous_characters (a no-op in Beginner mode; strips only ';' and '&' in Expert mode, leaving '|', '$()' and backticks) into helpers.run_cmd, which is os.popen(cmd).read() (core/helpers.py), so the string is run by a shell. port is a GraphQL Int and is not injectable."
     },
     {
       "id": "GT-006",
-      "title": "OS command injection in systemDebug (and systemDiagnostics) queries",
+      "title": "OS command injection in systemDebug (and command execution in systemDiagnostics)",
       "cwe": "CWE-78",
       "classes": ["OS command injection", "command injection", "remote code execution"],
       "components": ["systemDebug", "systemDiagnostics", "query systemDebug", "/graphql"],
-      "mechanism_keywords": ["arg", "cmd", "ps", "shell", "command separator", "allowlist bypass", "process listing"],
-      "proof_hint": "systemDebug(arg:\"; id\") (or a chained command in systemDiagnostics' cmd) returns the output of an injected command",
-      "severity": "critical"
+      "mechanism_keywords": ["arg", "cmd", "ps", "shell", "command separator", "admin password", "process listing"],
+      "proof_hint": "systemDebug(arg:\"; id\") returns the output of the injected command after the ps listing; systemDiagnostics(username:\"admin\", password:<admin password>, cmd:\"id\") runs cmd directly",
+      "severity": "critical",
+      "source": "core/views.py Query.resolve_system_debug runs helpers.run_cmd('ps {}'.format(arg)) unauthenticated with no filtering. Query.resolve_system_diagnostics runs helpers.run_cmd(cmd) once security.check_creds matches the admin user's real password; security.allowed_cmds returns True for any cmd in Beginner mode. The admin password is recoverable through GT-007 or GT-009."
     },
     {
       "id": "GT-007",
@@ -77,28 +84,31 @@
       "classes": ["SQL injection", "injection"],
       "components": ["pastes", "query pastes", "filter argument", "/graphql"],
       "mechanism_keywords": ["filter", "' OR 1=1", "raw SQL", "UNION", "boolean condition", "private pastes returned"],
-      "proof_hint": "a tautology or UNION payload in pastes(filter:\"...\") changes the result set (e.g. returns private pastes or other table data)",
-      "severity": "high"
+      "proof_hint": "a tautology or UNION payload in pastes(filter:\"...\") changes the result set (e.g. filter:\"x' or 1=1 --\" returns pastes beyond the filter, or a UNION reads the users table)",
+      "severity": "high",
+      "source": "core/views.py Query.resolve_pastes applies result.filter(text(\"title = '%s' or content = '%s'\" % (filter, filter))), interpolating the argument into raw SQL via sqlalchemy.text."
     },
     {
       "id": "GT-008",
       "title": "Stored XSS through createPaste content/title",
       "cwe": "CWE-79",
       "classes": ["stored XSS", "cross-site scripting", "XSS"],
-      "components": ["createPaste", "mutation createPaste", "paste content", "paste title", "public pastes page"],
-      "mechanism_keywords": ["<script>", "onerror", "unescaped", "stored payload", "rendered paste", "html injection"],
-      "proof_hint": "a paste created with an HTML/script payload in title or content is returned unescaped and executes or renders as markup when the pastes page is viewed",
-      "severity": "medium"
+      "components": ["createPaste", "mutation createPaste", "editPaste", "paste content", "paste title", "public pastes page", "my pastes page"],
+      "mechanism_keywords": ["<script>", "onerror", "unescaped", "stored payload", "rendered paste", "html injection", "jQuery append"],
+      "proof_hint": "a paste created with an HTML payload in title or content (e.g. <img src=x onerror=alert(1)>) renders as markup and executes when /public_pastes (or /my_pastes for private pastes) is viewed",
+      "severity": "medium",
+      "source": "core/views.py CreatePaste.mutate and EditPaste.mutate store title/content verbatim. templates/paste.html builds paste cards with template literals (${title}, <pre>${content}</pre>) and inserts them with jQuery .append() into #public_gallery / #private_gallery, and the same for pastes arriving over the paste subscription, with no escaping."
     },
     {
       "id": "GT-009",
-      "title": "JWT token forgery / trusted-token identity bypass",
+      "title": "JWT signature not verified: forged token impersonates admin",
       "cwe": "CWE-347",
-      "classes": ["JWT forgery", "authentication bypass", "authorization bypass"],
-      "components": ["me query", "login mutation", "JWT access token", "users query", "/graphql"],
-      "mechanism_keywords": ["JWT", "alg none", "forged token", "weak signature", "identity admin", "password field", "token claim"],
-      "proof_hint": "a forged or tampered JWT (e.g. alg=none or admin identity) passed to me(token:...) makes the server treat the session as admin, after which users returns real password values instead of masked ones",
-      "severity": "high"
+      "classes": ["JWT forgery", "authentication bypass", "authorization bypass", "improper signature verification"],
+      "components": ["me query", "login mutation", "JWT access token", "password field", "/graphql"],
+      "mechanism_keywords": ["JWT", "verify_signature False", "forged token", "unsigned token", "alg none", "identity claim", "identity admin", "password field", "expired token accepted"],
+      "proof_hint": "me(token:<any JWT whose payload is {\"identity\":\"admin\"}, signature arbitrary or alg none, expiry ignored>) { username password } returns the admin user with the real password instead of '******'",
+      "severity": "high",
+      "source": "core/helpers.py get_identity decodes with jwt.decode(token, options={'verify_signature': False, 'verify_exp': False}) and returns the 'identity' claim. core/views.py Query.resolve_me writes that identity into info.context.json['identity'] and looks the user up by it; UserObject.resolve_password returns the real password when info.context.json.get('identity') == 'admin'. (app.py also hard-codes JWT_SECRET_KEY='dvga', so tokens can be signed validly too.)"
     },
     {
       "id": "GT-010",
@@ -106,19 +116,32 @@
       "cwe": "CWE-22",
       "classes": ["path traversal", "arbitrary file write", "unrestricted file upload"],
       "components": ["uploadPaste", "mutation uploadPaste", "filename argument", "/graphql"],
-      "mechanism_keywords": ["filename", "../", "directory traversal", "file write", "content written to disk"],
-      "proof_hint": "uploadPaste with a filename containing ../ sequences writes the supplied content outside the intended upload directory",
-      "severity": "high"
+      "mechanism_keywords": ["filename", "../", "directory traversal", "file write", "content written to disk", "pastes/"],
+      "proof_hint": "uploadPaste with a filename containing ../ sequences writes the supplied content outside pastes/; a filename into a missing directory (e.g. ../nope/x.txt) returns the OS error naming the unsanitised path 'pastes/../nope/x.txt', which proves the concatenation without writing anything",
+      "severity": "high",
+      "source": "core/views.py UploadPaste.mutate calls helpers.save_file(filename, content). core/helpers.py save_file does open(WEB_UPLOADDIR + filename, 'w') with WEB_UPLOADDIR = 'pastes/' (config.py) and no normalisation or containment check, and returns str(exception) as the result on failure."
     },
     {
       "id": "GT-011",
-      "title": "GraphQL interface protection / query deny-list bypass",
-      "cwe": "CWE-693",
-      "classes": ["authorization bypass", "protection mechanism failure", "deny list bypass"],
-      "components": ["/graphql", "GraphiQL", "introspection protection", "query deny list"],
-      "mechanism_keywords": ["bypass", "deny list", "operation name", "header", "origin", "GraphiQL protection", "query allowlist"],
-      "proof_hint": "a request crafted to evade the server's interface/deny-list checks (e.g. altered operation name, headers or query shape) gets through where the plain query is rejected",
-      "severity": "medium"
+      "title": "GraphiQL access control bypass via client-controlled cookie",
+      "cwe": "CWE-565",
+      "classes": ["authorization bypass", "protection mechanism failure", "reliance on cookies without validation", "client-side enforcement"],
+      "components": ["/graphiql", "GraphiQL", "env cookie", "GraphiQL protection"],
+      "mechanism_keywords": ["env cookie", "graphiql:enable", "graphiql:disable", "GraphiQL Access Rejected", "cookie tampering", "bypass"],
+      "proof_hint": "a query POSTed to /graphiql is rejected with 'GraphiQL Access Rejected' when the env cookie is absent or graphiql:disable, and executes once the request carries Cookie: env=graphiql:enable",
+      "severity": "medium",
+      "source": "core/middleware.py IGQLProtectionMiddleware.resolve allows execution only when request.cookies.get('env') == 'graphiql:enable' (and always rejects in Expert mode); core/views.py index() sets env=graphiql:disable on the client, so the gate is a value the client controls."
+    },
+    {
+      "id": "GT-012",
+      "title": "Stack traces disclosed in GraphiQL endpoint errors",
+      "cwe": "CWE-209",
+      "classes": ["information disclosure", "stack trace disclosure", "verbose error"],
+      "components": ["/graphiql", "GraphQL errors", "extensions.exception"],
+      "mechanism_keywords": ["stack trace", "traceback", "extensions", "exception", "debug", "file path"],
+      "proof_hint": "an invalid query (e.g. a misspelled field) POSTed to /graphiql returns errors[].extensions.exception with stack, debug and path entries exposing Python source paths",
+      "severity": "low",
+      "source": "core/views.py registers /graphiql with format_error=format_custom_error; core/view_override.py format_custom_error adds extensions.exception.stack (traceback.format_stack), .debug (traceback.format_exc) and .path to every error except 'GraphiQL Access Rejected'. /graphql uses the default formatter and does not leak traces."
     }
   ]
 }

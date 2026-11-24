@@ -92,7 +92,7 @@ an order drawn from the seed. The output is per-gate passes/n for `detected`, `c
 `compare` refuses two results whose stamps differ. Arms change only the editable `goals`/`planner`/`worker`
 body, through the versioned prompt API, and the starting bodies are restored afterwards. Suites:
 `suites/heldout-v1.json` (Juice Shop v20.4.0, DVGA 2.2.0, DrostBench 005…095) and a disjoint
-`suites/dev-v1.json`. New ground truth: `ground_truth/dvga.json`. `run_bench.py` now exposes
+`suites/dev-v1.json`. New ground truth: `ground_truth/dvga.json` (v2, hand-verified 2026-11-24 against DVGA tag 2.2.0 commit `a961308`; card `c-085c80` done, see Decisions). `run_bench.py` now exposes
 `build_parser`/`prepare`/`run` and stamps `/api/tasks/{id}/outcome`. Unit-tested (15 new tests,
 `scripts/verify.sh` passes); never yet run live (card `c-f1518c`).
 
@@ -111,8 +111,6 @@ body, through the versioned prompt API, and the starting bodies are restored aft
    coverage against a codified methodology checklist, not only asset touch. Done = planner can
    read a methodology and the coverage graph shows checklist completion.
 
-- *(unclaimed)* — **E8 follow-up: hand-verify the DVGA ground truth** (S), card `c-085c80`. Done = each entry
-  cites the upstream resolver or helper that carries it.
 - *(unclaimed)* — **Bench image reproducible from a clean clone** (S), card `c-75c593`.
 
 **Human lane**
@@ -161,7 +159,7 @@ Card ids in brackets:
 - **SEC** [`c-c10f2c`] gorilla/websocket bump (GO-2026-6278).
 - **SEC** [`c-bd9a6d`] Residual gaps from the High/Medium fixes.
 - **SEC** [`c-cc25b6`] Low-severity audit items.
-- **E8 follow-ups** [`c-f1518c`] first live run, [`c-085c80`] DVGA ground-truth check, [`c-75c593`] bench
+- **E8 follow-ups** [`c-f1518c`] first live run, [`c-75c593`] bench
   image from a clean clone, [`c-d73308`] optional provider sampling seed per LLM profile.
 - **E10** [`c-72dd9d`] Code-security testing lane (SAST/dependency ingest) feeding the same dual-graph + evidence model.
 
@@ -180,6 +178,14 @@ Card ids in brackets:
   `ARTEX_SECRET_KEY`) loses stored secrets.
 
 ## Decisions
+
+- **2026-11-24** — DVGA ground truth bumped to v2 after reading the 2.2.0 source (card `c-085c80`). Every entry
+  now has a `source` field naming its resolver, helper, middleware or template (the judge prompt ignores it;
+  it only changes the content hash). Changes: GT-009 is *signature not verified* (`helpers.get_identity`,
+  `verify_signature: False`), not alg=none in particular. GT-011 is now the GraphiQL `env` cookie bypass,
+  because the deny-list, operation-name and introspection middlewares only run in Expert mode (moved to
+  notes). Added GT-012, stack traces on `/graphiql` (`format_custom_error`). The notes now say that
+  difficulty is server-wide DB state, switched by `X-DVGA-MODE` or `/difficulty/<level>`, not chosen per request.
 
 - **2026-11-23** — Stood ARTEX up locally and registered it as a Composite project rather than
   forking/renaming; it stays an AGPL-3.0 fork under `tenpointdata`. Backend verified building; web
