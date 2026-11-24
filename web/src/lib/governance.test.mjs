@@ -7,6 +7,7 @@ import {
   fromLocalInput,
   guessScopeKind,
   isForbidden,
+  landingPath,
   parseScopeText,
   toLocalInput,
 } from "./governance.ts";
@@ -58,4 +59,10 @@ test("authorizationStatus matches the server's InForce window", () => {
   assert.equal(authorizationStatus(a, "2026-12-01T00:00:00Z"), "in_force");
   assert.equal(authorizationStatus(a, "2026-12-15T00:00:00Z"), "expired");
   assert.equal(authorizationStatus({ ...a, revoked: true }, "2026-12-02T00:00:00Z"), "revoked");
+});
+
+test("landingPath sends a client_read session to its summary", () => {
+  assert.equal(landingPath({ permissions: ["client_read", "read"] }), "/function/tasks");
+  assert.equal(landingPath({ permissions: ["client_read"] }), "/function/reports");
+  assert.equal(landingPath(null), "/function/reports");
 });
