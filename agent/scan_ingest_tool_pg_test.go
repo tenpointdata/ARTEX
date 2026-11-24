@@ -77,7 +77,7 @@ func TestIngestScanOutputPG(t *testing.T) {
 	if n := count(`SELECT count(*) FROM assets WHERE type='ip' AND ip IN ('198.51.100.77','2001:db8::77')`); n != 2 {
 		t.Fatalf("%d ip assets, want 2", n)
 	}
-	if n := count(`SELECT count(*) FROM assets WHERE type='service' AND url IN ('http://198.51.100.77:80','https://198.51.100.77:443','https://[2001:db8::77]:8443')`); n != 3 {
+	if n := count(`SELECT count(*) FROM assets WHERE type='service' AND url IN ('http://198.51.100.77','https://198.51.100.77','https://[2001:db8::77]:8443')`); n != 3 {
 		t.Fatalf("%d http service assets, want 3", n)
 	}
 	if n := count(`SELECT count(*) FROM assets WHERE url LIKE '%evil%' OR domain LIKE '%evil%' OR domain = 'ptr.example.net'`); n != 0 {
@@ -245,7 +245,7 @@ func TestIngestScanOutputUserinfoPG(t *testing.T) {
 	}
 
 	out := ingest("httpx-jsonl", httpxUserinfoDedupFixture)
-	if out["events"] != 2.0 || out["urls"] != 1.0 || out["facts_written"] != 1.0 || out["facts_existing"] != 1.0 {
+	if out["events"] != 2.0 || out["urls"] != 1.0 || out["facts_written"] != 1.0 || out["assets_written"] != 1.0 {
 		t.Fatalf("same URL, different credentials: %v", out)
 	}
 	const appURL = `SELECT count(*) FROM assets WHERE type='service' AND url='https://scan-ingest.example.com/app?id=7'`

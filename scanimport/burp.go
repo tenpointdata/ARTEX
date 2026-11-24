@@ -101,10 +101,6 @@ func (c *collector) burpIssue(is burpIssue, rec string) {
 		c.asset(Asset{Kind: KindIP, IP: ip, Record: rec})
 	}
 	sev := normSeverity(is.Severity)
-	if sev == "" {
-		c.res.Informational++
-		return
-	}
 	cwe := parseCWE(is.Classifs)
 	c.finding(Finding{Tool: "burp", RuleID: rule, Severity: sev, Target: target, Host: host,
 		Title: is.Name, CWE: cwe, Record: rec}, map[string]any{

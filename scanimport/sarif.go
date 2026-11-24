@@ -264,10 +264,6 @@ func (c *collector) sarifResult(raw json.RawMessage, run *sarifRun) {
 	}
 	level := firstNonEmpty(r.Level.s(), rule.Default.Level.s())
 	sev := sarifSeverity(firstNonEmpty(rule.Props.SecSev.s(), r.Props.SecSev.s()), level)
-	if sev == "" {
-		c.res.Informational++
-		return
-	}
 	target := loc
 	if line > 0 {
 		target += ":" + strconv.Itoa(line)

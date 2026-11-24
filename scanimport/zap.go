@@ -213,12 +213,11 @@ func (c *collector) zapAlert(s *zapSite, a zapAlert, rec string) {
 			c.res.Skipped++
 			continue
 		}
-		if sev == "" {
-			c.res.Informational++
-			continue
-		}
-		c.finding(Finding{Tool: "zap", RuleID: rule, Severity: sev, Target: target, Host: host,
-			Title: title, CWE: cwe, Record: irec}, map[string]any{
+		// The parameter is part of the identity: the same rule on one URL
+		// through two parameters is two places to fix. It is hashed into the
+		// key only; its text stays in the untrusted detail.
+		c.findingVariant(Finding{Tool: "zap", RuleID: rule, Severity: sev, Target: target, Host: host,
+			Title: title, CWE: cwe, Record: irec}, zapVariant(in.Param.s()), map[string]any{
 			"alert":       a.Alert.s(),
 			"riskdesc":    a.RiskDesc.s(),
 			"confidence":  a.Confidence.s(),
@@ -234,6 +233,15 @@ func (c *collector) zapAlert(s *zapSite, a zapAlert, rec string) {
 			"other_info":  firstNonEmpty(in.OtherInfo.s(), a.OtherInfo.s()),
 		})
 	}
+}
+
+// zapVariant is the key variant of a ZAP instance: its parameter, "" when it
+// has none (header and page-level alerts then collapse per URL as before).
+func zapVariant(param string) string {
+	if p := strings.TrimSpace(param); p != "" {
+		return "param=" + p
+	}
+	return ""
 }
 
 func firstNonEmpty(ss ...string) string {

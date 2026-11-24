@@ -1,5 +1,5 @@
-// Package scanimport turns scanner output files (nmap, nuclei, ZAP, Burp,
-// SARIF) into typed assets and unverified candidate findings, with a
+// Package scanimport turns scanner output files (nmap, nuclei, httpx, ffuf,
+// ZAP, Burp, SARIF) into typed assets and unverified candidate findings, with a
 // provenance pointer into the file for every item.
 //
 // The parsers are deterministic and never interpret target-shaped text: only
@@ -24,6 +24,8 @@ const (
 	ZAPJSON     Format = "zap-json"
 	BurpXML     Format = "burp-xml"
 	SARIF       Format = "sarif"
+	HttpxJSONL  Format = "httpx-jsonl"
+	FfufJSON    Format = "ffuf-json"
 )
 
 // Limits.
@@ -41,7 +43,7 @@ const (
 
 // Formats lists the supported formats in a stable order.
 func Formats() []Format {
-	return []Format{NmapXML, NucleiJSONL, ZAPJSON, BurpXML, SARIF}
+	return []Format{NmapXML, NucleiJSONL, HttpxJSONL, FfufJSON, ZAPJSON, BurpXML, SARIF}
 }
 
 // AssetKind is the kind of an imported asset.
@@ -62,17 +64,27 @@ type Port struct {
 	Service string `json:"service"`
 }
 
-// Asset is something the file says exists. Every field is validated.
+// Asset is something the file says exists. The typed fields are validated;
+// Title, Tech and Detail are UNTRUSTED target text for the caller to quote.
 type Asset struct {
-	Kind      AssetKind `json:"kind"`
-	IP        string    `json:"ip,omitempty"`     // validated via Host
-	Domain    string    `json:"domain,omitempty"` // validated via Host
-	URL       string    `json:"url,omitempty"`    // http_service: scheme://host[:port], no userinfo or path
-	Port      int       `json:"port,omitempty"`   // service
-	Proto     string    `json:"proto,omitempty"`  // service: tcp|udp|sctp
-	Service   string    `json:"service,omitempty"`
-	OpenPorts []Port    `json:"open_ports,omitempty"` // ip
-	Record    string    `json:"record"`               // provenance, e.g. "host[3]", "line 17"
+	Kind   AssetKind `json:"kind"`
+	IP     string    `json:"ip,omitempty"`     // validated via Host
+	Domain string    `json:"domain,omitempty"` // validated via Host
+	// URL (http_service) is canonical as URL returns it: no userinfo, fragment
+	// or default port. nmap, nuclei, ZAP and Burp give the origin; httpx and
+	// ffuf give the URL they probed, path included.
+	URL       string `json:"url,omitempty"`
+	Port      int    `json:"port,omitempty"`  // service
+	Proto     string `json:"proto,omitempty"` // service: tcp|udp|sctp
+	Service   string `json:"service,omitempty"`
+	OpenPorts []Port `json:"open_ports,omitempty"` // ip
+	Status    int    `json:"status,omitempty"`     // http_service: HTTP status seen (httpx, ffuf)
+	Length    int64  `json:"length,omitempty"`     // http_service: body bytes seen (httpx, ffuf)
+	Record    string `json:"record"`               // provenance, e.g. "host[3]", "line 17"
+
+	Title  string   `json:"title,omitempty"`  // UNTRUSTED page title (httpx), cleaned, <= MaxTitleBytes
+	Tech   []string `json:"tech,omitempty"`   // UNTRUSTED technology names (httpx), cleaned
+	Detail string   `json:"detail,omitempty"` // UNTRUSTED compact JSON (banners, OS guesses, ...), <= MaxDetailBytes
 }
 
 // Finding is an unverified candidate finding reported by the scanner. Title
@@ -81,7 +93,7 @@ type Asset struct {
 type Finding struct {
 	Tool     string `json:"tool"`
 	RuleID   string `json:"rule_id"`
-	Severity string `json:"severity"` // critical|high|medium|low
+	Severity string `json:"severity"` // critical|high|medium|low; "info" only with Options.KeepInformational
 	Target   string `json:"target"`   // sanitized URL or host[:port]; SARIF "path[:line]"
 	Host     string `json:"host,omitempty"`
 	Location string `json:"location,omitempty"` // SARIF repo-relative path
@@ -104,8 +116,8 @@ type ToolInfo struct {
 // Records counts the records examined (nmap hosts, JSONL lines, ZAP alerts,
 // Burp issues, SARIF results). Skipped counts records or instances dropped
 // because a typed field failed validation (or ZAP false positives).
-// Informational counts would-be findings of informational severity, which are
-// not findings. Oversized counts JSONL lines over MaxLineBytes. Duplicates
+// Informational counts would-be findings of informational (or unknown)
+// severity, which are not findings unless Options.KeepInformational is set. Oversized counts JSONL lines over MaxLineBytes. Duplicates
 // counts findings dropped because the same Key was already produced in this
 // file. Truncated is set when the file ended early, was malformed after a
 // valid start, or hit MaxItems.
@@ -122,17 +134,35 @@ type Result struct {
 	Truncated     bool      `json:"truncated"`
 }
 
-// Parse reads one scanner file. It returns an error only when the input is not
-// that format at all; a partial or cut-short file yields what was read with
-// Truncated set.
+// Options tune a parse. The zero value is what an operator import uses.
+type Options struct {
+	// KeepInformational keeps informational and unknown-severity results as
+	// findings with Severity "info" (they are still counted in Informational).
+	// An in-run agent wants them as observations; an import does not.
+	KeepInformational bool
+}
+
+// Parse reads one scanner file with the default Options.
 func Parse(f Format, r io.Reader) (*Result, error) {
+	return ParseWith(f, r, Options{})
+}
+
+// ParseWith reads one scanner file. It returns an error only when the input is
+// not that format at all; a partial or cut-short file yields what was read
+// with Truncated set.
+func ParseWith(f Format, r io.Reader, opt Options) (*Result, error) {
 	c := newCollector(f)
+	c.opt = opt
 	var err error
 	switch f {
 	case NmapXML:
 		err = parseNmap(c, r)
 	case NucleiJSONL:
 		err = parseNuclei(c, r)
+	case HttpxJSONL:
+		err = parseHttpx(c, r)
+	case FfufJSON:
+		err = parseFfuf(c, r)
 	case ZAPJSON:
 		err = parseZAP(c, r)
 	case BurpXML:

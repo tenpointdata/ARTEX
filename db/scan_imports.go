@@ -134,6 +134,9 @@ func (d *DB) AddImportedFinding(ctx context.Context, f ImportedFinding) (id int6
 	}
 	err = tx.QueryRowContext(ctx, `SELECT finding_id FROM finding_import_sources WHERE dedup_key=$1`, f.DedupKey).Scan(&id)
 	if err == nil {
+		if err = addFindingImportLink(ctx, tx, id, f); err != nil {
+			return 0, false, err
+		}
 		return id, false, tx.Commit()
 	}
 	if !errors.Is(err, sql.ErrNoRows) {
@@ -160,7 +163,21 @@ VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9,$10,0,$11) RETURNING id`,
 VALUES ($1,$2,$3,$4,$5,$6)`, id, imp, f.Tool, f.RuleID, f.DedupKey, f.Record); err != nil {
 		return 0, false, err
 	}
+	if err = addFindingImportLink(ctx, tx, id, f); err != nil {
+		return 0, false, err
+	}
 	return id, true, tx.Commit()
+}
+
+// addFindingImportLink records that f's import reported the finding. Idempotent;
+// a no-op for findings added without an import.
+func addFindingImportLink(ctx context.Context, tx *sql.Tx, findingID int64, f ImportedFinding) error {
+	if f.ImportID <= 0 {
+		return nil
+	}
+	_, err := tx.ExecContext(ctx, `INSERT INTO finding_import_links(finding_id, import_id, record) VALUES ($1,$2,$3)
+ON CONFLICT (finding_id, import_id) DO NOTHING`, findingID, f.ImportID, f.Record)
+	return err
 }
 
 // FindingImportSource is the provenance of an imported finding.
@@ -170,6 +187,17 @@ type FindingImportSource struct {
 	Tool      string    `json:"tool"`
 	RuleID    string    `json:"rule_id"`
 	DedupKey  string    `json:"dedup_key"`
+	Record    string    `json:"record"`
+	CreatedAt time.Time `json:"created_at"`
+	// Imports lists every import that reported the finding, oldest first.
+	Imports []FindingImportLink `json:"imports"`
+}
+
+// FindingImportLink is one import that reported a finding.
+type FindingImportLink struct {
+	ImportID  int64     `json:"import_id"`
+	TaskID    *int64    `json:"task_id,omitempty"`
+	Format    string    `json:"format"`
 	Record    string    `json:"record"`
 	CreatedAt time.Time `json:"created_at"`
 }
@@ -190,5 +218,24 @@ FROM finding_import_sources WHERE finding_id=$1`, findingID).Scan(&s.FindingID, 
 	if imp.Valid {
 		s.ImportID = &imp.Int64
 	}
-	return &s, nil
+	s.Imports = []FindingImportLink{}
+	rows, err := d.QueryContext(ctx, `SELECT l.import_id, i.task_id, i.format, l.record, l.created_at
+FROM finding_import_links l JOIN scan_imports i ON i.id = l.import_id
+WHERE l.finding_id=$1 ORDER BY l.created_at, l.import_id`, findingID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var l FindingImportLink
+		var task sql.NullInt64
+		if err := rows.Scan(&l.ImportID, &task, &l.Format, &l.Record, &l.CreatedAt); err != nil {
+			return nil, err
+		}
+		if task.Valid {
+			l.TaskID = &task.Int64
+		}
+		s.Imports = append(s.Imports, l)
+	}
+	return &s, rows.Err()
 }

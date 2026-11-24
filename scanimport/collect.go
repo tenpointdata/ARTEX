@@ -2,6 +2,7 @@ package scanimport
 
 import (
 	"encoding/json"
+	"slices"
 	"sort"
 	"strconv"
 )
@@ -9,6 +10,7 @@ import (
 // collector accumulates one Result: it dedupes assets and findings and
 // enforces MaxItems.
 type collector struct {
+	opt    Options
 	res    *Result
 	assets map[string]int // asset identity -> index in res.Assets
 	keys   map[string]bool
@@ -56,6 +58,20 @@ func (c *collector) asset(a Asset) {
 		if ex.Service == "" {
 			ex.Service = a.Service
 		}
+		if ex.Status == 0 {
+			ex.Status, ex.Length = a.Status, a.Length
+		}
+		if ex.Title == "" {
+			ex.Title = a.Title
+		}
+		if ex.Detail == "" {
+			ex.Detail = a.Detail
+		}
+		for _, t := range a.Tech {
+			if !slices.Contains(ex.Tech, t) {
+				ex.Tech = append(ex.Tech, t)
+			}
+		}
 		for _, p := range a.OpenPorts {
 			dup := false
 			for _, q := range ex.OpenPorts {
@@ -74,15 +90,31 @@ func (c *collector) asset(a Asset) {
 	c.res.Assets = append(c.res.Assets, a)
 }
 
-// finding adds f with its Detail built from detail. Title is cleaned, Key is
-// derived, and a finding whose Key was already produced is counted in
-// Duplicates and dropped. It reports whether f was added.
+// finding adds f with its Detail built from detail. An empty Severity is
+// informational: it is counted, and kept as "info" only with
+// Options.KeepInformational. Title is cleaned, Key is derived, and a finding
+// whose Key was already produced is counted in Duplicates and dropped. It
+// reports whether f was added.
 func (c *collector) finding(f Finding, detail map[string]any) bool {
+	return c.findingVariant(f, "", detail)
+}
+
+// findingVariant is finding with variant (e.g. the ZAP parameter) folded into
+// the Key, so two results that differ only there stay two findings. An empty
+// variant gives the same Key as finding.
+func (c *collector) findingVariant(f Finding, variant string, detail map[string]any) bool {
+	if f.Severity == "" {
+		c.res.Informational++
+		if !c.opt.KeepInformational {
+			return false
+		}
+		f.Severity = "info"
+	}
 	if c.full() {
 		return false
 	}
 	f.Title = cleanText(f.Title, MaxTitleBytes)
-	f.Key = makeKey(f.Tool, f.RuleID, f.Target, f.Location, f.Line)
+	f.Key = makeKey(f.Tool, f.RuleID, f.Target, f.Location, f.Line, variant)
 	if c.keys[f.Key] {
 		c.res.Duplicates++
 		return false
@@ -98,7 +130,7 @@ func (c *collector) finding(f Finding, detail map[string]any) bool {
 var detailTiers = [][2]int{{4096, 100}, {1024, 20}, {256, 5}}
 
 // buildDetail renders m as compact JSON: values are strings, string lists,
-// ints or bools; strings are cleaned of credentials and clipped; empty values
+// lists of string maps, ints, int64s, ints lists or bools; strings are cleaned of credentials and clipped; empty values
 // are dropped. If the JSON still exceeds MaxDetailBytes after the tightest
 // tier, the largest keys are dropped and "truncated":true is set. Keys are
 // sorted by encoding/json, so the output is deterministic.
@@ -160,11 +192,34 @@ func shrink(m map[string]any, maxStr, maxList int) map[string]any {
 			if len(l) > 0 {
 				s[k] = l
 			}
+		case []map[string]string:
+			var l []map[string]string
+			for _, e := range x {
+				if len(l) >= maxList {
+					break
+				}
+				o := map[string]string{}
+				for ek, ev := range e {
+					if ev = scrubText(clip(ev, maxStr)); ev != "" {
+						o[ek] = ev
+					}
+				}
+				if len(o) > 0 {
+					l = append(l, o)
+				}
+			}
+			if len(l) > 0 {
+				s[k] = l
+			}
 		case []int:
 			if len(x) > 0 {
 				s[k] = x
 			}
 		case int:
+			if x != 0 {
+				s[k] = x
+			}
+		case int64:
 			if x != 0 {
 				s[k] = x
 			}

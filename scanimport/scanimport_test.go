@@ -16,6 +16,8 @@ var fixtures = map[Format]string{
 	ZAPJSON:     "zap.json",
 	BurpXML:     "burp.xml",
 	SARIF:       "semgrep.sarif",
+	HttpxJSONL:  "httpx.jsonl",
+	FfufJSON:    "ffuf.json",
 }
 
 func load(t *testing.T, f Format) []byte {
@@ -48,6 +50,8 @@ func TestCounts(t *testing.T) {
 		{ZAPJSON, "zap", 2, 4, 6, 2, 1, 0, []string{"high", "high", "medium", "low"}},
 		{BurpXML, "burp", 4, 3, 5, 1, 1, 0, []string{"high", "medium", "low"}},
 		{SARIF, "semgrep-oss", 0, 3, 5, 1, 1, 0, []string{"critical", "medium", "low"}},
+		{HttpxJSONL, "httpx", 3, 0, 6, 2, 0, 0, nil},
+		{FfufJSON, "ffuf", 4, 0, 6, 2, 0, 0, nil},
 	}
 	for _, tc := range tests {
 		t.Run(string(tc.f), func(t *testing.T) {
@@ -104,7 +108,7 @@ func TestNmapAssets(t *testing.T) {
 	if d := find(KindSubdomain, "web.example.com"); d == nil || d.IP != "198.51.100.7" || d.Record != "host[0]" {
 		t.Errorf("subdomain asset = %+v", d)
 	}
-	for _, u := range []string{"http://198.51.100.7:80", "https://198.51.100.7:443", "http://198.51.100.9:8080"} {
+	for _, u := range []string{"http://198.51.100.7", "https://198.51.100.7", "http://198.51.100.9:8080"} {
 		if find(KindHTTPService, u) == nil {
 			t.Errorf("missing http_service %s", u)
 		}
@@ -204,10 +208,10 @@ func TestKeysStableAndDistinct(t *testing.T) {
 			seen[a.Findings[i].Key] = true
 		}
 	}
-	if k := makeKey("a", "b", "HTTP://X.com/p", "", 0); k != makeKey("a", "b", "http://x.com/p", "", 0) {
+	if k := makeKey("a", "b", "HTTP://X.com/p", "", 0, ""); k != makeKey("a", "b", "http://x.com/p", "", 0, "") {
 		t.Error("host case changes key")
 	}
-	if makeKey("a", "b", "t", "", 0) == makeKey("a", "b", "t", "", 1) || makeKey("a", "b", "t", "", 0) == makeKey("a", "c", "t", "", 0) {
+	if makeKey("a", "b", "t", "", 0, "") == makeKey("a", "b", "t", "", 1, "") || makeKey("a", "b", "t", "", 0, "") == makeKey("a", "c", "t", "", 0, "") {
 		t.Error("key collisions")
 	}
 }
@@ -352,8 +356,22 @@ func TestHelpers(t *testing.T) {
 	if u, _ := URL("ftp://x.com"); u != "" {
 		t.Error("ftp accepted")
 	}
-	if u, _ := URL("http://[::1]:80/x"); u != "http://[::1]:80/x" {
+	if u, _ := URL("http://[::1]:80/x"); u != "http://[::1]/x" {
 		t.Errorf("ipv6 url = %q", u)
+	}
+	// Default ports and a bare "/" path drop out, so nmap's http://ip:80 and
+	// nuclei's http://ip name one asset; a non-default port stays.
+	for in, want := range map[string]string{
+		"http://10.0.0.1:80": "http://10.0.0.1", "http://10.0.0.1/": "http://10.0.0.1", "https://h.com:443/": "https://h.com",
+		"https://h.com:80": "https://h.com:80", "http://h.com:443": "http://h.com:443", "http://h.com/?": "http://h.com/?",
+		"http://h.com/?a=1": "http://h.com/?a=1", "HTTPS://H.com:443/p": "https://h.com/p",
+	} {
+		if got, _ := URL(in); got != want {
+			t.Errorf("URL(%q) = %q, want %q", in, got, want)
+		}
+	}
+	if Origin("http://10.0.0.1:80/x") != Origin("http://10.0.0.1") {
+		t.Error("Origin keeps the default port")
 	}
 	if o := Origin("https://u:p@x.com:8443/a?b"); o != "https://x.com:8443" {
 		t.Errorf("Origin = %q", o)

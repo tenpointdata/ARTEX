@@ -86,6 +86,9 @@ func clientReadAllowed(method, path string) bool {
 	if path == "/api/exploration/findings/retests/active" {
 		return false // live retests across every client
 	}
+	if path == "/api/exploration/findings/{id}/integrations" {
+		return false // tracker tickets and import provenance are operator-internal
+	}
 	return strings.HasPrefix(path, "/api/report/") || path == "/api/exploration/findings" ||
 		strings.HasPrefix(path, "/api/exploration/findings/")
 }

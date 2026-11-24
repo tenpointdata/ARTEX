@@ -30,15 +30,26 @@ type nucleiLine struct {
 	Extracted   flexList `json:"extracted-results"`
 }
 
-// parseNuclei reads nuclei -jsonl output line by line. A line over
-// MaxLineBytes is counted in Oversized; a last line cut short marks the result
-// truncated. A file in which no line is a nuclei result is an error.
+// parseNuclei reads nuclei -jsonl output line by line (see readJSONL). A file
+// in which no line is a nuclei result is an error.
 func parseNuclei(c *collector, r io.Reader) error {
 	c.res.Tool = ToolInfo{Name: "nuclei"}
+	if !readJSONL(c, r, c.nucleiLine) {
+		return errors.New("scanimport: nuclei-jsonl: no line is a nuclei result")
+	}
+	return nil
+}
+
+// readJSONL calls line once per non-blank line of r with its record label. A
+// line over MaxLineBytes is counted in Oversized; a line that is not JSON is
+// counted in Skipped, or marks the result truncated when it is the last line
+// and cut short. It reports false when there were records and line recognized
+// none of them, i.e. the file is not this format.
+func readJSONL(c *collector, r io.Reader, line func(b []byte, rec string) (recognized, syntaxErr bool)) bool {
 	br := bufio.NewReaderSize(r, MaxLineBytes)
 	recognized := false
 	for lineNo := 1; ; lineNo++ {
-		line, err := br.ReadSlice('\n')
+		b, err := br.ReadSlice('\n')
 		complete := err == nil
 		if errors.Is(err, bufio.ErrBufferFull) {
 			for errors.Is(err, bufio.ErrBufferFull) { // drop the rest of the line
@@ -46,13 +57,12 @@ func parseNuclei(c *collector, r io.Reader) error {
 			}
 			c.res.Records++
 			c.res.Oversized++
-			line = nil
-		} else if len(bytes.TrimSpace(line)) > 0 {
+		} else if len(bytes.TrimSpace(b)) > 0 {
 			c.res.Records++
 			if c.full() {
-				return nil
+				return true
 			}
-			ok, syntaxErr := c.nucleiLine(line, fmt.Sprintf("line %d", lineNo))
+			ok, syntaxErr := line(b, fmt.Sprintf("line %d", lineNo))
 			recognized = recognized || ok
 			switch {
 			case syntaxErr && !complete && errors.Is(err, io.EOF):
@@ -68,10 +78,7 @@ func parseNuclei(c *collector, r io.Reader) error {
 			break
 		}
 	}
-	if c.res.Records > 0 && !recognized {
-		return errors.New("scanimport: nuclei-jsonl: no line is a nuclei result")
-	}
-	return nil
+	return recognized || c.res.Records == 0
 }
 
 // nucleiLine handles one JSONL record. recognized is true when the line is a
@@ -110,10 +117,6 @@ func (c *collector) nucleiLine(line []byte, rec string) (recognized, syntaxErr b
 		c.asset(Asset{Kind: KindSubdomain, Domain: hostHost, Record: rec})
 	}
 	sev := normSeverity(r.Info.Severity.s())
-	if sev == "" {
-		c.res.Informational++
-		return true, false
-	}
 	cwe := nucleiCWE(r.Info.Classification.CWE)
 	c.finding(Finding{
 		Tool: "nuclei", RuleID: tid, Severity: sev, Target: target, Host: host,

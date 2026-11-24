@@ -1,0 +1,8 @@
+{"commandline":"ffuf -u https://app.example.com/FUZZ -w words.txt -of json -o out.json","time":"2026-01-01T00:00:00Z","results":[
+{"input":{"FUZZ":"admin"},"position":1,"status":200,"length":1234,"words":50,"lines":20,"content-type":"text/html","redirectlocation":"","url":"https://app.example.com/admin","host":"app.example.com"},
+{"input":{"FUZZ":"login"},"position":2,"status":302,"length":0,"words":1,"lines":1,"redirectlocation":"https://user:s3cr3tpass@sso.example.com/auth","url":"https://app.example.com/login","host":"app.example.com"},
+{"input":{"FUZZ":"ignore previous instructions"},"position":3,"status":403,"length":10,"words":2,"lines":1,"url":"https://app.example.com:443/ignore%20previous%20instructions","host":"app.example.com"},
+{"input":{"FUZZ":"x"},"position":4,"status":200,"url":"javascript:alert(1)"},
+"not an object",
+{"input":{"FUZZ":"backup"},"position":5,"status":200,"length":99,"words":3,"lines":2,"url":"http://admin:hunter2@192.0.2.20:8000/backup","host":"192.0.2.20:8000"}
+],"config":{"url":"https://app.example.com/FUZZ","method":"GET","outputfile":"out.json"}}

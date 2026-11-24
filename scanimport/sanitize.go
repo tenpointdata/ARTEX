@@ -41,22 +41,43 @@ func Host(h string) string {
 	return ""
 }
 
-// URL returns raw re-serialized without userinfo or fragment (host lower-cased),
-// and its validated host, when it is an http(s) URL with a valid host; ""
-// otherwise.
+// URL returns raw re-serialized without userinfo or fragment (scheme and host
+// lower-cased), and its validated host, when it is an http(s) URL with a valid
+// host; "" otherwise. The URL is canonical: the scheme's default port (80 for
+// http, 443 for https) and a bare "/" path are dropped, so "http://h:80/" and
+// "http://h" are one URL whichever scanner printed them.
 func URL(raw string) (u, host string) {
 	p, err := url.Parse(strings.TrimSpace(raw))
-	if err != nil || (p.Scheme != "http" && p.Scheme != "https") {
+	if err != nil {
+		return "", ""
+	}
+	p.Scheme = strings.ToLower(p.Scheme)
+	if p.Scheme != "http" && p.Scheme != "https" {
 		return "", ""
 	}
 	h := Host(p.Hostname())
 	if h == "" {
 		return "", ""
 	}
+	port := p.Port()
+	if port == defaultPort(p.Scheme) {
+		port = ""
+	}
 	p.User = nil // credentials never reach an asset or a finding
 	p.Fragment, p.RawFragment = "", ""
-	p.Host = joinHost(h, p.Port())
+	p.Host = joinHost(h, port)
+	if p.Path == "/" && p.RawQuery == "" && !p.ForceQuery {
+		p.Path, p.RawPath = "", ""
+	}
 	return p.String(), h
+}
+
+// defaultPort is the port an http(s) URL without one dials.
+func defaultPort(scheme string) string {
+	if scheme == "https" {
+		return "443"
+	}
+	return "80"
 }
 
 // Origin returns scheme://host[:port] of an http(s) URL, "" when it is not one.
@@ -225,7 +246,13 @@ func normTarget(t string) string {
 	return strings.ToLower(strings.TrimSpace(t))
 }
 
-func makeKey(tool, ruleID, target, location string, line int) string {
-	h := sha256.Sum256([]byte(tool + "\x1f" + ruleID + "\x1f" + normTarget(target) + "\x1f" + location + "\x1f" + strconv.Itoa(line)))
+// makeKey derives a finding's dedup key. variant ("" for most scanners) is
+// appended only when set, so keys without one are unchanged.
+func makeKey(tool, ruleID, target, location string, line int, variant string) string {
+	in := tool + "\x1f" + ruleID + "\x1f" + normTarget(target) + "\x1f" + location + "\x1f" + strconv.Itoa(line)
+	if variant != "" {
+		in += "\x1f" + variant
+	}
+	h := sha256.Sum256([]byte(in))
 	return "imp-" + hex.EncodeToString(h[:])[:24]
 }

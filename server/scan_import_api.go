@@ -151,7 +151,14 @@ func upsertImportedAsset(as *db.AssetStore, a scanimport.Asset, task int64) (int
 		id, err := as.UpsertSubdomain(db.UpsertSubdomainReq{Domain: a.Domain, TaskID: task})
 		return id, a.Domain, err
 	case "http_service":
-		id, err := as.UpsertHTTPService(db.UpsertHTTPServiceReq{URL: a.URL, IP: a.IP, TaskID: task})
+		req := db.UpsertHTTPServiceReq{URL: a.URL, IP: a.IP, TaskID: task, PageTitle: a.Title, Technologies: a.Tech}
+		if a.Status > 0 {
+			req.StatusCode = &a.Status
+		}
+		if a.Length > 0 {
+			req.ContentLength = &a.Length
+		}
+		id, err := as.UpsertHTTPService(req)
 		host := a.Domain
 		if u, perr := url.Parse(a.URL); perr == nil {
 			host = strings.ToLower(u.Hostname())

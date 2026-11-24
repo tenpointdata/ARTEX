@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -176,4 +177,31 @@ func (t *ToolSet) runIngestBbot(ctx context.Context, in json.RawMessage, tc *act
 		out["fact_errors"] = errs
 	}
 	return jsonResult(out)
+}
+
+// readJSONLines calls fn with each non-blank line of r, and returns the number
+// of lines skipped for exceeding bbotMaxLineBytes. fn must not keep the line:
+// its buffer is reused by the next read.
+func readJSONLines(r io.Reader, fn func(line []byte)) (int, error) {
+	oversized := 0
+	br := bufio.NewReaderSize(r, bbotMaxLineBytes)
+	for {
+		line, err := br.ReadSlice('\n')
+		if errors.Is(err, bufio.ErrBufferFull) {
+			for errors.Is(err, bufio.ErrBufferFull) { // drop the rest of the line
+				_, err = br.ReadSlice('\n')
+			}
+			oversized++
+			line = nil
+		}
+		if len(bytes.TrimSpace(line)) > 0 {
+			fn(line)
+		}
+		if errors.Is(err, io.EOF) {
+			return oversized, nil
+		}
+		if err != nil {
+			return oversized, err
+		}
+	}
 }
