@@ -83,6 +83,10 @@ Linux-root tests, the Docker egress iptables rules, the Postgres-backed tests an
   summaries are framed as untrusted data.
 - Per-run executor HOME; MCP servers run as uid 10002 (`ARTEX_EXEC_MCP_UID`). The workspace file
   manager uses `os.Root`.
+- **2026-11-24** (card `c-8dea4d`): `scripts/verify.sh` with `ARTEX_PG_DSN` set passes on macOS.
+  `TestGateOffTaskIsUnchanged` now expects the name lookups the always-on egress checks make for
+  connecting tools (WebFetch, custom http) and none for a command tool. The SOCKS5 UDP datagram test
+  skips when 127.0.0.2 cannot bind.
 
 ## Triage (next handful)
 
@@ -156,6 +160,12 @@ Card ids in brackets:
   "immutable surfaces" must never enter an automated search space.
 - **Migrations fix forward** — a published `db/migrations/*.sql` is never edited.
 - **Embedded UI** requires `-tags embedui`; a plain `go build` omits the web assets.
+- **Postgres tests on macOS:** a throwaway cluster works (`brew install postgresql@17`, `initdb`,
+  start `pg_ctl` with `LC_ALL=en_US.UTF-8` or the postmaster aborts as "multithreaded"). Use password
+  auth, not `trust`: `TestConnectWithoutPasswordRealPG` expects a passwordless connect to be refused.
+  The SOCKS5 UDP datagram test needs `sudo ifconfig lo0 alias 127.0.0.2 up`, else it skips.
+- **With the gate off, names are still resolved** for tools the platform connects to (always-on
+  egress checks, `intercept/target_egress.go`); a test counting resolver lookups must expect them.
 - **Secrets** are AES-256-GCM sealed with per-column AAD; losing the key (`keys/secret.key` or
   `ARTEX_SECRET_KEY`) loses stored secrets.
 
