@@ -32,6 +32,9 @@ var proxyEnvKeys = map[string]bool{"HTTP_PROXY": true, "HTTPS_PROXY": true, "ALL
 // srv is returned unchanged. A relay that cannot start is an error: the server
 // must not be spawned on a URL that drops its run's scope.
 func (m *Manager) scopeMCPProxy(ctx context.Context, srv *db.MCPServer) (*db.MCPServer, io.Closer, error) {
+	if srv != nil && srv.Transport == "stdio" && m.traffic == nil && m.remoteProxy != nil && m.TrafficEnabled() {
+		return m.scopeMCPProxyRemote(ctx, srv) // worker node (mcp_proxy_remote.go)
+	}
 	if srv == nil || srv.Transport != "stdio" || m.traffic == nil || !m.TrafficEnabled() {
 		return srv, nil, nil
 	}
@@ -58,7 +61,12 @@ func (m *Manager) scopeMCPProxy(ctx context.Context, srv *db.MCPServer) (*db.MCP
 
 // namesProxy reports whether args or env point a client at proxy.
 func namesProxy(args []string, env map[string]string, proxy string) bool {
-	a, e := replaceProxy(args, env, proxy, "\x00")
+	return namesProxyFunc(args, env, func(v string) bool { return sameProxy(v, proxy) })
+}
+
+// namesProxyFunc reports whether args or env point a client at a proxy that is accepts.
+func namesProxyFunc(args []string, env map[string]string, is func(string) bool) bool {
+	a, e := replaceProxyFunc(args, env, is, "\x00")
 	for i := range a {
 		if a[i] != args[i] {
 			return true
@@ -76,7 +84,11 @@ func namesProxy(args []string, env map[string]string, proxy string) bool {
 // ("--proxy-server v" or "--proxy-server=v") and proxy variable that is proxy,
 // compared without a credential, replaced by with.
 func replaceProxy(args []string, env map[string]string, proxy, with string) ([]string, map[string]string) {
-	is := func(v string) bool { return sameProxy(v, proxy) }
+	return replaceProxyFunc(args, env, func(v string) bool { return sameProxy(v, proxy) }, with)
+}
+
+// replaceProxyFunc is replaceProxy for every proxy value is accepts.
+func replaceProxyFunc(args []string, env map[string]string, is func(string) bool, with string) ([]string, map[string]string) {
 	outArgs := append([]string(nil), args...)
 	for i := 0; i < len(outArgs); i++ {
 		switch a := outArgs[i]; {

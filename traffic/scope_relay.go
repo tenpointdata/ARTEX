@@ -5,7 +5,6 @@ import (
 	"io"
 	"net"
 	"net/url"
-	"sync"
 	"time"
 
 	"github.com/Autumn-27/artex/egress"
@@ -25,22 +24,10 @@ import (
 type ScopeRelay struct {
 	URL string // credential-free proxy URL for the client
 
-	ln    net.Listener
+	*relayConns
 	t     *Traffic
 	token string
-	once  sync.Once
-	mu    sync.Mutex
-	done  bool // Close ran; no connection is tracked from then
-	conns map[net.Conn]struct{}
-	slots chan struct{} // one per client connection relayed at once (maxRelayConns)
 }
-
-// maxRelayConns caps the client connections one relay serves at once; a
-// connection over it is closed unserved. Chromium keeps at most 256 sockets
-// per profile (and 6 per proxy host per pool), so a browser never meets the
-// cap; it bounds what a runaway or hostile client of the loopback port can
-// hold open (two sockets and two goroutines a connection).
-const maxRelayConns = 256
 
 // StartScopeRelay returns a relay for the scope token in proxyURL, a URL that
 // ScopedProxyURL, EndedScopeURL (or the server's ScopedProxyAddr) returned. A
@@ -61,65 +48,21 @@ func (t *Traffic) StartScopeRelay(proxyURL string) (string, *ScopeRelay, error) 
 	if !ok {
 		return t.ProxyAddr(), nil, nil
 	}
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	base, err := listenRelay()
 	if err != nil {
 		return "", nil, err
 	}
-	r := &ScopeRelay{URL: "http://" + ln.Addr().String(), ln: ln, t: t, token: tok, conns: map[net.Conn]struct{}{}, slots: make(chan struct{}, maxRelayConns)}
-	go r.serve(u.Host)
+	r := &ScopeRelay{URL: base.url(), relayConns: base, t: t, token: tok}
+	go r.serve(func(down net.Conn) { r.relay(down, u.Host) })
 	return r.URL, r, nil
 }
 
 // Close stops the relay and closes its open connections. Safe on nil.
 func (r *ScopeRelay) Close() error {
-	if r == nil {
-		return nil
+	if r != nil {
+		r.close()
 	}
-	r.once.Do(func() {
-		_ = r.ln.Close()
-		r.mu.Lock()
-		r.done = true
-		for c := range r.conns {
-			_ = c.Close()
-		}
-		r.mu.Unlock()
-	})
 	return nil
-}
-
-func (r *ScopeRelay) serve(proxyHost string) {
-	for {
-		down, err := r.ln.Accept()
-		if err != nil {
-			return
-		}
-		select {
-		case r.slots <- struct{}{}:
-			go func() {
-				defer func() { <-r.slots }()
-				r.relay(down, proxyHost)
-			}()
-		default:
-			_ = down.Close() // over maxRelayConns
-		}
-	}
-}
-
-// track adds c to the open connections; false once the relay is closed.
-func (r *ScopeRelay) track(c net.Conn) bool {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if r.done {
-		return false
-	}
-	r.conns[c] = struct{}{}
-	return true
-}
-
-func (r *ScopeRelay) untrack(c net.Conn) {
-	r.mu.Lock()
-	delete(r.conns, c)
-	r.mu.Unlock()
 }
 
 // relayDialTimeout bounds a relay's dial of the recording proxy (loopback).
