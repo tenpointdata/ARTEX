@@ -59,6 +59,13 @@ See `docs/ARCHITECTURE.md` for the code-level map. Summary:
 
 ## Current state
 
+**2026-11-24 — E6 wall time fix (`c-990198`, in review; not on main).** `llm_usage.ts` is a call's
+completion time, so Cost & efficiency's `first_ts` is now `min(ts - latency_ms)` in `db.CostBreakdown`
+and in the archive `cost_cells` aggregate; Wall time = last end − first start. Commit `3a38132` on the
+local branch **`ej/c-990198-wall-time`**, stacked on c-f4a69d (`ej/20261124-145313-129188`, which carries
+E6 `ej/20261124-123231-b78990`): landing it lands both. Test `db/llm_cost_wall_test.go` passes on Postgres 16;
+verify.sh passes. Archives made before this keep `first_ts` = first completion (not backfilled).
+
 **2026-11-24 — SSE 401 after console login (`c-13e86c`, fixed; pre-E5).** Streams are same-origin only
 (`web/src/lib/sse.ts`), dev gzip off, `openSSE` writes `: open`. Test `server/activity_stream_auth_pg_test.go`;
 browser-checked on the E5 stack.
