@@ -14,6 +14,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { SidebarMenu, SidebarMenuButton, SidebarMenuItem, useSidebar } from "@/components/ui/sidebar";
+import { useSession } from "@/hooks/use-session";
 import { t } from "@/i18n";
 import { auth } from "@/lib/auth";
 import { getInitials } from "@/lib/utils";
@@ -31,6 +32,9 @@ export function NavUser({
 }) {
   const { isMobile } = useSidebar();
   const [pwOpen, setPwOpen] = React.useState(false);
+  // Only the bootstrap ARTEX login changes its own password here; an admin
+  // changes a console user's password on the Users page.
+  const isBootstrap = useSession().username === "ARTEX";
 
   async function handleLogout() {
     await auth.logout();
@@ -78,11 +82,15 @@ export function NavUser({
               </div>
             </DropdownMenuLabel>
             <DropdownMenuSeparator />
-            <DropdownMenuItem onClick={() => setPwOpen(true)}>
-              <KeyRound />
-              {t("Change password")}
-            </DropdownMenuItem>
-            <DropdownMenuSeparator />
+            {isBootstrap && (
+              <>
+                <DropdownMenuItem onClick={() => setPwOpen(true)}>
+                  <KeyRound />
+                  {t("Change password")}
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+              </>
+            )}
             <DropdownMenuItem onClick={handleLogout} className="text-destructive focus:text-destructive">
               <LogOut />
               {t("Sign out")}

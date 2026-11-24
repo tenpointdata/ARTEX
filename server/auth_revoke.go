@@ -83,25 +83,13 @@ func (s *Server) loadAuthState() {
 	s.loadPasswordVersion()
 }
 
-// session returns the claims of token when it is a live session (sessionOK).
-func (s *Server) session(token string) (*sessionClaims, bool) {
-	if s.pwdState.Load() == pwdUnreadable {
-		return nil, false
-	}
-	c, ok := sessionToken(token, s.jwtKey, s.pwdVersion.Load())
-	if !ok || s.revoked.has(c.ID) {
-		return nil, false
-	}
-	return c, true
-}
-
-// revokeSession revokes token when it is validly signed at the current
-// password version (revoked already or not, so a retry after a failed persist
-// writes it). It returns an error only when the revocation could not be
+// revokeSession revokes token when it is validly signed and carries a jti,
+// legacy or console-user, whatever its version (revoked already or not, so a
+// retry after a failed persist writes it). It returns an error only when the revocation could not be
 // persisted; the token is revoked in this process either way.
 func (s *Server) revokeSession(token string) error {
-	c, ok := sessionToken(token, s.jwtKey, s.pwdVersion.Load())
-	if !ok {
+	c, ok := parseSession(token, s.jwtKey)
+	if !ok || c.ID == "" {
 		return nil
 	}
 	exp := time.Now().Add(jwtTTL)

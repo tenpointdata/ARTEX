@@ -1,7 +1,8 @@
 "use client";
 
-import { auth, type CurrentUser } from "@/lib/auth";
+import { useSession } from "@/hooks/use-session";
+import { type CurrentUser, currentUserOf } from "@/lib/auth";
 
 export function useCurrentUser(): CurrentUser {
-  return auth.getCurrentUser();
+  return currentUserOf(useSession());
 }

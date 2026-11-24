@@ -111,6 +111,15 @@ func (s *Server) authLogout(w http.ResponseWriter, r *http.Request) {
 
 // GET /api/auth/session says whether the request carries a valid session. It
 // answers 200 either way so the UI can ask without triggering its 401 redirect.
+// A valid session also reports its username, role and permissions, so the UI
+// can hide what the role cannot do (the API enforces it regardless).
 func (s *Server) authSession(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, 200, map[string]any{"authenticated": s.sessionOK(extractToken(r))})
+	p, ok := s.sessionPrincipal(extractToken(r))
+	if !ok {
+		writeJSON(w, 200, map[string]any{"authenticated": false})
+		return
+	}
+	writeJSON(w, 200, map[string]any{
+		"authenticated": true, "username": p.Username, "role": p.Role, "permissions": permissionsOf(p.Role),
+	})
 }
