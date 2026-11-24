@@ -1,6 +1,6 @@
 # HANDOFF.md — ARTEX
 
-**Last updated:** 2026-11-24 13:50 MST, by claude-code: c-f4115c (now in review): closed the six E5 artifact lifecycle gaps on a branch that merges the E5 + client_read branch (ej/20261124-110647-182fa9, PR #16). Earlier hand-offs are under Deltas and in `ej handoff log`.
+**Last updated:** 2026-11-24 14:25 MST, by claude-code: c-01377e (in review): E5 console locks the target-gate switch while a task has an authorization and explains authorization_ended pauses instead of offering a resume that 409s. Earlier hand-offs are under Deltas and in `ej handoff log`.
 
 > Single entry point for whoever picks this up next (any agent or human), with no access to the
 > originating conversation. Read this first, then the sections of the code it points at.
@@ -58,6 +58,15 @@ See `docs/ARCHITECTURE.md` for the code-level map. Summary:
 - `docs/` — `ARCHITECTURE.md`, `OPS.md`, traffic docs, `RSI.md` (self-improvement governance contract).
 
 ## Current state
+
+**2026-11-24 (c-01377e, in review)** — E5 UI for the gate requirement and `authorization_ended` pauses on
+`ej/20261124-140004-61d777`, stacked on c-f4115c + c-869050 (both merged into it as the base). Task DTO
+carries `authorization: {version, revoked, ended}` (list: one query, `db.AuthorizationSummaries`; detail
+and PATCH: the gate's cache). Task view: Target gate switch, locked on with the reason while an artifact
+exists; a paused task whose version ended gets a disabled Resume, a notice and "Store a new version"
+(admins → Authorization tab; the header refreshes when a version is stored). Task list: inline resume
+disabled with the reason; bulk resume leaves such tasks out. Live-checked in a browser against a real
+server + PG: no 409 reached by a click. Detail in `docs/GOVERNANCE.md` ("What the console sees").
 
 **2026-11-24 (c-f4115c, in review)** — E5 lifecycle gaps closed on `ej/20261124-133353-5aceb1`, stacked on
 PR #16 + c-5b5421: archives carry the artifact, an artifact forces the gate on, expiry/revocation pauses
@@ -287,8 +296,8 @@ body, through the versioned prompt API, and the starting bodies are restored aft
   is now forced on for tasks with one (c-f4115c). Decide whether the extra admin-only routes in `server/rbac_policy.go` (tools, MCP, agents, LLM config,
   notify) suit how operators work.
 
-- *(unclaimed)* — **E5 UI for the gate requirement and authorization_ended pauses** (S), card `c-01377e`,
-  after `c-869050`. Done = no console click hits those 409s unexplained.
+- *(unclaimed)* — **Activity stream 401 after a console login on the E5 stack** (S), card `c-13e86c`.
+  Done = the Sessions tab's stream connects for legacy and DB users, with a test on the SSE auth path.
 - *(unclaimed)* — **Change-password 401 logs the user out** (XS), card `c-5018f6`. Done = a wrong current
   password shows an error and keeps the session.
 
@@ -329,7 +338,7 @@ Card ids in brackets:
 - **E4** [`c-c0bb07`] Methodology-driven coverage (OWASP WSTG / API Top 10 as structured checklists).
 - **E5** [`c-669406`] Engagement governance. The backend is done on `ej/20261124-055929-bd2253`. Follow-ups:
   `c-5b5421` (client binding), `c-869050` (UI, in review), `c-f4115c` (lifecycle gaps, in review; follow-ups
-  `c-5018f6`, `c-01377e`), `c-92bb52` (role-aware controls on existing pages), `c-7c4715` (client_read
+  `c-5018f6`; `c-01377e` in review), `c-92bb52` (role-aware controls on existing pages), `c-7c4715` (client_read
   console), `c-601ec6` (chain paging).
 - **TEST** [`c-3157b4`] `TestGateOffTaskIsUnchanged` fails on main with Postgres (also fails before E5).
 - **E6** [`c-cb0093`] Cost/observability dashboard + OpenTelemetry export, building on existing context telemetry.
@@ -399,6 +408,11 @@ Card ids in brackets:
   `ARTEX_SECRET_KEY`) loses stored secrets.
 
 ## Decisions
+
+- **2026-11-24** — c-01377e: the console learns about the artifact from a summary on the task DTO
+  (`authorization`), not from a per-task `GET /authorization` or a persisted pause cause. The resume
+  refusal is "paused and the newest version ended", which the summary states exactly and which survives
+  restarts (the engine's pause cause does not); the list needs it for every row, so one batched query.
 
 - **2026-11-24** — E5 lifecycle (c-f4115c): an artifact *forces* the target gate (refuse turning it off,
   409) rather than recommending it, because with the gate off the scope sees only declared targets and
@@ -536,6 +550,7 @@ Card ids in brackets:
 ## Deltas
 
 <!-- composite:deltas · newest first; Composite rewrites this block on every merge (ej handoff merge / merge_handoff) -->
+- **2026-11-24 14:25 MST** · claude-code · `ej/20261124-140004-61d777` — c-01377e (in review): merged c-f4115c (`ej/20261124-133353-5aceb1`) and c-869050 (`ej/20261124-132958-94f4bf`) as the base; task DTO `authorization {version, revoked, ended}` (list: `db.AuthorizationSummaries`, one query; detail/PATCH: gate cache); console Target gate switch locked with the reason while an artifact exists; ended-artifact pauses show a notice + "Store a new version" instead of Resume, in the task view and the list (bulk resume skips them). PG tests (db summary, HTTP list/detail through expiry, renewal, revocation), web governance tests, i18n, tsc, live browser check against a real server + PG: no 409 reached by a click. Go suite with PG: only the known macOS SOCKS5 UDP failure. Card opened: c-13e86c (activity stream 401 after console login, seen during the live check). **Next:** land PR #16 / c-5b5421 / c-f4115c / c-869050, then this branch. **Decided:** the console reads a DTO summary, not a per-task GET or a persisted pause cause.
 - **2026-11-24 13:50 MST** · claude-code · `ej/20261124-133353-5aceb1` `bc44469`→`9830ac9` (2 commits) · `h-2d8bcf` — c-f4115c (now in review): closed the six E5 artifact lifecycle gaps on a branch that merges the E5 + client_read branch (ej/20261124-110647-182fa9, PR #16). Archives carry engagement_authorizations and restore re-creates missing versions; an artifact forces the target gate on (PATCH gate-off → 409); the scheduler pauses tasks whose artifact expired or was revoked, and resume is refused until a new version; console users change their own password through /api/auth/change-password (version compare-and-swap, sessions end); SSE re-checks and the gate's artifact read go through 2 s caches on a new generic memo/ package, invalidated by every db write. PG tests for each, mutation-checked; verify.sh (with web steps) passes. Board cards opened: c-5018f6, c-01377e. **Next:** Land PR #16 (E5) and c-5b5421's branch first, then this branch. c-01377e: UI for the gate requirement and authorization_ended pauses (after c-869050). c-5018f6: wrong current password returns 401, which the web client treats as logout. Not checked: a live task paused by the scheduler at not_after (the sweep is tested directly). **Decided:** An artifact forces the target gate (refuse turning it off) instead of recommending it. Expiry/revocation pauses unconditionally and blocks resume; a not-yet-started window does not pause. Password self-service extends the existing /api/auth/change-password rather than adding /api/users/me/password (UI already calls it; already rate-limited). Archive keeps artifact rows with the stub and carries them in the package; restore uses SET CONSTRAINTS IMMEDIATE on the one artifact audit trigger so re-created rows get actor archive-restore without relabelling restored intercept rows. One generic memo cache (TTL + race-safe invalidation), 2 s; a request's first auth check stays uncached.
 - **2026-11-24 13:46 MST** · claude-code · `ej/20261124-132958-94f4bf` `60e20d8`→`7f9af4f` (4 commits) · `h-7f6f23` — c-869050 (now in review): web UI for E5. /system/users admin table (inline role/enabled, set password, delete, client_read company bindings); task detail Authorization tab (status badge, version history table, admin-only new-version form and revoke); Approval Records Chain tab (filters, paging, entry sheet, Verify showing head_seq/head_hash, broken_at, rows_mismatched). Session role/permissions drive a permission-filtered sidebar via useCan; a 403 shows a message and never logs out; the login form takes any username. Branch merges ej/20261124-110647-182fa9 (E5 PR #16 + client_read), so it carries E5. Verified in headless Chromium against a real backend + Postgres 17 as admin, reviewer (forced 403 stays signed in; tampered chain shows Broken at seq 6) and client_read (lands on Findings, no refused calls). verify.sh --web-only (now with governance unit tests and the i18n check), build:static, and the db migration test after merging main pass. **Next:** c-92bb52: gate mutating controls on existing pages by role (reviewer currently sees Interception Rules edit controls). c-7c4715: client_read console (my-companies endpoint + switcher, client dashboard). c-601ec6: chain newest-first paging and deep link to the approval row. Land PR #16 / the c-5b5421 branch or this branch (it carries both). **Decided:** Built on the unmerged E5 + client_read branch rather than waiting, so the UI was tested against the real API. Governance client lives in web/src/lib/governance-api.ts (api.ts is already over 600 lines) reusing http(). UI hiding is a convenience; the server policy stays the enforcement. Dashboard and company switcher are hidden for client_read because they call operator-wide routes. Audit kind quick-picks are identifiers, not translated. **Issues:** opened #c-601ec6, #c-7c4715, #c-92bb52.
 - **2026-11-24 13:36 MST** · claude-code · `ej/20261124-132441-98ba1e` `4fdcbd4`→`88d42a7` (3 commits) · `h-59bfe6` — c-9b48b7: confirmed go-mitmproxy keep-alive host pinning is still unfixed through v1.9.5 (= upstream main 07e0ca5), and no upstream report exists. Drafted the issue text and a tested 10-line patch with a regression test (docs/upstream/go-mitmproxy-keepalive-host-pinning.{md,patch}). The test fails without the fix and passes with it; upstream go test ./... passes. NOT filed: this is outward-facing and waits on Ian. unpinHostChange stays, its comment now points at the draft, and ARTEX regression tests and verify.sh pass. **Next:** Ian: approve filing (human lane). Then an agent files the issue and PR at lqqyt2423/go-mitmproxy as the doc describes. After a fixed release: bump go.mod, delete unpinHostChange and absoluteForm, keep the tests, run verify.sh. **Decided:** The upstream fix uses the separate client for a host change instead of redialling in place, because wrapServerConn.Close half-closes the non-TLS client connection (CloseRead), which would kill the client. It is limited to plain-HTTP proxy connections (a flag set in initHttpDialFn), so the new plain-HTTP-in-CONNECT tunnel mode is untouched. ARTEX stays on v1.9.2, because v1.9.5 does not fix this.
