@@ -117,6 +117,14 @@ func (p *execUIDPool) acquire(key string) (uid uint32, fresh bool, err error) {
 	return 0, false, fmt.Errorf("every executor uid of %s is in use: no uid for %s", p.r, key)
 }
 
+// held returns the uid key holds, if any.
+func (p *execUIDPool) held(key string) (uint32, bool) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	uid, ok := p.byKey[key]
+	return uid, ok
+}
+
 // adopt records uid as key's (a run directory found on disk at start-up). It
 // reports false when uid is outside the range or already another key's.
 func (p *execUIDPool) adopt(key string, uid uint32) bool {

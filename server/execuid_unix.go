@@ -152,8 +152,12 @@ func (e *execRuns) makeRunDir(base, leaf string) error {
 	return nil
 }
 
-// ownKey gives every entry of key to uid.
+// ownKey gives every entry of key, and its spill directory, to uid.
 func (e *execRuns) ownKey(key string, uid uint32) error {
+	return errors.Join(e.ownKeyEntries(key, uid), e.ownSpill(key, uid))
+}
+
+func (e *execRuns) ownKeyEntries(key string, uid uint32) error {
 	dir, isLeaf := e.keyDir(key)
 	if isLeaf {
 		return ownRunDir(dir, uid)
@@ -174,8 +178,13 @@ func (e *execRuns) ownKey(key string, uid uint32) error {
 	return errors.Join(errs...)
 }
 
-// disownKey gives every entry of key back to root and closes its run directories.
+// disownKey gives every entry of key back to root and closes its run directories
+// and its spill directory.
 func (e *execRuns) disownKey(key string) error {
+	return errors.Join(e.disownKeyEntries(key), e.disownSpill(key))
+}
+
+func (e *execRuns) disownKeyEntries(key string) error {
 	dir, isLeaf := e.keyDir(key)
 	root := entryOwner{uid: 0, gid: 0}
 	if isLeaf {
@@ -244,8 +253,13 @@ func (e *execRuns) release(key string) {
 	}
 }
 
-// closeKey makes every run directory of key root:root 0700 without walking it.
+// closeKey makes every run directory of key root:root 0700, and its spill
+// directory too, without walking them.
 func (e *execRuns) closeKey(key string) error {
+	return errors.Join(e.closeSpill(key), e.closeKeyRunDirs(key))
+}
+
+func (e *execRuns) closeKeyRunDirs(key string) error {
 	dir, isLeaf := e.keyDir(key)
 	leaves := []string{dir}
 	if !isLeaf {
@@ -343,6 +357,9 @@ func (e *execRuns) adoptAll() error {
 				return fmt.Errorf("%s: %w", key, err)
 			}
 		}
+	}
+	if err := e.adoptSpills(); err != nil {
+		return fmt.Errorf("spill directories: %w", err)
 	}
 	return nil
 }
@@ -468,6 +485,7 @@ func prepareExecRuns(p ExecPrivilege, dataDir string) error {
 	}
 	setExecRuns(e)
 	agent.SetRunDirMaker(e.makeRunDir)
+	agent.SetSpillDirMaker(e.makeSpillDir, e.shareSpill)
 	return os.Setenv(envExecUIDRange, p.Range.String())
 }
 

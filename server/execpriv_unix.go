@@ -230,7 +230,8 @@ func prepareExecScript(p ExecPrivilege, path string) error {
 // group. The entries a task directory held before this layout are shared with the
 // group too (shareTaskDir). Command-output spills leave the run directories for
 // <data>/spill, which the
-// executor group reads and cannot change (makeSpillDir). The key files and the
+// executor group reads and cannot change (makeSpillDir); with a range, the group
+// is the key's uid instead (execuid_spill_unix.go). The key files and the
 // config file (which can hold the database DSN) are restricted to root. Nothing
 // else under the data directory changes; directories a
 // root-only path needs are left as they are. It sets p.ScriptDir to the script
@@ -255,11 +256,11 @@ func PrepareExecPrivilege(p *ExecPrivilege, dataDir, keyDir, configPath string) 
 			return fmt.Errorf("share the run directories with the executor group: %w", err)
 		}
 		agent.SetRunDirMaker(func(base, leaf string) error { return makeRunDir(base, leaf, gid) })
+		agent.SetSpillDirMaker(
+			func(base, dir string) error { return makeSpillDir(base, dir, gid) },
+			func(dir string) error { return shareSpillFiles(dir, gid) },
+		)
 	}
-	agent.SetSpillDirMaker(
-		func(base, dir string) error { return makeSpillDir(base, dir, gid) },
-		func(dir string) error { return shareSpillFiles(dir, gid) },
-	)
 	// The file tools open the paths the agent names inside the server: they do it as
 	// the executor too (agent/filetools_identity.go).
 	if agent.FileToolIdentitySupported() {
@@ -445,6 +446,9 @@ func shareSpillFiles(dir string, gid int) error {
 func shareRestoredSpillDir(p ExecPrivilege, dir string) error {
 	if !p.Enabled {
 		return nil
+	}
+	if e := currentExecRuns(); e != nil {
+		return e.restoredSpillDir(dir)
 	}
 	gid := int(p.GID)
 	if err := setDirOwner(dir, gid, spillDirMode); err != nil {
