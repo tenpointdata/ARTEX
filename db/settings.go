@@ -144,11 +144,24 @@ ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()`, ver
 
 // GetBool returns the boolean setting, or def when unset/unparseable.
 func (d *DB) GetBool(key string, def bool) bool {
-	v, ok, err := d.GetSetting(key)
-	if err != nil || !ok {
+	v, err := d.LookupBool(key, def)
+	if err != nil {
 		return def
 	}
-	return v == "true" || v == "1"
+	return v
+}
+
+// LookupBool is GetBool that reports a failed read instead of hiding it behind
+// def, for callers that must fail closed when the stored value is unknown.
+func (d *DB) LookupBool(key string, def bool) (bool, error) {
+	v, ok, err := d.GetSetting(key)
+	if err != nil {
+		return def, err
+	}
+	if !ok {
+		return def, nil
+	}
+	return v == "true" || v == "1", nil
 }
 
 // SetBool stores a boolean setting as "true"/"false".

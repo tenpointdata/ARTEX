@@ -172,6 +172,9 @@ These are known and carded on the ARTEX board:
 - **The capture-store tools need the control node.** On a worker node they
   are calls to the control node (see "Evidence on worker nodes"). While it is
   down they fail, and so does a finding that carries traffic refs.
-- **The capture switch is read at start-up on a worker node.** A worker node
-  reads `traffic_capture` when it starts, so after the switch is flipped on the
-  control node, restart the worker nodes.
+- **A capture-switch flip reaches running intents only when they end.** A
+  worker node re-reads `traffic_capture` every poll (2 s) and drops its task
+  agent bundles when the value changes, so the next run gets the new proxy URL,
+  CA, traffic tools and prompt note. An intent already running keeps the
+  settings it started with. If the setting cannot be read, the node stops
+  claiming new work until it can.

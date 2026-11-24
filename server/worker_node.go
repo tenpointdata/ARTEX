@@ -81,7 +81,10 @@ func (s *Server) workerDispatchLoop(ctx context.Context) {
 // the loops of tasks that ended.
 func (s *Server) workerDispatchOnce(ctx context.Context) {
 	e, pg, w := s.engine, s.m.pg, s.engine.wnode
+	captureErr := s.syncTrafficCapture()
 	switch allNode, err := pg.LiveNodeWithRole(string(RoleAll), s.node.NodeID); {
+	case captureErr != nil:
+		w.setBlocked(s.node.NodeID, "traffic-capture setting unreadable: "+captureErr.Error())
 	case err != nil:
 		w.setBlocked(s.node.NodeID, "node registry unreadable: "+err.Error())
 	case allNode:
@@ -127,6 +130,31 @@ func (s *Server) workerDispatchOnce(ctx context.Context) {
 			w.mu.Unlock()
 		}
 	}
+}
+
+// syncTrafficCapture follows the control node's traffic-capture switch. When it
+// flips, the task agent bundles are dropped (as applyLLM does on the control
+// node) so each task's next run is built with the new proxy URL, CA, traffic
+// tools (HostTools) and prompt note. An intent already running keeps the
+// bundle it started with until it ends. A read error is returned so the caller
+// blocks new claims: the node cannot tell whether its traffic must be recorded.
+func (s *Server) syncTrafficCapture() error {
+	changed, err := s.m.reloadTrafficEnabled()
+	if err != nil {
+		return err
+	}
+	if changed {
+		log.Printf("[node %s] traffic capture switched %s on the control node; rebuilding task agents", s.node.NodeID, onOff(s.m.TrafficEnabled()))
+		s.invalidateTaskAgents()
+	}
+	return nil
+}
+
+func onOff(on bool) string {
+	if on {
+		return "on"
+	}
+	return "off"
 }
 
 // syncServedTask mirrors one served task's control state into this process

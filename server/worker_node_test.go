@@ -103,9 +103,16 @@ func startTestWorkerNode(t *testing.T, nodeID string, p llm.Provider) *testNode 
 	if err != nil {
 		t.Fatal(err)
 	}
+	return startTestNodeOn(t, m, NodeConfig{Role: RoleWorker, NodeID: nodeID, Host: nodeID, Workers: 1}, p)
+}
+
+// startTestNodeOn runs m as the worker node node, with p as its worker model.
+// It closes m when the test ends.
+func startTestNodeOn(t *testing.T, m *Manager, node NodeConfig, p llm.Provider) *testNode {
+	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
 	e := NewEngine(m)
-	e.node = NodeConfig{Role: RoleWorker, NodeID: nodeID, Host: nodeID, Workers: 1}
+	e.node = node
 	s := &Server{m: m, engine: e, ctx: ctx, node: e.node, chatBusy: map[string]bool{},
 		chatCancel: map[string]context.CancelCauseFunc{}, taskAgents: map[string]*taskAgentBundle{}}
 	worker := agent.NewWorker(p, "test-model", m.dir, nil, 0, 3)

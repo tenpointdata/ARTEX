@@ -632,6 +632,23 @@ func (m *Manager) SetTrafficEnabled(on bool) error {
 	return nil
 }
 
+// reloadTrafficEnabled re-reads settings.traffic_capture into memory and
+// reports whether the value changed. A worker node (E7) calls it every poll:
+// the control node's SetTrafficEnabled changes only the control's memory and
+// the shared row. It does not touch the browser MCP row (the control node owns
+// it). Callers must rebuild the agents when it reports a change. On a read
+// error the in-memory value is left as it was.
+func (m *Manager) reloadTrafficEnabled() (changed bool, err error) {
+	on, err := m.pg.LookupBool(settingTrafficCapture, false)
+	if err != nil {
+		return false, err
+	}
+	m.mu.Lock()
+	changed, m.trafficOn = m.trafficOn != on, on
+	m.mu.Unlock()
+	return changed, nil
+}
+
 // LLMRecordEnabled reports whether LLM request/response recording is on
 // (off by default; settings.llm_record). The recorder consults this per call, so the
 // toggle takes effect immediately without rebuilding agents.

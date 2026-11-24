@@ -59,6 +59,18 @@ See `docs/ARCHITECTURE.md` for the code-level map. Summary:
 
 ## Current state
 
+**2026-11-24 — Worker nodes follow the capture switch without a restart (`c-7ad4da`, E7 follow-up; in review).**
+`workerDispatchOnce` (`server/worker_node.go`) now calls `syncTrafficCapture` every 2 s poll. That
+re-reads `settings.traffic_capture` (`Manager.reloadTrafficEnabled`, which uses the new
+`db.LookupBool`) and, when the value flips, drops the task agent bundles as `applyLLM` does, so the next
+run gets the new proxy URL, CA, `HostTools` and prompt note. An unreadable setting blocks new claims.
+An intent already running keeps the settings it started with (documented under "Limits" in
+docs/DISTRIBUTED.md). **This branch merges the E7 branches (`ej/20261124-155351-f5bfb9`), so landing
+it lands E7.** Verified against Postgres 16: `TestWorkerNodeFollowsTrafficCaptureSwitch` (a control
+manager and a worker manager: off, then on, each followed within one poll; it fails with the sync
+removed) and the other worker-node tests. `scripts/verify.sh` with `ARTEX_PG_DSN`: every package passes
+except `server`, which fails only on the known macOS `TestManagerSOCKS5UDP…` 127.0.0.2 bind.
+
 **2026-11-24 — Worker-node findings carry their captured proof (`c-3b781a`, E7 follow-up; in review).**
 A finding recorded by an intent on a `-role worker` node now binds the request/response the control
 node's recording proxy captured. The worker calls a **signed node RPC** on the control API
@@ -73,8 +85,7 @@ Verified against Postgres 16: `TestWorkerNodeFindingBindsControlCapture` (two ma
 intent's `report_finding` binds the control capture; a mutation with the local store fails it),
 `TestNodeRPCVerifier`, `TestControlAPIURL`, `TestWorkerNodeUsesControlRecordingProxy`, and
 `scripts/verify.sh` (see Deltas for the result). The Helm template was rendered (`alpine/helm`). Not
-checked: a real multi-host run. Gap carded: `c-7ad4da` (workers read the capture switch only at
-start-up).
+checked: a real multi-host run. Gap `c-7ad4da` (capture switch read only at start-up) is fixed above.
 
 **2026-11-24 — SSE 401 after console login (`c-13e86c`, fixed; pre-E5).** Streams are same-origin only
 (`web/src/lib/sse.ts`), dev gzip off, `openSSE` writes `: open`. Test `server/activity_stream_auth_pg_test.go`;
