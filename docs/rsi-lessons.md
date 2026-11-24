@@ -86,7 +86,7 @@ rendered block. Selection is scoped:
   `scope_key`: a digest of the task's operator-declared (`source='manual'`)
   target scope, so two tasks against the same declared target share lessons; a
   task that declares no target gets its own key and sees only its own lessons.
-  Lessons written before `scope_key` existed (migration 0015) have an empty key
+  Lessons written before `scope_key` existed (migration 0021) have an empty key
   and are selected by no task; re-run `POST /api/tasks/{id}/lessons/extract` to
   rebuild them;
 - `ARTEX_RSI_LESSONS_SHARED=1` (off by default) also offers lessons from other
