@@ -14,7 +14,7 @@ Do not weaken them through `extraEnv`.
 | Role | Workload | What it does |
 | --- | --- | --- |
 | `control` | Deployment, 1 replica, strategy `Recreate` | UI/API on 8787, planners, schedulers, notifier. Holds in-memory planner state, so it must stay a single replica. `control.localWorkers` (default `0`) sets how many intent workers run inside it; `0` sends all intents to worker nodes. |
-| `worker` | Deployment, `worker.replicas` (default 2) | No API. Plaintext `GET /healthz` on `worker.healthPort` (8790). Claims intents from PostgreSQL, runs them through the same guards and its own loopback-only capture proxy (`127.0.0.1:8788`, never exposed). `ARTEX_NODE_ID` is the pod name; `worker.concurrency` sets `ARTEX_NODE_WORKERS`. |
+| `worker` | Deployment, `worker.replicas` (default 2) | No API. Plaintext `GET /healthz` on `worker.healthPort` (8790). Claims intents from PostgreSQL, runs them through the same guards; tool traffic goes through the control node's recording proxy (`<release>-control-proxy:8788`, scope-token gated) and evidence calls go to the control API's signed node RPC over TLS. `ARTEX_NODE_ID` is the pod name; `worker.concurrency` sets `ARTEX_NODE_WORKERS`. |
 
 All nodes share the same PostgreSQL, `ARTEX_SECRET_KEY`, LLM provider env, and egress/noise/budget
 settings (one ConfigMap plus one Secret).
@@ -68,8 +68,25 @@ unprivileged executor uid. All other capabilities are dropped except the small s
 do that only if you enforce egress with a NetworkPolicy or firewall. The optional
 `networkPolicy.enabled` allows worker ingress only on the health port.
 
+## TLS between workers and the control node
+
+On by default (`controlTLS.enabled=true`). The control API serves TLS, and workers reach
+`https://<release>-control:8787` with the CA pinned (`ARTEX_CONTROL_CA`, mounted from the TLS
+Secret's CA key only; worker pods never mount the control key). Pick the certificate source:
+
+| `controlTLS.source` | Certificate | Notes |
+| --- | --- | --- |
+| `generate` (default) | private CA and certificate made by the chart, kept via `lookup` | not for `helm template`/GitOps (it would regenerate); renew by deleting `<release>-control-tls` and upgrading, then roll the workers |
+| `secret` | `controlTLS.existingSecret` with `tls.crt`, `tls.key` and the CA under `controlTLS.caKey` | the certificate must cover `<release>-control` |
+| `certManager` | a `Certificate` from `controlTLS.certManager.issuerRef` | the issuer must be CA-type (CA, Vault) so `ca.crt` is the signing CA; renewals are reloaded by the control node within 30 s |
+
+With TLS on, probes use HTTPS, the Service port has `appProtocol: https`, the Ingress gets
+`nginx.ingress.kubernetes.io/backend-protocol: HTTPS`, and `kubectl port-forward` serves
+`https://localhost:8787`. The recording proxy hop (port 8788) stays plain HTTP. See
+docs/DISTRIBUTED.md "Transport".
+
 ## Ingress
 
 `control.ingress.*` creates a standard Ingress with TLS. Set `settings.trustedProxies` to your
-ingress controller CIDR so client addresses are read correctly. No Service exists for the capture
-proxy or workers.
+ingress controller CIDR so client addresses are read correctly. The capture proxy's Service
+(`<release>-control-proxy`) is for worker nodes only; workers have no Service.

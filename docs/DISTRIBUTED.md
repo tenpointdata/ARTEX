@@ -128,10 +128,64 @@ reach them through a **node RPC** on the control API,
   processes run as per-task uids, which cannot read the server's key file.
   Anyone holding the key can already decrypt every stored secret, so the RPC
   does not re-run the agent-side checks on the control node.
-- **Transport.** Plain HTTP inside the cluster by default. Payloads include
-  captured target traffic (sessions, credentials) in clear text, so set
-  `ARTEX_CONTROL_API=https://…` (TLS in front of the control API) when the
-  network between the nodes is shared or untrusted.
+- **Transport.** See "Transport" below: the node RPC runs over TLS with the
+  control API's CA pinned by default.
+
+## Transport
+
+Worker nodes make two kinds of connection to the control node:
+
+| Connection | Carries | Default protection |
+| --- | --- | --- |
+| Control API (`ARTEX_CONTROL_API`), node RPC | `tool`/`preview` payloads with captured target traffic (session cookies, credentials), findings | **TLS, CA pinned** (Helm and compose), plus the HMAC on every request and reply |
+| Recording proxy (`ARTEX_CONTROL_PROXY`) | the agents' target traffic | plain HTTP to the proxy; HTTPS targets stay TLS inside `CONNECT` |
+
+- **Control side.** The control node serves its API over TLS when
+  `ARTEX_TLS_CERT`/`ARTEX_TLS_KEY` (or `-tls-cert`/`-tls-key`) are set. It
+  rereads the pair when either file changes (checked at most every 30 s), so a
+  renewed certificate (cert-manager, a rotated Secret) is served without a
+  restart. A renewal that fails to load keeps the last good pair and logs.
+- **Worker side.** `ARTEX_CONTROL_CA` names a PEM file holding the CA that
+  signed the control API certificate. With it the worker accepts only
+  `https://` and trusts only that CA, never the system roots, so a publicly
+  valid certificate for the same name does not pass. The file must hold CA
+  certificates only (a private key block is refused). When `ARTEX_CONTROL_API`
+  is empty, it is derived from the proxy host as `https://<host>:8787` if a CA
+  is pinned, else `http://`. Without a CA an `https://` API is checked against
+  the system roots. A plain `http://` API still works (compatibility), but the
+  worker logs a WARNING at start-up. The worker reads the CA once at start-up,
+  so restart the workers after a CA change.
+- **Helm.** `controlTLS.enabled` (default `true`) with `controlTLS.source`:
+  `generate` (the chart makes a private CA and certificate once and keeps them
+  through `lookup`, which is not available under `helm template`/GitOps),
+  `secret` (`controlTLS.existingSecret` with `tls.crt`, `tls.key` and the CA
+  under `controlTLS.caKey`), or `certManager` (a `Certificate` from
+  `controlTLS.certManager.issuerRef`, which must be a CA-type issuer so the
+  Secret's `ca.crt` is the signing CA). The certificate covers
+  `<release>-control[.<ns>[.svc[.cluster.local]]]`, `localhost`, `127.0.0.1`
+  and `controlTLS.extraDnsNames`. Worker pods mount only the CA key of that
+  Secret, never the control key. Probes use HTTPS, the Service port has
+  `appProtocol: https`, and the Ingress gets
+  `nginx.ingress.kubernetes.io/backend-protocol: HTTPS` (other controllers
+  need their own backend-TLS setting).
+- **Compose.** `docker-compose.distributed.yml` runs `artex node-tls` once
+  (`artex-tls-init`), which writes the control pair to the `artex-tls` volume
+  (mounted on the control node only) and `ca.crt` to `artex-control-ca`
+  (mounted on the workers). The UI is then `https://localhost:8787`.
+- **`artex node-tls`.** `artex node-tls -dir D [-ca-dir C] -names a,b -ips
+  10.0.0.5 [-days N]` makes a fresh CA and a server certificate for those names
+  (ECDSA P-256) and writes `D/tls.crt`, `D/tls.key` (0600) and `C/ca.crt`. The
+  CA key is discarded, so nothing else can be signed with it. Existing files
+  are kept, so it is safe to run on every start. To renew, delete the files,
+  rerun the command and restart the workers.
+- **The proxy hop is still plain HTTP.** Agent tools speak to the recording
+  proxy as an ordinary HTTP proxy, and most of them cannot use a TLS proxy.
+  HTTPS targets are unaffected: the MITM TLS session runs from the worker to
+  the control proxy inside `CONNECT`. Plain-HTTP target traffic and the
+  per-task scope token in `Proxy-Authorization` do cross the network in clear
+  text. Until a worker-side TLS relay exists (card c-677166), keep
+  the proxy port on a trusted network. The Helm `networkPolicy.enabled` admits
+  only worker pods to it.
 
 ## Deploying
 
@@ -147,10 +201,12 @@ reach them through a **node RPC** on the control API,
 - **Separate hosts by hand.** Run the control node with
   `-role control -proxy :8788`. On each other host, run
   `-role worker -health-addr :8790` with the same database environment,
-  `ARTEX_SECRET_KEY`, LLM configuration, `ARTEX_CONTROL_PROXY=http://<control>:8788`
-  and, when the API is not on port 8787 of the same host,
-  `ARTEX_CONTROL_API=http://<control>:<api port>`. Worker nodes must reach the
-  control API as well as the proxy.
+  `ARTEX_SECRET_KEY`, LLM configuration, `ARTEX_CONTROL_PROXY=http://<control>:8788`,
+  `ARTEX_CONTROL_API=https://<control>:<api port>` and `ARTEX_CONTROL_CA`.
+  Make the files with `artex node-tls -dir tls -names <control host> -ips
+  <control ip>`, start the control node with `ARTEX_TLS_CERT=tls/tls.crt
+  ARTEX_TLS_KEY=tls/tls.key`, and copy only `tls/ca.crt` to the workers.
+  Worker nodes must reach the control API as well as the proxy.
 
 ## Limits
 
