@@ -638,6 +638,8 @@ func TestGateOffTaskIsUnchanged(t *testing.T) {
 		t.Fatal("the worker run did not end")
 	}
 
+	// WebFetch's lookups are its always-on checks; count the custom tools' own.
+	before := res.lookups()
 	httpTool := g.s.buildCustomTool(&db.Tool{Key: "probe_http", Kind: "http",
 		Schema: json.RawMessage(`{"type":"object","properties":{"port":{"type":"string"}}}`),
 		Exec:   execJSON(t, map[string]any{"url": "http://localhost:{port}/c"})})
@@ -656,7 +658,10 @@ func TestGateOffTaskIsUnchanged(t *testing.T) {
 	if n := targetRowCount(t, g.m.pg, task.ID); n != 0 {
 		t.Fatalf("%d target rows, want none", n)
 	}
-	if n := res.lookups(); n != 0 {
-		t.Fatalf("%d lookups, want none", n)
+	// The http tool's rendered-URL check reads the cached answer of the WebFetch
+	// calls; its dial makes the one fresh lookup it connects to. The command
+	// tool resolves nothing.
+	if n := res.lookups() - before; n != 1 {
+		t.Fatalf("%d lookups by the custom tools, want the http tool's dial lookup only", n)
 	}
 }

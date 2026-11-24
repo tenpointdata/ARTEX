@@ -115,11 +115,54 @@ func TestCustomHTTPDirectDialPinned(t *testing.T) {
 	}
 }
 
-// With the gate off (and without a scope) the call keeps http.DefaultTransport:
-// no transport is built. A spec with a proxy keeps its proxy transport, without
-// a dialer. Gate on and direct: a transport with the pinned dialer, no
-// environment proxy, keep-alive off.
-func TestCustomHTTPGateOffTransportUnchanged(t *testing.T) {
+// With the gate off, a direct call dials through the pinned dialer, whose
+// fresh lookup is checked and whose addresses are dialled: a name that answers
+// a metadata address between the rendered-URL check (which reads the cached
+// answer) and the dial is refused there, and nothing reaches it. The normal
+// gate-off call still reaches its target.
+func TestCustomHTTPGateOffDialChecksFreshLookup(t *testing.T) {
+	g := newGateServer(t)
+	task := g.newTask(t, db.TaskCreateOptions{})
+	srv, hits, _, port := countingServer(t)
+	res := &countingResolver{answers: map[string][]string{"api.example.com": {"203.0.113.7"}}}
+	g.m.interceptor.SetResolver(res)
+	dialer := newRouteDialer(g)
+	dialer.route("203.0.113.7:"+port, srv.Listener.Addr().String())
+	// Were the metadata address dialled, it would reach the server.
+	dialer.route("169.254.169.254:"+port, srv.Listener.Addr().String())
+	key := "api.example.com:" + port
+	tool := g.s.buildCustomTool(&db.Tool{Key: "probe_off", Kind: "http",
+		Exec: execJSON(t, map[string]any{"url": "http://" + key + "/off"})})
+	call := func() (string, bool) { return callTool(t, tool, gatedCtx(task, 0), `{}`, nil) }
+
+	if out, isErr := call(); isErr || !strings.Contains(out, "probe-reached") || hits.Load() != 1 {
+		t.Fatalf("gate-off call: error=%v out=%q hits=%d", isErr, out, hits.Load())
+	}
+	before := res.lookups()
+	res.set("api.example.com", "169.254.169.254")
+	out, isErr := call()
+	if !isErr || !strings.Contains(out, "TARGET_RULE_BLOCKED: the connection to "+key+" was not opened") ||
+		!strings.Contains(out, "169.254.169.254") || hits.Load() != 1 {
+		t.Fatalf("rebound to metadata: error=%v out=%q hits=%d", isErr, out, hits.Load())
+	}
+	if res.lookups() == before {
+		t.Fatal("the dial made no fresh lookup")
+	}
+	if got := dialer.calls(); !slices.Equal(got, []string{"203.0.113.7:" + port}) {
+		t.Fatalf("dialled %v, want the checked address once", got)
+	}
+	// The deny is audited (one denied row); nothing asks for an approval.
+	if n := targetRowCount(t, g.m.pg, task.ID); n != 1 {
+		t.Fatalf("%d target rows, want the one denied row of the metadata deny", n)
+	}
+}
+
+// Without a scope, or with a gate-off scope that carries no Interceptor, the
+// call keeps http.DefaultTransport: no transport is built. A spec with a proxy
+// keeps its proxy transport, without a dialer. Gate on and direct, or gate off
+// with an Interceptor: a transport with the pinned dialer, no environment
+// proxy, keep-alive off.
+func TestCustomHTTPToolTransportShape(t *testing.T) {
 	s := &Server{}
 	direct := httpExec{URL: "http://api.example.com/"}
 	scope := func(on bool) context.Context {
@@ -135,6 +178,14 @@ func TestCustomHTTPGateOffTransportUnchanged(t *testing.T) {
 	}
 	if tr := s.httpToolTransport(scope(true), "probe", direct); tr == nil || tr.Proxy != nil || tr.DialContext == nil || !tr.DisableKeepAlives {
 		t.Fatalf("gated direct call: transport %+v", tr)
+	}
+	offWithGate := intercept.WithTargetScope(context.Background(), intercept.TargetScope{TaskID: "7",
+		Enabled: func() bool { return false }, Interceptor: &intercept.Interceptor{}})
+	if tr := s.httpToolTransport(offWithGate, "probe", direct); tr == nil || tr.Proxy != nil || tr.DialContext == nil || !tr.DisableKeepAlives {
+		t.Fatalf("gate-off direct call with an Interceptor: transport %+v", tr)
+	}
+	if tr := s.httpToolTransport(offWithGate, "probe", httpExec{URL: direct.URL, Proxy: "http://127.0.0.1:1"}); tr == nil || tr.Proxy == nil || tr.DialContext != nil {
+		t.Fatalf("gate-off operator proxy: transport %+v, want the proxy transport without a dialer", tr)
 	}
 }
 

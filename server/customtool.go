@@ -620,12 +620,19 @@ func assessmentRedirectCheck(check func(*http.Request, []*http.Request) error) f
 // (http.DefaultTransport). A call through a proxy keeps httpProxyTransport: it
 // dials the proxy, which makes the connection to the target. A direct call in
 // a gated scope connects through the pinned dialer, to addresses a pin covers.
+// A direct call in a scope whose gate is off but that carries its Interceptor
+// connects through the same dialer, which then runs the always-on checks (the
+// asset block rules and the metadata deny) on a fresh lookup and dials only
+// the addresses it checked: the rendered-URL check alone reads a cached answer
+// that the client's own lookup need not repeat.
 func (s *Server) httpToolTransport(ctx context.Context, key string, spec httpExec) *http.Transport {
 	if tr := s.httpProxyTransport(spec); tr != nil {
 		return tr
 	}
 	if !intercept.GateOn(ctx) {
-		return nil
+		if scope, ok := intercept.TargetScopeFromContext(ctx); !ok || scope.Interceptor == nil {
+			return nil
+		}
 	}
 	base, ok := http.DefaultTransport.(*http.Transport)
 	if !ok {
