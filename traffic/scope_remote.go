@@ -2,8 +2,11 @@ package traffic
 
 import (
 	"errors"
+	"log"
 	"net"
 	"net/http"
+	"os"
+	"strings"
 	"sync"
 	"time"
 )
@@ -31,12 +34,15 @@ import (
 //   - a resolution in flight when ForgetScope(key) runs is not cached and is
 //     refused, so a dial racing the end of the scope cannot re-open it.
 //
-// Exposure: once the proxy listens where workers reach it, a client without a
+// Exposure: once the proxy listens where other hosts reach it (a worker node,
+// or a single node with ARTEX_PROXY_ALLOW_NONLOOPBACK=1), a client without a
 // token from a non-loopback address would get the global rules only: an open
-// proxy onto the cluster network. RequireScopeForRemoteClients (on whenever a
-// remote resolver is set) refuses its dials, and those of a non-loopback client
-// naming a scope that does not resolve, even when a global egress proxy is set
-// (that path bypasses the gate). Loopback clients keep today's behaviour.
+// proxy onto that network. RequireScopeForRemoteClients refuses its dials, and
+// those of a non-loopback client naming a scope that does not resolve, even
+// when a global egress proxy is set (that path bypasses the gate). It is on by
+// default in every role (Open); ARTEX_PROXY_ALLOW_UNSCOPED_REMOTE=1 turns it
+// off on a node without a remote resolver, and setting a resolver (the control
+// node) always turns it back on. Loopback clients keep today's behaviour.
 //
 // Binding is by the client connection's remote address (scope.go), which for a
 // worker is its pod or host address and an ephemeral port: unique per TCP
@@ -102,6 +108,19 @@ func (t *Traffic) RequireScopeForRemoteClients(on bool) {
 	t.remote.mu.Lock()
 	t.remote.require = on
 	t.remote.mu.Unlock()
+}
+
+// unscopedRemoteClientsAllowed reports ARTEX_PROXY_ALLOW_UNSCOPED_REMOTE: the
+// operator's explicit opt-out that lets a non-loopback client without a scope
+// token use the proxy on the global rules only (manual capture from another
+// host). Ignored on a node that resolves remote tokens.
+func unscopedRemoteClientsAllowed() bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("ARTEX_PROXY_ALLOW_UNSCOPED_REMOTE"))) {
+	case "1", "true", "yes", "on":
+		log.Printf("[traffic] WARNING: ARTEX_PROXY_ALLOW_UNSCOPED_REMOTE is on: non-loopback proxy clients without a run scope get the global rules only")
+		return true
+	}
+	return false
 }
 
 func (r *remoteScopes) requireScope() bool {
