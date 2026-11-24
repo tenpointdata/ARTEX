@@ -81,7 +81,9 @@ func TestSessionEndpointReportsCookieSession(t *testing.T) {
 	r.AddCookie(&http.Cookie{Name: sessionCookiePlain, Value: tok})
 	w := httptest.NewRecorder()
 	s.authSession(w, r)
-	if w.Code != 200 || w.Body.String() != "{\"authenticated\":true}\n" {
+	// The legacy login reports itself as the admin (rbac.go).
+	want := "{\"authenticated\":true,\"permissions\":[\"client_read\",\"read\",\"review\",\"operate\",\"admin\"],\"role\":\"admin\",\"username\":\"ARTEX\"}\n"
+	if w.Code != 200 || w.Body.String() != want {
 		t.Fatalf("got %d %q", w.Code, w.Body.String())
 	}
 	w = httptest.NewRecorder()
