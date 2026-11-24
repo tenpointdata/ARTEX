@@ -104,6 +104,13 @@ var rbacPolicy = []policyRule{
 	{http.MethodGet, "/api/workspace/read", false, permOperate},
 	{http.MethodGet, "/api/llm/records", true, permOperate},
 	{http.MethodGet, "/api/logs", true, permOperate},
+	// Raw recorded traffic carries the Authorization headers and cookies the
+	// agents used; conversation messages echo them. Host and list summaries stay read.
+	{http.MethodGet, "/api/traffic/exchange", false, permOperate},
+	{http.MethodGet, "/api/traffic/blob", false, permOperate},
+	{http.MethodGet, "/api/traffic/export", true, permOperate},
+	{http.MethodGet, "/api/traffic/stream", false, permOperate},
+	{http.MethodGet, "/api/conversations/{id}/messages", true, permOperate},
 
 	// --- read: the audit chain, for reviewers ---
 	{http.MethodGet, "/api/intercept/history/chain", true, permRead},

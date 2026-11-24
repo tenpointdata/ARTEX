@@ -31,6 +31,10 @@ const (
 	AuthorizationTechniqueDenied = "AUTHORIZATION_TECHNIQUE_DENIED"
 )
 
+// authorizedNonTarget are tools that reach no target themselves but start
+// work that does: they stay subject to revocation and the window.
+var authorizedNonTarget = toolSet("spawn_task")
+
 // authNow is the clock of the window check; tests replace it.
 var authNow = time.Now
 
@@ -84,6 +88,13 @@ func (c *targetCheck) authorize(targets []Target) TargetResult {
 	if c.ref.TaskID == 0 || c.i.targets == nil {
 		return TargetResult{}
 	}
+	tool, input := unwrapExtra(c.tool, c.input)
+	// A tool that cannot reach a target is never refused, not even when the
+	// artifact cannot be read.
+	local := noTargetTools[tool] && !authorizedNonTarget[tool]
+	if local && len(targets) == 0 {
+		return TargetResult{}
+	}
 	first := &checkedTarget{}
 	if len(targets) > 0 {
 		first.Target = targets[0]
@@ -95,12 +106,11 @@ func (c *targetCheck) authorize(targets []Target) TargetResult {
 	if a == nil {
 		return TargetResult{}
 	}
-	tool, input := unwrapExtra(c.tool, c.input)
 	terms := fmt.Sprintf("authorization v%d of task %d", a.Version, a.TaskID)
 	if a.Reference != "" {
 		terms += " (" + a.Reference + ")"
 	}
-	if !noTargetTools[tool] {
+	if !local {
 		now := authNow()
 		switch {
 		case a.Revoked:

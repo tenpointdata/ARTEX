@@ -175,7 +175,12 @@ var dummyHash = sync.OnceValue(func() []byte {
 
 // auditUsername bounds an attempted username before it goes into the chain.
 func auditUsername(u string) string {
-	u = strings.ToLower(strings.TrimSpace(u))
+	u = strings.Map(func(r rune) rune {
+		if r < 0x20 || r == 0x7f {
+			return -1
+		}
+		return r
+	}, strings.ToLower(strings.TrimSpace(u)))
 	if len(u) > 64 {
 		u = u[:64]
 	}

@@ -96,8 +96,10 @@ END $$;
 
 -- The actor of a row entry: the transaction's artex.actor setting when the
 -- application set one, else the approver or decider the row names.
+-- TimeZone is pinned so to_jsonb renders timestamptz columns the same way in
+-- every session; the verifier pins it too.
 CREATE OR REPLACE FUNCTION audit_row_event() RETURNS trigger
-LANGUAGE plpgsql AS $$
+LANGUAGE plpgsql SET TimeZone = 'UTC' AS $$
 DECLARE
     rec   JSONB;
     actor TEXT;
@@ -129,7 +131,8 @@ CREATE TRIGGER trg_intercept_pending_audit AFTER INSERT OR UPDATE OR DELETE ON i
 CREATE TABLE IF NOT EXISTS artex_users (
     id            BIGSERIAL PRIMARY KEY,
     username      TEXT NOT NULL UNIQUE
-                    CHECK (username ~ '^[a-z0-9][a-z0-9._-]{1,63}$' AND username <> 'artex'),
+                    CHECK (username ~ '^[a-z0-9][a-z0-9._-]{1,63}$' AND username NOT IN
+                      ('artex','system','anonymous','human','rule','model','target','db','admin')),
     password_hash TEXT NOT NULL,
     role          TEXT NOT NULL CHECK (role IN ('admin','operator','reviewer','client_read')),
     disabled      BOOLEAN NOT NULL DEFAULT false,

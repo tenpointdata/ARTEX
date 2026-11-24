@@ -11,7 +11,7 @@ intercept history. All of the schema is in `db/migrations/0016_engagement_govern
 | `admin` | everything, including users, authorization artifacts and guardrail configuration (intercept rules, asset rules, target-gate exemptions, judge, tool config, settings) |
 | `operator` | run engagements: create, start and steer tasks, chat, tools, traffic; decide approvals |
 | `reviewer` | read everything except secrets, raw LLM records and logs; decide approvals; triage findings |
-| `client_read` | read the report, the findings, the stats and a task's outcome and coverage. Nothing else |
+| `client_read` | read the report, the findings, the stats and a task's outcome and coverage. Nothing else. **The role is global for now:** a `client_read` user sees every client's findings, so give it only to someone entitled to all of them (per-client binding is a follow-up) |
 
 - The bootstrap login `ARTEX` (set on `/setup`) is always `admin` and serves as the break-glass account.
   Admins add other users with `POST /api/users`.
@@ -19,6 +19,12 @@ intercept history. All of the schema is in `db/migrations/0016_engagement_govern
   matching rule wins. Without a matching rule, `GET` needs `read` and every other method needs
   `operate`, and `client_read` is refused. Each refusal answers 403 and is appended to the audit chain
   as `rbac.denied`.
+- Reviewers can't read raw traffic exchanges, blobs, HAR exports or the traffic stream, and can't read
+  conversation messages: those carry the credentials the agents used.
+- `POST /api/auth/change-password` changes only the `ARTEX` password, and only an `ARTEX` session can
+  call it. An admin changes a console user's password with `PATCH /api/users/{id}`.
+- The names `system`, `anonymous`, `human`, `rule`, `model`, `target`, `db` and `admin` are reserved,
+  because the audit trail uses them for automatic actors.
 - A user's session token carries the user's version, and any password, role or disabled change bumps
   that version. Old sessions stop working on their next request.
 
@@ -52,10 +58,18 @@ hops. A task without an artifact is gated exactly as before.
 | Revoked | `AUTHORIZATION_REVOKED` | every tool that can reach a target |
 | Outside `not_before`..`not_after` (this is scope expiry) | `AUTHORIZATION_OUT_OF_WINDOW` | every tool that can reach a target, including commands that declare no target |
 | Technique class not listed | `AUTHORIZATION_TECHNIQUE_DENIED` | calls classified into a class (`intercept/technique.go`) |
-| Target outside the scope | `AUTHORIZATION_OUT_OF_SCOPE` | each declared target and each connection |
+| Target outside the scope | `AUTHORIZATION_OUT_OF_SCOPE` | each declared target, and each connection the platform dials (WebFetch, custom tools, SOCKS5, redirects) |
 
-Tools that cannot reach a target are never refused: these are the `noTargetTools` such as `Read`,
-`record_fact` and `report_finding`, so agents can still write up an engagement after it expires.
+**Undeclared connections.** A command can build its target at run time, for example
+`curl "https://$(cat host)"`. The scope check then sees only what goes through the platform's dialer.
+For a task with an artifact, turn the target gate on as well, so that undeclared targets still need a
+pin, and run with the Docker egress filter.
+
+Tools that cannot reach a target are never refused, even when the artifact can't be read: these are the
+`noTargetTools` such as `Read`, `record_fact` and `report_finding`, so agents can still write up an
+engagement after it expires. One exception is `spawn_task`, which stays subject to revocation and the
+window. A child task inherits its caller's current artifact as its first version, and a spawn under a
+revoked or expired artifact is refused.
 Each refusal is a decided intercept row (`decided_by = system`). It shows up in
 `/api/intercept/history` and on the audit chain.
 
@@ -85,6 +99,13 @@ The SQL function `audit_append` and the Go verifier (`db/audit_chain.go`) both c
 - `GET /api/intercept/history/chain/verify` recomputes every hash. It also checks that `seq` has no
   gaps and that the head row names the last entry, then compares every intercept history row with
   its newest entry. Rows written before 0016 are counted as `rows_unchained`.
+
+Verification reads everything in one repeatable-read snapshot with `TimeZone = 'UTC'`, and the row
+trigger pins UTC too, so concurrent appends and session time zones don't produce false alarms.
+
+**Cost.** Each append locks the head row until its transaction commits, so every intercept write
+queues behind any open transaction that already wrote one. A long one, such as a task archive, stalls
+the others until it commits.
 
 **Limits.** A database superuser can disable the triggers and rewrite the whole chain consistently.
 The hashes catch partial edits, removals and edits made behind the triggers' back, but a full rewrite

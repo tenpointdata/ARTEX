@@ -141,7 +141,17 @@ const maxMismatchReport = 200
 // and that the head row names the last entry, then compares each intercept
 // history row with the newest entry about it.
 func (d *DB) VerifyAudit(ctx context.Context) (AuditVerification, error) {
-	return verifyAudit(ctx, d.DB)
+	// One snapshot for every read, so appends that commit meanwhile are not
+	// mistaken for a removed tail, and UTC so rows render as the trigger did.
+	tx, err := d.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelRepeatableRead, ReadOnly: true})
+	if err != nil {
+		return AuditVerification{}, err
+	}
+	defer tx.Rollback()
+	if _, err := tx.ExecContext(ctx, `SET LOCAL TimeZone = 'UTC'`); err != nil {
+		return AuditVerification{}, err
+	}
+	return verifyAudit(ctx, tx)
 }
 
 // auditQuerier is what verification reads through: the pool, or a
@@ -153,6 +163,9 @@ type auditQuerier interface {
 
 func verifyAudit(ctx context.Context, d auditQuerier) (AuditVerification, error) {
 	v := AuditVerification{OK: true, RowsMismatched: []int64{}}
+	if err := d.QueryRowContext(ctx, `SELECT seq, hash FROM audit_chain_head WHERE id = 1`).Scan(&v.HeadSeq, &v.HeadHash); err != nil {
+		return v, fmt.Errorf("read audit head: %w", err)
+	}
 	prev, want := GenesisHash, int64(1)
 	for {
 		rows, err := d.QueryContext(ctx, `SELECT seq, at, actor, kind, subject, payload, prev_hash, hash
@@ -191,9 +204,6 @@ func verifyAudit(ctx context.Context, d auditQuerier) (AuditVerification, error)
 		if n < verifyBatch || v.BrokenAt != 0 {
 			break
 		}
-	}
-	if err := d.QueryRowContext(ctx, `SELECT seq, hash FROM audit_chain_head WHERE id = 1`).Scan(&v.HeadSeq, &v.HeadHash); err != nil {
-		return v, fmt.Errorf("read audit head: %w", err)
 	}
 	if v.BrokenAt == 0 && (v.HeadSeq != want-1 || v.HeadHash != prev) {
 		v.BrokenAt, v.Problem = want, fmt.Sprintf("the head names entry %d but the last entry is %d: entries were removed", v.HeadSeq, want-1)

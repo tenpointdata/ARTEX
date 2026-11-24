@@ -1,9 +1,12 @@
 package server
 
 import (
+	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/Autumn-27/artex/db"
@@ -188,4 +191,44 @@ func (s *Server) verifyAuditChain(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, 200, v)
+}
+
+// callerAuthorization returns the artifact of the task a tool call runs in
+// (read from the call's target scope, never from model-written arguments),
+// nil when the task has none. One that does not authorize action now is an error.
+func (s *Server) callerAuthorization(ctx context.Context) (*db.EngagementAuthorization, error) {
+	scope, ok := intercept.TargetScopeFromContext(ctx)
+	if !ok || scope.TaskID == "" || s.m == nil || s.m.pg == nil {
+		return nil, nil
+	}
+	callerID, err := strconv.ParseInt(scope.TaskID, 10, 64)
+	if err != nil || callerID <= 0 {
+		return nil, nil
+	}
+	a, err := s.m.pg.CurrentAuthorization(callerID)
+	if err != nil {
+		return nil, fmt.Errorf("read the engagement authorization of the calling task: %w", err)
+	}
+	if a != nil && !a.InForce(time.Now()) {
+		return nil, fmt.Errorf("%s: the engagement authorization of task %d is revoked or outside its window; no task can be spawned under it", intercept.AuthorizationOutOfWindow, callerID)
+	}
+	return a, nil
+}
+
+// inheritAuthorization stores a's terms as the first version of the child
+// task. On failure the child is deleted so it never runs without them.
+func (s *Server) inheritAuthorization(childID string, a *db.EngagementAuthorization) error {
+	id, err := strconv.ParseInt(childID, 10, 64)
+	if err == nil {
+		in := a.Input()
+		in.Note = strings.TrimSpace(fmt.Sprintf("inherited from task %d v%d. %s", a.TaskID, a.Version, in.Note))
+		_, err = s.m.pg.AddAuthorization(id, in, false, fmt.Sprintf("spawn_task:task-%d", a.TaskID))
+	}
+	if err != nil {
+		if _, derr := s.m.DeleteTask(childID, DeleteTaskOptions{}); derr != nil {
+			err = fmt.Errorf("%w (and deleting the child failed: %v)", err, derr)
+		}
+		return fmt.Errorf("the child task could not inherit the engagement authorization and was not started: %w", err)
+	}
+	return nil
 }

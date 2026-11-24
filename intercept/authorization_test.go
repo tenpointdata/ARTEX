@@ -173,3 +173,19 @@ func TestClassifyTechniques(t *testing.T) {
 		}
 	}
 }
+
+// spawn_task reaches no target but starts work that does: revocation and the
+// window apply to it. Local tools pass even when the artifact cannot be read.
+func TestAuthorizationSpawnAndLocalTools(t *testing.T) {
+	g := newGate(t)
+	a := g.withArtifact(exampleScope)
+	g.passes("spawn inside the window", g.check("spawn_task", `{"goal":"x"}`))
+	a.NotAfter = time.Now().Add(-time.Minute)
+	g.blocked("spawn after expiry", AuthorizationOutOfWindow, g.check("spawn_task", `{"goal":"x"}`))
+	a.NotAfter, a.Revoked = time.Now().Add(time.Hour), true
+	g.blocked("spawn after revocation", AuthorizationRevoked, g.check(executeExtraTool, `{"tool_name":"spawn_task","params":{"goal":"x"}}`))
+
+	g.store.fail["Authorization"] = errors.New("db down")
+	g.passes("local tool, artifact unreadable", g.check("Read", `{"file_path":"/tmp/x"}`))
+	g.blocked("spawn, artifact unreadable", TargetGateUnavailable, g.check("spawn_task", `{"goal":"x"}`))
+}

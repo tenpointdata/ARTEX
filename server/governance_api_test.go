@@ -1,9 +1,11 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -86,5 +88,33 @@ func TestGovernanceEndpointsPG(t *testing.T) {
 	code, out = do("GET", "/api/intercept/history/chain/verify", "")
 	if code != 200 || out["ok"] != true {
 		t.Fatalf("verify: %d %v", code, out)
+	}
+
+	// spawn_task inheritance: the caller is read from the call's scope.
+	ctx := intercept.WithTargetScope(context.Background(), intercept.TargetScope{TaskID: strconv.FormatInt(task.ID, 10)})
+	if _, err := s.callerAuthorization(ctx); err == nil {
+		t.Fatal("a revoked artifact allowed a spawn")
+	}
+	if code, _ = do("POST", base, body); code != 200 {
+		t.Fatalf("re-authorize: %d", code)
+	}
+	a, err := s.callerAuthorization(ctx)
+	if err != nil || a == nil || a.Version != 3 {
+		t.Fatalf("caller artifact = %+v, %v", a, err)
+	}
+	if a, err := s.callerAuthorization(context.Background()); a != nil || err != nil {
+		t.Fatalf("no scope: %+v %v", a, err)
+	}
+	child, err := d.CreateTaskWithOptions("governance child", "inherits", db.TaskCreateOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = d.DeleteTask(child.ID) })
+	if err := s.inheritAuthorization(strconv.FormatInt(child.ID, 10), a); err != nil {
+		t.Fatal(err)
+	}
+	got, err := d.CurrentAuthorization(child.ID)
+	if err != nil || got == nil || got.Reference != "SOW-9" || len(got.Scope) != 1 || got.CreatedBy != fmt.Sprintf("spawn_task:task-%d", task.ID) {
+		t.Fatalf("child artifact = %+v, %v", got, err)
 	}
 }

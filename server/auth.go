@@ -548,8 +548,15 @@ func (s *Server) authChangePassword(w http.ResponseWriter, r *http.Request) {
 	if pg == nil {
 		return
 	}
-	if !s.sessionOK(extractToken(r)) {
+	who, ok := s.sessionPrincipal(extractToken(r))
+	if !ok {
 		writeErr(w, 401, "Unauthorized")
+		return
+	}
+	// This changes the bootstrap ARTEX password only. A console user's
+	// password is changed by an admin (PATCH /api/users/{id}).
+	if who.UserID != 0 {
+		writeErr(w, 403, "only the ARTEX bootstrap login can change its password here; ask an admin to change a console user's password")
 		return
 	}
 	if wait := s.passwordChangeWait(r); wait > 0 {

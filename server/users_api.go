@@ -2,6 +2,7 @@ package server
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
 	"regexp"
 	"strings"
@@ -28,10 +29,18 @@ func (s *Server) registerRBACRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("DELETE /api/users/{id}", s.deleteUser)
 }
 
+// reservedActors are actor names the audit chain and the intercept history
+// use for decisions no console user took.
+var reservedActors = map[string]bool{"system": true, "anonymous": true, "human": true, "rule": true,
+	"model": true, "target": true, "db": true, "admin": true}
+
 // validateUsername returns "" or a reason ready to show the user.
 func validateUsername(u string) string {
 	if u == strings.ToLower(legacyUsername) {
 		return "username \"artex\" is reserved for the bootstrap admin"
+	}
+	if reservedActors[u] {
+		return fmt.Sprintf("username %q is reserved: the audit trail uses it for automatic actors", u)
 	}
 	if !usernamePattern.MatchString(u) {
 		return "username must be 2-64 characters of a-z, 0-9, '.', '_' or '-', starting with a letter or digit"
