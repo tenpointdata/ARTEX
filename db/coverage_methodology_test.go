@@ -181,3 +181,80 @@ func TestTaskMethodologiesOperatorChoice(t *testing.T) {
 		t.Fatalf("unknown methodology: %v, want ErrTaskMethodologyUnknown", err)
 	}
 }
+
+// TestTaskMethodologiesNoneAndPatch: a [none] choice gets no checklist even
+// when the goal would select one, "none" beside a methodology is refused, and
+// UpdateTask rewrites the choice (none -> chosen -> automatic) so the next
+// TaskMethodologies read (the planner's per-round block) follows it.
+func TestTaskMethodologiesNoneAndPatch(t *testing.T) {
+	d, err := Open(testDSN(t))
+	if err != nil {
+		SkipPGUnavailable(t, err)
+	}
+	t.Cleanup(func() { d.Close() })
+	as := d.Assets()
+	current := func(id int64) string {
+		t.Helper()
+		ms, err := as.TaskMethodologies(id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		out := []string{}
+		for _, m := range ms {
+			out = append(out, m.ID)
+		}
+		return strings.Join(out, ",")
+	}
+
+	task, err := d.CreateTaskWithOptions("test https://shop.example.test", "find web vulnerabilities",
+		TaskCreateOptions{Methodologies: []string{" None "}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { cleanupErr(t, "task", d.DeleteTask(task.ID)) })
+	if got := strings.Join(task.Methodologies, ","); got != methodology.None {
+		t.Fatalf("stored %q, want the canonical sentinel", got)
+	}
+	if got := current(task.ID); got != "" {
+		t.Fatalf("none task got checklists %q despite a matching goal", got)
+	}
+	if scores, err := as.MethodologyCoverage(task.ID); err != nil || len(scores) != 0 {
+		t.Fatalf("none task coverage: %v %v", scores, err)
+	}
+
+	if _, err := d.CreateTaskWithOptions("x", "y", TaskCreateOptions{Methodologies: []string{"none", "owasp-wstg"}}); !errors.Is(err, ErrTaskMethodologyUnknown) {
+		t.Fatalf("none beside a methodology: %v, want ErrTaskMethodologyUnknown", err)
+	}
+
+	steps := []struct {
+		set  []string
+		want string
+	}{
+		{[]string{"owasp-api-top10"}, "owasp-api-top10"},
+		{[]string{}, "owasp-wstg"}, // back to automatic: the goal selects WSTG again
+		{[]string{"none"}, ""},
+	}
+	for i, s := range steps {
+		set := s.set
+		updated, err := d.UpdateTask(task.ID, TaskPatch{Methodologies: &set})
+		if err != nil || updated == nil {
+			t.Fatalf("step %d: %v %v", i, updated, err)
+		}
+		if got := current(task.ID); got != s.want {
+			t.Errorf("step %d: methodologies %q, want %q", i, got, s.want)
+		}
+	}
+
+	// nil leaves the choice alone; a bad id is refused without changing it.
+	name := "renamed"
+	if _, err := d.UpdateTask(task.ID, TaskPatch{Name: &name}); err != nil {
+		t.Fatal(err)
+	}
+	bad := []string{"owasp-nope"}
+	if _, err := d.UpdateTask(task.ID, TaskPatch{Methodologies: &bad}); !errors.Is(err, ErrTaskMethodologyUnknown) {
+		t.Fatalf("bad patch: %v", err)
+	}
+	if stored, err := d.GetTask(task.ID); err != nil || strings.Join(stored.Methodologies, ",") != methodology.None {
+		t.Fatalf("choice after no-op and refused patches: %v %v", stored, err)
+	}
+}

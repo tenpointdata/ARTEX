@@ -2834,5 +2834,7 @@
   "e.g. rbac.denied, or row. for all row changes": "ör. rbac.denied veya tüm satır değişiklikleri için row.",
   "empty (covers every target; the target gate still applies)": "boş (her hedefi kapsar; hedef geçidi yine de uygulanır)",
   "you": "siz",
-  "{name} sees only the reports and findings of the companies checked here. With none checked the account is refused everywhere.": "{name} yalnızca burada işaretlenen şirketlerin raporlarını ve bulgularını görür. Hiçbiri işaretli değilse hesap her yerde reddedilir."
+  "{name} sees only the reports and findings of the companies checked here. With none checked the account is refused everywhere.": "{name} yalnızca burada işaretlenen şirketlerin raporlarını ve bulgularını görür. Hiçbiri işaretli değilse hesap her yerde reddedilir.",
+  "No checklist": "Kontrol listesi yok",
+  "No checklist applies to this task, whatever its goal says.": "Hedef ne derse desin, bu göreve hiçbir kontrol listesi uygulanmaz."
 }

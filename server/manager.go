@@ -69,7 +69,7 @@ type Task struct {
 	PlanHeartbeatSeconds int                    `json:"plan_heartbeat_seconds"` // planner heartbeat trigger interval (seconds)
 	PlanQuietMode        bool                   `json:"plan_quiet_mode"`        // planner quiet-mode switch (#86), editable mid-run
 	CoverageEnabled      bool                   `json:"coverage_enabled"`       // asset coverage feature switch (fixed at creation, on by default)
-	Methodologies        []string               `json:"methodologies"`          // operator-chosen methodology ids (fixed at creation); empty = automatic
+	Methodologies        []string               `json:"methodologies"`          // operator-chosen methodology ids (editable with PATCH); empty = automatic, ["none"] = no checklist
 	FirstRunAt           int64                  `json:"first_run_at,omitempty"`
 	DeadlineAt           int64                  `json:"deadline_at,omitempty"`
 	Store                *pgdb.ExplorationStore `json:"-"`
@@ -1129,6 +1129,7 @@ func (m *Manager) UpdateTaskMetadata(taskID string, patch pgdb.TaskPatch) (*Task
 	// planning round (edge or heartbeat) already respects the new value.
 	task.PlanQuietMode = updated.PlanQuietMode
 	task.targetGate.Store(updated.TargetGate)
+	task.Methodologies = append([]string{}, updated.Methodologies...)
 	return task, nil
 }
 

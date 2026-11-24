@@ -62,7 +62,7 @@ type TaskDTO struct {
 	ArchiveBlockedBy   string             `json:"archive_blocked_by_task_id,omitempty"`
 	CompanyIDs         []int64            `json:"company_ids"`
 	CoverageEnabled    bool               `json:"coverage_enabled"` // asset coverage feature switch (fixed at creation)
-	Methodologies      []string           `json:"methodologies"`    // operator-chosen methodology ids (fixed at creation); empty = automatic
+	Methodologies      []string           `json:"methodologies"`    // operator-chosen methodology ids (editable with PATCH); empty = automatic, ["none"] = no checklist
 	PlanQuietMode      bool               `json:"plan_quiet_mode"`  // planner quiet-mode switch (#86), editable mid-run
 	TargetGate         bool               `json:"target_gate"`      // approval gate for asset targets, opt-in, editable mid-run
 }

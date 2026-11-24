@@ -190,8 +190,8 @@ type TaskCreateOptions struct {
 	Methodologies []string
 }
 
-// ErrTaskMethodologyUnknown reports a create request naming no built-in methodology.
-var ErrTaskMethodologyUnknown = errors.New("unknown methodology")
+// ErrTaskMethodologyUnknown reports a choice naming no built-in methodology, or "none" beside one.
+var ErrTaskMethodologyUnknown = errors.New("invalid methodology choice")
 
 // CreateTaskWithOptions creates an exploration, task, direct source relations,
 // and the ordered task LLM chain in one transaction.
@@ -451,11 +451,25 @@ type TaskPatch struct {
 	PlanQuietMode *bool
 	// TargetGate flips the per-task target-gate opt-in; nil = leave unchanged.
 	TargetGate *bool
+	// Methodologies replaces the task's methodology choice; nil = leave
+	// unchanged, empty = automatic, [methodology.None] = no checklist. Ids are
+	// resolved like at creation (ErrTaskMethodologyUnknown on an unknown id).
+	// The planner reads the choice each round, so the next round follows it.
+	Methodologies *[]string
 }
 
-// UpdateTask applies a partial task name/pin mutation and returns the updated row.
+// UpdateTask applies a partial task metadata mutation (name, pin, live switches,
+// methodology choice) and returns the updated row.
 // Re-pinning an already pinned task preserves its original position.
 func (d *DB) UpdateTask(id int64, patch TaskPatch) (*Task, error) {
+	var methodologies any // NULL = leave unchanged
+	if patch.Methodologies != nil {
+		ids, err := normalizeTaskMethodologies(*patch.Methodologies)
+		if err != nil {
+			return nil, err
+		}
+		methodologies = marshalStringArray(ids)
+	}
 	task, err := scanTask(d.QueryRow(`UPDATE tasks SET
 	name = CASE WHEN $2::boolean THEN $3 ELSE name END,
 	pinned_at = CASE
@@ -464,9 +478,10 @@ func (d *DB) UpdateTask(id int64, patch TaskPatch) (*Task, error) {
 		ELSE NULL
 	END,
 	plan_quiet_mode = CASE WHEN $5::boolean THEN $6 ELSE plan_quiet_mode END,
-	target_gate = CASE WHEN $7::boolean THEN $8 ELSE target_gate END
+	target_gate = CASE WHEN $7::boolean THEN $8 ELSE target_gate END,
+	methodologies = COALESCE($9::text[], methodologies)
 WHERE id=$1 AND deleted_at IS NULL
-RETURNING `+taskCols, id, patch.Name != nil, patch.Name, patch.Pinned, patch.PlanQuietMode != nil, patch.PlanQuietMode, patch.TargetGate != nil, patch.TargetGate))
+RETURNING `+taskCols, id, patch.Name != nil, patch.Name, patch.Pinned, patch.PlanQuietMode != nil, patch.PlanQuietMode, patch.TargetGate != nil, patch.TargetGate, methodologies))
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}

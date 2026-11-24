@@ -27,6 +27,7 @@ import { Input } from "@/components/ui/input";
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
 import { Progress } from "@/components/ui/progress";
 import { Switch } from "@/components/ui/switch";
+import { MethodologyChoiceCard } from "./methodology-choice-card";
 import { MethodologyCoverage } from "./methodology-coverage";
 import { api } from "@/lib/api";
 import { taskAssetTypeLabel } from "@/lib/task-assets";
@@ -709,6 +710,12 @@ export function OverviewTab({ taskId }: { taskId: string }) {
         </CardContent>
       </Card>
       <TaskInterceptRulesCard taskId={taskId} />
+      {task && task.coverage_enabled !== false && (
+        <MethodologyChoiceCard
+          task={task}
+          onSaved={(u) => setTask((prev) => (prev ? { ...prev, methodologies: u.methodologies } : u))}
+        />
+      )}
       {coverage && coverage.enabled && (coverage.scope_rows > 0 || (coverage.gaps?.length ?? 0) > 0 || !!coverage.methodologies?.length) && (
         <Card>
           <CardHeader>

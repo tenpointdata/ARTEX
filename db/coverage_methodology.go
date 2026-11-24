@@ -9,8 +9,9 @@ import (
 
 // Methodology coverage: the task's checklist completion against the testing
 // methodologies (methodology package) that apply to it. The operator may choose
-// them at creation (tasks.methodologies); otherwise they are derived from the
-// task's goal and description (methodology.Select). Either way they stay fixed. The score reads three existing sources:
+// them (tasks.methodologies, set at creation and editable with PATCH, including
+// methodology.None to turn checklists off); otherwise they are derived from the
+// task's goal and description (methodology.Select). The score reads three existing sources:
 //   - coverage_ledger rows (agent_reported), matched by risk_area;
 //   - findings (machine_observed), matched by vulnclass, as "reported";
 //   - intents whose payload names a methodology_item (planner citations).
@@ -36,8 +37,8 @@ func CoverageEntryCloses(outcome, evidence, reason string) bool {
 }
 
 // TaskMethodologies returns the built-in methodologies that apply to a task:
-// the operator's choice (tasks.methodologies) when set, else those its goal and
-// description select. None applies to an automatic task without a match.
+// the operator's choice (tasks.methodologies) when set, none for a [none]
+// choice, else those its goal and description select (methodology.Choose).
 func (s *AssetStore) TaskMethodologies(taskID int64) ([]methodology.Methodology, error) {
 	var goal, desc, chosenJSON string
 	if err := s.db.QueryRow(`SELECT COALESCE(goal,''), COALESCE(description,''),
@@ -52,10 +53,7 @@ COALESCE(array_to_json(methodologies)::text,'[]') FROM tasks WHERE id=$1`, taskI
 	if err != nil {
 		return nil, err
 	}
-	if len(chosen) > 0 {
-		return methodology.Pick(all, chosen), nil
-	}
-	return methodology.Select(all, goal+"\n"+desc), nil
+	return methodology.Choose(all, chosen, goal+"\n"+desc), nil
 }
 
 // MethodologyCoverage scores each applicable methodology for a task. It returns

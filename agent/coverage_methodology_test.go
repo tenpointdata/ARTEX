@@ -59,3 +59,38 @@ func TestCompactIntentsCarriesMethodologyItem(t *testing.T) {
 		t.Fatalf("%v", got[0])
 	}
 }
+
+// TestMethodologyBlockFollowsPatch: the planner block is read from the task's
+// stored choice each round, so a PATCH to the choice changes the next round's
+// block: automatic (goal selects WSTG) -> none (no block) -> API Top 10.
+func TestMethodologyBlockFollowsPatch(t *testing.T) {
+	d := testDB(t)
+	defer d.Close()
+	task, err := d.CreateTaskWithOptions("test https://shop.example.test", "find web vulnerabilities", db.TaskCreateOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = d.DeleteTask(task.ID) }()
+	ts := NewToolSet(nil, "")
+	ts.SetAssetStore(d.Assets(), d.Companies())
+	ts.SetTaskID(task.ID)
+
+	if b := ts.methodologyBlock(); !strings.Contains(b, "OWASP WSTG") && !strings.Contains(b, "WSTG-") {
+		t.Fatalf("automatic round lacks WSTG:\n%s", b)
+	}
+	patch := func(ids ...string) {
+		t.Helper()
+		if _, err := d.UpdateTask(task.ID, db.TaskPatch{Methodologies: &ids}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	patch(methodology.None)
+	if b := ts.methodologyBlock(); b != "" {
+		t.Fatalf("none round still has a block:\n%s", b)
+	}
+	patch("owasp-api-top10")
+	b := ts.methodologyBlock()
+	if !strings.Contains(b, "API1:2023") || strings.Contains(b, "WSTG-") {
+		t.Fatalf("chosen round should list API Top 10 only:\n%s", b)
+	}
+}

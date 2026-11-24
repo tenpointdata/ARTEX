@@ -49,6 +49,9 @@ func (m Methodology) Validate() error {
 	if strings.TrimSpace(m.ID) == "" || strings.TrimSpace(m.Name) == "" {
 		return fmt.Errorf("methodology: id and name are required")
 	}
+	if Key(m.ID) == Key(None) {
+		return fmt.Errorf("methodology: id %q is reserved", m.ID)
+	}
 	if len(m.Items) == 0 {
 		return fmt.Errorf("methodology %s: no items", m.ID)
 	}
@@ -182,10 +185,17 @@ func Select(ms []Methodology, text string) []Methodology {
 	return out
 }
 
+// None is the choice that turns every checklist off: a task whose stored
+// choice is exactly [None] gets no methodology whatever its goal says. It is a
+// reserved id (Validate refuses a methodology named so).
+const None = "none"
+
 // ResolveIDs maps operator-supplied methodology ids to the canonical ids of ms
 // (matched by Key, so "OWASP API Top10" names owasp-api-top10). Order is kept
 // and repeats dropped; blank entries are ignored. An id naming no methodology
 // is an error, so a typo never silently falls back to automatic selection.
+// None may only stand alone: [None] resolves to [None], None beside a
+// methodology is an error.
 func ResolveIDs(ms []Methodology, ids []string) ([]string, error) {
 	out := make([]string, 0, len(ids))
 	seen := map[string]bool{}
@@ -195,6 +205,9 @@ func ResolveIDs(ms []Methodology, ids []string) ([]string, error) {
 			continue
 		}
 		found := ""
+		if k == Key(None) {
+			found = None
+		}
 		for _, m := range ms {
 			if Key(m.ID) == k {
 				found = m.ID
@@ -209,7 +222,23 @@ func ResolveIDs(ms []Methodology, ids []string) ([]string, error) {
 			out = append(out, found)
 		}
 	}
+	if seen[None] && len(out) > 1 {
+		return nil, fmt.Errorf("methodology %q cannot be combined with other methodologies", None)
+	}
 	return out, nil
+}
+
+// Choose applies a stored choice: empty = automatic (Select over text), [None]
+// = no methodology, otherwise exactly the chosen ones (Pick).
+func Choose(ms []Methodology, chosen []string, text string) []Methodology {
+	switch {
+	case len(chosen) == 0:
+		return Select(ms, text)
+	case len(chosen) == 1 && Key(chosen[0]) == Key(None):
+		return nil
+	default:
+		return Pick(ms, chosen)
+	}
 }
 
 // Pick returns the methodologies of ms named by ids, in the order of ids. An id

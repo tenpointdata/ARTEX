@@ -8,12 +8,24 @@ import { t } from "@/i18n";
 import { api } from "@/lib/api";
 import type { MethodologySummary } from "@/lib/types";
 
+/** The choice that turns every checklist off (server: methodology.None); it only stands alone. */
+export const METHODOLOGY_NONE = "none";
+
 /**
- * Task create form: which testing methodologies the task is checked against.
- * Nothing ticked = automatic (the server derives them from the goal and
- * description); ticking any replaces the automatic choice with exactly those.
+ * Which testing methodologies a task is checked against (create form and the
+ * task overview). Nothing ticked = automatic (the server derives them from the
+ * goal and description); ticking any replaces the automatic choice with exactly
+ * those; "No checklist" ([METHODOLOGY_NONE]) turns them all off.
  */
-export function MethodologyPicker({ value, onChange }: { value: string[]; onChange: (ids: string[]) => void }) {
+export function MethodologyPicker({
+  value,
+  onChange,
+  disabled,
+}: {
+  value: string[];
+  onChange: (ids: string[]) => void;
+  disabled?: boolean;
+}) {
   const [options, setOptions] = React.useState<MethodologySummary[]>([]);
   const [failed, setFailed] = React.useState(false);
 
@@ -28,8 +40,10 @@ export function MethodologyPicker({ value, onChange }: { value: string[]; onChan
     };
   }, []);
 
+  const none = value.length === 1 && value[0] === METHODOLOGY_NONE;
+  const chosen = none ? [] : value;
   const toggle = (id: string, on: boolean) =>
-    onChange(on ? [...value.filter((v) => v !== id), id] : value.filter((v) => v !== id));
+    onChange(on ? [...chosen.filter((v) => v !== id), id] : chosen.filter((v) => v !== id));
 
   return (
     <div className="grid gap-2">
@@ -47,12 +61,28 @@ export function MethodologyPicker({ value, onChange }: { value: string[]; onChan
             </TableRow>
           </TableHeader>
           <TableBody>
+            <TableRow>
+              <TableCell>
+                <Checkbox
+                  id="methodology-none"
+                  checked={none}
+                  disabled={disabled}
+                  onCheckedChange={(v) => onChange(v ? [METHODOLOGY_NONE] : [])}
+                />
+              </TableCell>
+              <TableCell colSpan={3}>
+                <label htmlFor="methodology-none" className="cursor-pointer">
+                  {t("No checklist")}
+                </label>
+              </TableCell>
+            </TableRow>
             {options.map((m) => (
               <TableRow key={m.id}>
                 <TableCell>
                   <Checkbox
                     id={`methodology-${m.id}`}
-                    checked={value.includes(m.id)}
+                    checked={chosen.includes(m.id)}
+                    disabled={disabled}
                     onCheckedChange={(v) => toggle(m.id, !!v)}
                   />
                 </TableCell>
@@ -74,9 +104,11 @@ export function MethodologyPicker({ value, onChange }: { value: string[]; onChan
         </Table>
       )}
       <p className="text-muted-foreground text-xs">
-        {value.length === 0
-          ? t("None ticked: automatic. A checklist applies when the goal or description contains one of its words.")
-          : t("Only the ticked checklists apply to this task, whatever its goal says.")}
+        {none
+          ? t("No checklist applies to this task, whatever its goal says.")
+          : value.length === 0
+            ? t("None ticked: automatic. A checklist applies when the goal or description contains one of its words.")
+            : t("Only the ticked checklists apply to this task, whatever its goal says.")}
       </p>
     </div>
   );

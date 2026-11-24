@@ -138,3 +138,29 @@ func TestResolveIDsAndPick(t *testing.T) {
 		t.Fatalf("Pick = %+v", picked)
 	}
 }
+
+func TestNoneChoice(t *testing.T) {
+	all, err := All()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, err := ResolveIDs(all, []string{" NONE ", "none"}); err != nil || len(got) != 1 || got[0] != None {
+		t.Fatalf("none alone: %v %v", got, err)
+	}
+	if _, err := ResolveIDs(all, []string{"owasp-wstg", "none"}); err == nil {
+		t.Fatal("none beside a methodology must be refused")
+	}
+	web := "test https://shop.example.test"
+	if got := Choose(all, []string{None}, web); len(got) != 0 {
+		t.Fatalf("none chooses nothing: %v", got)
+	}
+	if got := Choose(all, nil, web); len(got) != 1 || got[0].ID != "owasp-wstg" {
+		t.Fatalf("automatic: %v", got)
+	}
+	if got := Choose(all, []string{"owasp-api-top10"}, web); len(got) != 1 || got[0].ID != "owasp-api-top10" {
+		t.Fatalf("chosen: %v", got)
+	}
+	if err := (Methodology{ID: "None", Name: "x", Items: []Item{{ID: "a", Title: "a"}}}).Validate(); err == nil {
+		t.Fatal("the reserved id must not name a methodology")
+	}
+}
