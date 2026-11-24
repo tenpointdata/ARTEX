@@ -6,6 +6,7 @@ import (
 	"net"
 	"net/url"
 	"sync"
+	"time"
 
 	"github.com/Autumn-27/artex/egress"
 )
@@ -105,18 +106,30 @@ func (r *ScopeRelay) untrack(c net.Conn) {
 	r.mu.Unlock()
 }
 
+// relayDialTimeout bounds a relay's dial of the recording proxy (loopback).
+const relayDialTimeout = 5 * time.Second
+
+// endedRelayToken is the binding left for a relay connection that ended: a
+// token no scope is registered under, so a dial named by it is refused.
+const endedRelayToken = egress.ScopeTokenPrefix + "relay-ended"
+
 func (r *ScopeRelay) relay(down net.Conn, proxyHost string) {
 	defer down.Close()
-	up, err := net.Dial("tcp", proxyHost)
+	up, err := net.DialTimeout("tcp", proxyHost, relayDialTimeout)
 	if err != nil {
 		return
 	}
 	defer up.Close()
 	// Bind before a byte is sent: the proxy reads no request from up, so it
 	// makes no upstream dial for it, until the copy below starts.
+	// When the relay ends the binding becomes a tombstone, not a gap: the
+	// proxy may have read a request it has not dialled for yet, and that dial
+	// must be refused, not made on the global rules. The proxy's disconnect of
+	// the connection (sink.ClientDisconnected) drops the entry; if it came first,
+	// the swap finds nothing and nothing is left behind.
 	key := up.LocalAddr().String()
 	r.t.sink.relayed.Store(key, r.token)
-	defer r.t.sink.relayed.CompareAndDelete(key, r.token)
+	defer r.t.sink.relayed.CompareAndSwap(key, r.token, endedRelayToken)
 	if !r.track(down) || !r.track(up) {
 		return
 	}

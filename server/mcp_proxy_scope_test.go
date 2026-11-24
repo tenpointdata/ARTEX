@@ -134,3 +134,27 @@ func TestScopeMCPProxyLeavesOtherServers(t *testing.T) {
 		t.Fatalf("capture off: rewritten (%v, %v)", closer, err)
 	}
 }
+
+// A proxy setting names the capture proxy in any of the forms a client
+// accepts (no scheme, a loopback name, a credential), and only on its port.
+func TestSameProxyForms(t *testing.T) {
+	const capture = "http://127.0.0.1:8788"
+	for v, want := range map[string]bool{
+		capture: true, "127.0.0.1:8788": true, "localhost:8788": true, "http://LOCALHOST:8788": true,
+		"http://u:p@127.0.0.1:8788": true, "http://[::1]:8788": true, " http://127.0.0.1:8788 ": true,
+		"http://127.0.0.1:8789": false, "http://10.0.0.1:8788": false, "socks5://127.0.0.1:8788": false,
+		"127.0.0.1": false, "": false, "http=127.0.0.1:8788;https=127.0.0.1:8788": false,
+	} {
+		if got := sameProxy(v, capture); got != want {
+			t.Errorf("sameProxy(%q) = %v, want %v", v, got, want)
+		}
+	}
+	args := []string{"--proxy-server", "http=127.0.0.1:8788;https=127.0.0.1:8788"}
+	if namesProxy(args, nil, capture) || !mentionsProxyPort(args, nil, capture) {
+		t.Error("a per-scheme list must be reported, not rewritten")
+	}
+	env := map[string]string{"PLAYWRIGHT_MCP_PROXY_SERVER": "localhost:8788"}
+	if _, e := replaceProxy(nil, env, capture, "R"); e["PLAYWRIGHT_MCP_PROXY_SERVER"] != "R" {
+		t.Errorf("PLAYWRIGHT_MCP_PROXY_SERVER not relayed: %v", e)
+	}
+}

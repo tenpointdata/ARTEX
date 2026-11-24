@@ -4,6 +4,9 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"log"
+	"net"
+	"net/url"
 	"strings"
 
 	"github.com/Autumn-27/artex/db"
@@ -20,7 +23,8 @@ import (
 // left alone: that proxy, not ARTEX, reaches the target.
 
 // proxyEnvKeys are the environment variables a proxy-aware client reads.
-var proxyEnvKeys = map[string]bool{"HTTP_PROXY": true, "HTTPS_PROXY": true, "ALL_PROXY": true}
+// PLAYWRIGHT_MCP_PROXY_SERVER is @playwright/mcp's spelling of --proxy-server.
+var proxyEnvKeys = map[string]bool{"HTTP_PROXY": true, "HTTPS_PROXY": true, "ALL_PROXY": true, "PLAYWRIGHT_MCP_PROXY_SERVER": true}
 
 // scopeMCPProxy returns srv as it is to be spawned for the run on ctx, and the
 // relay the caller closes with the server (nil when none was needed). With
@@ -34,6 +38,9 @@ func (m *Manager) scopeMCPProxy(ctx context.Context, srv *db.MCPServer) (*db.MCP
 	capture := m.traffic.ProxyAddr()
 	args, env := jsonStrSlice(srv.Args), jsonStrMap(srv.Env)
 	if !namesProxy(args, env, capture) {
+		if mentionsProxyPort(args, env, capture) {
+			log.Printf("[mcp] %s: a proxy setting names the capture proxy's port in a form that cannot be rewritten; its dials get the global rules only (use --proxy-server %s)", srv.Name, capture)
+		}
 		return srv, nil, nil
 	}
 	relayURL, relay, err := m.traffic.StartScopeRelay(m.ScopedProxyAddr(ctx))
@@ -69,7 +76,7 @@ func namesProxy(args []string, env map[string]string, proxy string) bool {
 // ("--proxy-server v" or "--proxy-server=v") and proxy variable that is proxy,
 // compared without a credential, replaced by with.
 func replaceProxy(args []string, env map[string]string, proxy, with string) ([]string, map[string]string) {
-	is := func(v string) bool { return proxyWithoutCredentials(v) == proxy }
+	is := func(v string) bool { return sameProxy(v, proxy) }
 	outArgs := append([]string(nil), args...)
 	for i := 0; i < len(outArgs); i++ {
 		switch a := outArgs[i]; {
@@ -92,4 +99,56 @@ func replaceProxy(args []string, env map[string]string, proxy, with string) ([]s
 		outEnv[k] = v
 	}
 	return outArgs, outEnv
+}
+
+// sameProxy reports whether the proxy setting v names proxy: the same port and
+// the same host, a loopback name or address standing for any other. A value
+// without a scheme ("127.0.0.1:8788", as Chromium accepts) is read as http.
+func sameProxy(v, proxy string) bool {
+	v = strings.TrimSpace(v)
+	if v == "" {
+		return false
+	}
+	if !strings.Contains(v, "://") {
+		v = "http://" + v
+	}
+	a, errA := url.Parse(v)
+	b, errB := url.Parse(proxy)
+	if errA != nil || errB != nil || a.Port() == "" || a.Port() != b.Port() || !strings.EqualFold(a.Scheme, b.Scheme) {
+		return false
+	}
+	return strings.EqualFold(a.Hostname(), b.Hostname()) || (isLoopbackHost(a.Hostname()) && isLoopbackHost(b.Hostname()))
+}
+
+func isLoopbackHost(h string) bool {
+	if strings.EqualFold(h, "localhost") {
+		return true
+	}
+	ip := net.ParseIP(h)
+	return ip != nil && (ip.IsLoopback() || ip.IsUnspecified())
+}
+
+// mentionsProxyPort reports whether a proxy flag or variable mentions proxy's
+// port without naming it in a form replaceProxy understands (Chromium's
+// "http=…;https=…" list, say), so the operator can be told.
+func mentionsProxyPort(args []string, env map[string]string, proxy string) bool {
+	u, err := url.Parse(proxy)
+	if err != nil || u.Port() == "" {
+		return false
+	}
+	port := ":" + u.Port()
+	for i, a := range args {
+		if strings.HasPrefix(a, "--proxy-server=") && strings.Contains(a, port) {
+			return true
+		}
+		if a == "--proxy-server" && i+1 < len(args) && strings.Contains(args[i+1], port) {
+			return true
+		}
+	}
+	for k, v := range env {
+		if proxyEnvKeys[strings.ToUpper(k)] && strings.Contains(v, port) {
+			return true
+		}
+	}
+	return false
 }

@@ -51,6 +51,9 @@ func (s *sink) ClientDisconnected(c *mproxy.ClientConn) {
 	if c != nil {
 		s.paced.Delete(c.Id)
 		s.unbindScope(c)
+		if key := clientKey(c); key != "" {
+			s.relayed.Delete(key) // scope_relay.go: the relay connection is gone
+		}
 	}
 	if s.t != nil {
 		s.t.snaps.requestSweep()

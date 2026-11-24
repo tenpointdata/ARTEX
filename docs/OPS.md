@@ -128,7 +128,11 @@ The recording proxy (go-mitmproxy) has no dial hook, so its upstream is a loopba
   credential, because Chromium drops a userinfo from `--proxy-server`) whose connections the proxy
   binds to the run's token. The relay closes with the run; a relay of a deleted conversation or an
   ended task is refused. If the relay cannot start, the server is not started for that run.
-  A reference to another proxy is left as stored. Listing an MCP's tools from the UI (no run)
+  A reference is matched by port and host (a loopback name stands for any loopback address; no
+  scheme reads as http); `PLAYWRIGHT_MCP_PROXY_SERVER` counts too. A form that cannot be rewritten
+  (Chromium's `http=…;https=…` list) is logged and keeps the global rules. A relay is an
+  unauthenticated loopback listener, like the proxy itself; using another run's relay only adds
+  that run's rules. A reference to another proxy is left as stored. Listing an MCP's tools from the UI (no run)
   spawns it with the stored URL: global rules. Code: `traffic/scope_relay.go`,
   `Manager.scopeMCPProxy`.
 - **Global egress proxy.** When one is set, go-mitmproxy forwards through it and the gate is not on

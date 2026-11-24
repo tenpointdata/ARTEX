@@ -1,6 +1,7 @@
 package traffic
 
 import (
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
@@ -105,4 +106,35 @@ func (tr *Traffic) scopeTokenFor(t *testing.T, key string) string {
 	}
 	pass, _ := u.User.Password()
 	return pass
+}
+
+// When a relay closes under an open connection, no binding naming a live scope
+// is left, and the proxy's disconnect removes whatever is (no leak). The
+// tombstone itself (endedRelayToken, refused at the gate) lives only between
+// the relay's close and the proxy's disconnect, too brief to observe reliably.
+func TestScopeRelayCloseLeavesRefusedBinding(t *testing.T) {
+	tr, _, _ := startProxy(t)
+	_, relay, err := tr.StartScopeRelay(tr.ScopedProxyURL("task-t", runScope("task-t")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	c, err := net.Dial("tcp", strings.TrimPrefix(relay.URL, "http://"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	bound := func() (string, bool) {
+		var key, tok string
+		tr.sink.relayed.Range(func(k, v any) bool { key, tok = k.(string), v.(string); return false })
+		return tok, key != ""
+	}
+	waitFor(t, "the relay binding", func() bool { tok, ok := bound(); return ok && tok != endedRelayToken })
+	_ = relay.Close()
+	waitFor(t, "the ended binding", func() bool { tok, ok := bound(); return !ok || tok == endedRelayToken })
+	if tok, ok := bound(); ok {
+		if _, known := tr.scopes.lookup(tok); known {
+			t.Fatalf("ended binding %q names an active scope", tok)
+		}
+	}
+	waitFor(t, "the binding to go", func() bool { _, ok := bound(); return !ok })
 }
