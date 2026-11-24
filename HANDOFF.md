@@ -93,36 +93,29 @@ switches between them and reads each one's findings and report; all 51 `/api` re
 username. Browser-tested as admin, reviewer and client_read against a real backend. Open: `c-92bb52`,
 `c-7c4715`, `c-601ec6`.
 
-**2026-11-24** — **E2 integrations** (backend card `c-6def05`, UI card `c-597eb6`). The backend from
-branch `ej/20261124-055326-6bcfa9` was merged into the UI branch `ej/20261124-132955-7aef3f`, so both
-land together. See `docs/integrations.md`.
-- **UI (c-597eb6):** System → **Integrations** (`/system/integrations`) is a trackers table with an inline
-  enable switch, Sync, edit and delete (with a confirm). The add/edit sheet shows masked credential inputs driven by
-  `secret_keys` (the `ConfigField`/`lib/config-form.ts` now shared with Notifications) and an
-  `include_evidence` switch. **Scanner imports** (`/system/integrations/imports`) detects the format
-  from the file and lists past imports. The findings bulk bar has a **Push to tracker** select, which
-  batches requests at the server's 200 cap. The finding detail has a **Tickets** card (ticket links,
-  remote state, import provenance, a single push). Pure helpers live in `web/src/lib/integrations.ts`,
-  tested by `npm run test:integrations` (in verify.sh); the client is `web/src/lib/integrations-api.ts`.
-- Verified 2026-11-24: in real Chromium (Playwright) against the real backend, with a throwaway Postgres and a fake GitHub API on
-  loopback (`ARTEX_NOTIFY_ALLOW_LOCAL=1`). Add tracker, masked edit kept the token, a destination change
-  without the token was refused, nuclei import (3 new findings), push of 3 (created; a re-push updated),
-  the detail Tickets card with provenance, sync pulling a closed issue to `fixed`, and delete all passed.
-  Follow-ups: card `c-2d91eb`.
-- **Findings out:** package `ticketing` has GitHub Issues, Jira and DefectDojo adapters. All of
-  them go through `notify.Do`, which carries the notify SSRF guard and redaction. Tracker configs
-  are sealed at rest and masked on readback, and a destination change requires the credentials
-  again. Routes are under `/api/integrations/trackers` (CRUD, `push`, `sync`). Finding status
-  round-trips in both directions; when both sides changed, the tracker wins. A ticket's status never
-  touches the finding's verification.
-- **Scanner data in:** package `scanimport` parses Nmap XML, Nuclei JSONL, ZAP JSON, Burp XML and
-  SARIF. `POST /api/integrations/imports` writes assets with provenance (`scan_import_assets`) and
-  unverified POE-0 findings (`finding_import_sources`). A re-import never edits or promotes a finding.
-- Migration `0015_integrations.sql` is new and has not been released.
-- Verified on macOS against a local Postgres: `go test` for `db`, `ticketing`, `scanimport`,
-  `notify` and `agent`, the new server tests, and `scripts/verify.sh`. `./server` still has three
-  failures that also fail at base `1abe24f`, because of the local environment: a trust-auth
-  Postgres, no `127.0.0.2` loopback alias, and DNS lookups.
+**2026-11-24** — **E2 integrations** (backend `c-6def05`, UI `c-597eb6`, follow-ups `c-2d91eb`, all in review)
+are on branch `ej/20261124-150516-d78c96`. It merges the UI branch `ej/20261124-132955-7aef3f`, which carries
+the backend `ej/20261124-055326-6bcfa9`, so landing it lands all of E2. See `docs/integrations.md`.
+- **Findings out:** package `ticketing` (GitHub Issues, Jira, DefectDojo) goes through `notify.Do` (the SSRF
+  guard and redaction). Tracker configs are sealed and masked, and a destination change needs the credentials again.
+  `/api/integrations/trackers` has CRUD, `push` and `sync`. Status round-trips, and the tracker wins a conflict.
+- **Scanner data in:** package `scanimport` reads Nmap, Nuclei, ZAP, Burp and SARIF. `POST /api/integrations/imports`
+  writes assets with provenance and unverified POE-0 findings (`finding_import_sources`), and never edits on re-import.
+  `GET /api/integrations/imports?limit=&offset=` returns `{imports, total}`.
+- **UI:** System → Integrations (the trackers table and a masked-credential sheet) and Scanner imports (format
+  detection, Past imports with a pager). Each import's New findings count links to
+  `/function/findings?import_id=N`. `import_id` is in the shared findings filter (`db.FindingFilter.ImportID`),
+  so it applies to the list, groups, asset tree and export, and the page shows a chip that clears it.
+  The findings bulk bar and the detail page have Push to tracker; the detail has a Tickets card.
+- **RBAC (with E5):** `GET /api/exploration/findings/{id}/integrations` needs `read`, not `client_read`.
+  Tracker create/edit/delete need `admin`, the same as notification channels. Push, sync and import need `operate`.
+  The E2 pages do not yet gate their controls by role (`c-119206`).
+- **Browser e2e:** `scripts/e2e/integrations.sh` sets up a throwaway Postgres, the backend, a Next production
+  build and Playwright, then runs `integrations-e2e.js` against `fake-github.js`. It passed 24 checks
+  locally on 2026-11-24. It is not a CI job yet (`c-1198a2`, after c-cc25b6).
+- Migration `0015_integrations.sql` is unreleased, and its checksum is enforced, so do not edit it. Fix forward.
+- Local `./server` failures that are environment, not code: `TestConnectWithoutPasswordRealPG` (trust-auth Postgres)
+  and the SOCKS5 test that needs a `127.0.0.2` alias.
 
 **2026-11-24 (c-d25ff9, E3)** — The `RSI.md` Loop C benchmark gate and Loop B lesson graduation are built,
 flag off (`ARTEX_RSI_LOOP`, default off, read per request). Pure core `rsi/` (search-space allowlist:
@@ -253,6 +246,8 @@ body, through the versioned prompt API, and the starting bodies are restored aft
    CVSS/EPSS-scored, remediation-bearing, standards-mapped deliverables (OWASP ASVS/WSTG, MITRE
    ATT&CK). Done = a report export with per-finding CVSS vector + remediation + framework tags,
    covered by tests. Card `c-8f9cca`.
+8. *(unclaimed)* — **E2 UI: gate integrations controls by role** (S), card `c-119206`. Done = as reviewer
+   and as client_read, no E2 control the server refuses is shown, and the finding detail has no 403.
 
 - *(unclaimed)* — **RSI gate hardening** (M), card `c-0d277f`: server-side per-task arm ledger, suite
   pre-registration, adopted-lesson retire sync. Done = Postgres tests for each.
@@ -275,7 +270,8 @@ body, through the versioned prompt API, and the starting bodies are restored aft
   notify) suit how operators work.
 
 **Blocked**
-- Nothing blocked.
+- **E2 browser e2e as a CI job** (S), card `c-1198a2`: blocked on c-cc25b6's SHA-pinned ci.yml landing. Done = a
+  `web-e2e` job runs `scripts/e2e/integrations.sh` on pull requests and fails when the import filter is broken.
 
 ## Set up / run / test / deploy
 
@@ -287,6 +283,9 @@ body, through the versioned prompt API, and the starting bodies are restored aft
   open http://localhost:8787, setup token via `docker compose logs artex | grep "Setup token"`.
 - **Verify (reproduces CI):** `scripts/verify.sh` (fast set, no Docker); `--full` adds `go test -race`
   + web static build; `--security` runs `govulncheck ./...`.
+- **Browser e2e (E2 integrations):** `scripts/e2e/integrations.sh`. It needs Go, Node, and initdb/pg_ctl,
+  or `ARTEX_E2E_PG_DSN` set to an empty database. It installs Playwright unless it resolves on `NODE_PATH`.
+  `ARTEX_E2E_KEEP=1` keeps the logs and screenshots. Ports are set with `ARTEX_E2E_{API,UI,PG}_PORT`.
 - **Benchmark harness:** `scripts/benchmark` against the subject instance `docker-compose.bench.yml`
   (`cp bench/.env.example bench/.env`, set `ARTEX_PG_PASSWORD` + an LLM key, then
   `docker compose -f docker-compose.bench.yml up --build -d`; `ARTEX_BENCH_PORT=18787` when a production
@@ -306,7 +305,8 @@ Composite ARTEX board, not as GitHub issues, because the repo is public (decisio
 Card ids in brackets:
 
 - **E1** [`c-8f9cca`] Client-grade reporting & deliverables (scoring, remediation, framework mappings, branded export).
-- **E2** [`c-6def05`] Backend done 2026-11-24 (see Current state). UI done on `ej/20261124-132955-7aef3f` (`c-597eb6`, in review; follow-ups `c-2d91eb`). Follow-ups:
+- **E2** [`c-6def05`] Backend, UI (`c-597eb6`) and UI follow-ups (`c-2d91eb`) are done, in review on `ej/20261124-150516-d78c96` (see Current state). Follow-ups:
+  [`c-119206`] role-gate the E2 UI controls; [`c-1198a2`] run `scripts/e2e/integrations.sh` in CI (after c-cc25b6);
   [`c-da9198`] scheduled sync plus a per-tracker lock; [`c-ea60a0`] move agent `scan_ingest` onto
   `scanimport`, normalize default ports, and settle two dedup edge cases.
 - **E3** [`c-d25ff9`] — gate built (in review). Follow-ups: hardening `c-0d277f`, UI `c-936308`, first live run `c-772190`, proposer/critic `c-c89f5b`.
@@ -396,6 +396,19 @@ Card ids in brackets:
   `ARTEX_SECRET_KEY`) loses stored secrets.
 
 ## Decisions
+
+- **2026-11-24 c-2d91eb (E2 follow-ups):**
+  - This branch merges the unmerged E2 UI branch (which carries the backend) instead of waiting, as c-597eb6
+    did. Landing it lands E2.
+  - `import_id` matches the findings an import **created** (`finding_import_sources.import_id`). A later
+    import that only matched one by dedup key does not claim it, so "its new findings" is exact.
+  - Migration 0015 was not edited for an `import_id` index: its checksum is enforced, so any database that
+    applied it would refuse to start. The filter is an `EXISTS` on the `finding_id` primary key.
+  - The import filter lives in the URL, not in the saved list preferences, so it never sticks to a later visit.
+  - E2 under E5: a finding's tickets and raw scanner record are operator data (`read`). Trackers are data
+    sinks, so their CRUD needs `admin`, the same as notification channels.
+  - The e2e uses a production `next build` + `next start` (its `/api` rewrite points at the backend) rather
+    than embedding the UI, so the runner never writes into `server/webui/dist`.
 
 - **2026-11-24** — c-13e86c: SSE streams are same-origin only, with no cross-origin override. The cookie is
   the only credential a script-free EventSource can present, and the backend's CORS answers `*`, which a
