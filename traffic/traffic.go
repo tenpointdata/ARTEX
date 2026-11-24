@@ -354,6 +354,9 @@ func Open(dir, addr string) (*Traffic, error) {
 		// opts out; go-mitmproxy exposes only a global switch, not per-host.
 		SslInsecure: InsecureUpstream(),
 		CaRootPath:  filepath.Join(dir, "_ca"),
+		// ARTEX's own CA (ca.go): ECDSA P-256, one year, short-lived leaves.
+		// An existing CA file is loaded unchanged.
+		NewCaFunc: NewCAFunc(filepath.Join(dir, "_ca"), CAConfigFromEnv()),
 	})
 	if err != nil {
 		db.Close()
