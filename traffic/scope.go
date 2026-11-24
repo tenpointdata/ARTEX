@@ -160,11 +160,12 @@ func clientKey(c *mproxy.ClientConn) string {
 // host's server. Such a request is sent with go-mitmproxy's separate client,
 // which dials (through the gate) the host the request names. Requests inside a
 // tunnel are left alone: there the CONNECT fixed the server, and a Host header
-// that differs from it is the client's to send.
+// (or an absolute-form target, legal inside a TLS tunnel) that differs from it
+// is the client's to send; rerouting it would also drop the TLS.
 func unpinHostChange(f *mproxy.Flow) {
 	raw := f.Request.Raw()
 	sc := f.ConnContext.ServerConn
-	if raw == nil || sc == nil || f.Request.URL == nil || !absoluteForm(raw.RequestURI) {
+	if raw == nil || sc == nil || f.Request.URL == nil || f.ConnContext.ClientConn.Tls || !absoluteForm(raw.RequestURI) {
 		return
 	}
 	if sc.Address != canonicalAddr(f.Request.URL) {

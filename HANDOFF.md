@@ -77,7 +77,14 @@ Linux-root tests, the Docker egress iptables rules, the Postgres-backed tests an
 - Cloud-metadata and link-local addresses are always denied for platform dials, redirects and WebFetch.
   Since 2026-11-23 (branch `ej/20261123-152404-f61d73`, card `c-485de0`) this includes the capture
   proxy's own upstream dials: go-mitmproxy's upstream is a loopback gate (`traffic/upstream_gate.go`)
-  that dials with `Interceptor.DialSOCKS5`. This applies global rules only; task rules are tracked on `c-5a6f96`.
+  that dials with `Interceptor.DialSOCKS5`.
+- **2026-11-24** (card `c-5a6f96`, commit `75184c3`): task agents' proxy URLs now carry a task scope token,
+  so capture-proxy upstream dials (and SOCKS5 with the token as password) also apply that task's
+  block rules and, with its gate on, its pins/approvals; an ended task's token is refused. Clients
+  without a token (operators, chat/conversation agents, custom HTTP tools, the transparent listener)
+  keep the global rules only (`c-eb32cc`). go-mitmproxy's keep-alive host pinning is worked around
+  (`unpinHostChange`; upstream report `c-9b48b7`). The global-egress-proxy bypass is accepted and
+  documented (`docs/OPS.md` §6). `scripts/verify.sh` passes.
   Block rules apply even with the gate off. Fuzzy allow rules match on name and address boundaries.
 - Main-agent writes carry origin `mainagent` and are framed as agent-authored. Norma compaction
   summaries are framed as untrusted data.
@@ -89,8 +96,8 @@ Linux-root tests, the Docker egress iptables rules, the Postgres-backed tests an
 **Agents' lane**
 1. *(unclaimed)* — **SEC: gorilla/websocket bump, GO-2026-6278** (XS), card `c-c10f2c`; needs network.
    Done = govulncheck clean.
-2. *(unclaimed)* — **SEC: upstream-gate residuals** (M), card `c-5a6f96`: task-scoped rules on proxy
-   dials, go-mitmproxy keep-alive host pinning, and the global-egress-proxy bypass. Done = a test or a decision for each.
+2. *(unclaimed)* — **SEC: scope the remaining proxy clients** (S), card `c-eb32cc`: chat/conversation
+   agents, custom HTTP tools, transparent listener. Done = scoped with a test, or a decision each.
 3. *(unclaimed)* — **E1 Client-grade reporting & deliverables** (M). Turn `report/` into
    CVSS/EPSS-scored, remediation-bearing, standards-mapped deliverables (OWASP ASVS/WSTG, MITRE
    ATT&CK). Done = a report export with per-finding CVSS vector + remediation + framework tags,
@@ -137,7 +144,8 @@ Card ids in brackets:
 - **E7** [`c-d60149`] Distributed/remote workers (queue-backed intents) for larger engagements; Helm chart.
 - **E8** [`c-5487e8`] Planner/worker evaluation suite (regression targets, prompt-version A/B via the benchmark gate).
 - **E9** [`c-73af97`] Frontend/UX pass (tables over cards, fewer-clicks triage workflow, live engagement dashboard).
-- **SEC** [`c-5a6f96`] Capture-proxy upstream gate residuals (task-scoped rules, go-mitmproxy host pinning, egress-proxy bypass).
+- **SEC** [`c-eb32cc`] Scope the remaining capture-proxy clients (chat/conversation agents, custom HTTP tools, transparent listener).
+- **SEC** [`c-9b48b7`] Report go-mitmproxy keep-alive host pinning upstream; drop `unpinHostChange` once fixed.
 - **SEC** [`c-dadc14`] Verify the security branch on Linux root, in Docker and against Postgres, plus the web typecheck.
 - **SEC** [`c-8d54d5`] Capture proxy: insecure upstream only for in-scope targets.
 - **SEC** [`c-c10f2c`] gorilla/websocket bump (GO-2026-6278).
@@ -150,6 +158,10 @@ Card ids in brackets:
 - go-mitmproxy v1.9.2 has no upstream dial hook. Every capture-proxy upstream dial goes through its
   upstream-proxy URL, which is our loopback gate (random credential, `traffic/upstream_gate.go`). Do not
   set `SetUpstreamProxy` back to returning nil: nil means a bare `net.Dialer` as root, with no checks (`c-485de0`).
+- A task's proxy scope rides on the proxy URL userinfo (`egress/proxycred.go`). Code that rewrites a
+  proxy URL must keep it (`MarkProxyURL` does); prompts and logs show it stripped
+  (`egress.WithoutProxyCredential`). The client-connection binding is keyed by remote address, the only
+  key go-mitmproxy hands `upstreamFor` (`traffic/scope.go`).
 
 - **Guardrails are invariants.** Scope/target gate, interception gate, budgets, noise governor,
   untrusted-output boundary, audit trail — never weaken/bypass/route around them. `RSI.md`
@@ -180,6 +192,16 @@ Card ids in brackets:
   self-signed targets set `ARTEX_CAPTURE_INSECURE_UPSTREAM=1` for that run only, until per-target trust
   (card `c-8d54d5`) exists. Reason: the goproxy setting is global, so turning it on also leaves package
   downloads through the proxy open to tampering.
+
+- **2026-11-24** — Capture-proxy task scope (`c-5a6f96`): carried as a per-task token in the proxy URL
+  userinfo, because a proxy client can only identify itself through its credential and every tool
+  already reads `HTTP_PROXY`. The token only *adds* a task's rules, so it is not treated as a secret
+  and a missing token falls back to the global rules (the floor), while an unknown token fails closed.
+  Proxy dials never wait for approval (an unpinned host opens a request and is refused). The
+  global-egress-proxy path is **accepted**, not routed through the gate: the operator's proxy resolves
+  and reaches the target, so the gate could only make a name-only check. OPS.md tells operators not to
+  run that proxy where it can reach metadata. Keep-alive host pinning is fixed locally with
+  go-mitmproxy's separate client rather than closing the client connection, so clients see no resets.
 
 ## Deltas
 

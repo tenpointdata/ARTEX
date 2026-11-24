@@ -787,6 +787,18 @@ func (s *Server) invalidateTaskAgents() {
 	s.taskAgentMu.Unlock()
 }
 
+// dropTaskAgents forgets a removed task's agents and, under the same lock, its
+// proxy scope token, so no agentsForTask in between rebuilds a bundle holding a
+// token that is then forgotten (a restored task gets a fresh one).
+func (s *Server) dropTaskAgents(id string) {
+	s.taskAgentMu.Lock()
+	defer s.taskAgentMu.Unlock()
+	delete(s.taskAgents, id)
+	if s.m.traffic != nil {
+		s.m.traffic.ForgetScope(id)
+	}
+}
+
 func (s *Server) agentsForTask(t *Task) *taskAgentBundle {
 	s.taskAgentMu.Lock()
 	defer s.taskAgentMu.Unlock()
