@@ -138,6 +138,7 @@ Operator-facing changes:
    Done = govulncheck clean.
 2. *(unclaimed)* — **SEC: upstream connection reuse across proxy scopes** (S), card `c-3b9252`.
    Done = test that two scopes never share an upstream connection, or a recorded decision.
+   Then **SEC: scope-relay follow-ups** (S), card `c-a1c0fc` (tests + a live Playwright check).
 3. *(unclaimed)* — **SEC: logout revocation** (S), card `c-a0af33`. Done = a token replayed after
    logout or a password change gets 401, by a test.
 4. *(unclaimed)* — **SEC: Docker Desktop named volumes** (S), card `c-775dc2`. Done = `docker compose up`
@@ -188,6 +189,7 @@ Card ids in brackets:
 - **E7** [`c-d60149`] Distributed/remote workers (queue-backed intents) for larger engagements; Helm chart.
 - **E8** [`c-5487e8`] Planner/worker evaluation suite (regression targets, prompt-version A/B via the benchmark gate).
 - **E9** [`c-73af97`] Frontend/UX pass (tables over cards, fewer-clicks triage workflow, live engagement dashboard).
+- **SEC** [`c-a1c0fc`] Scope-relay follow-ups: PG test of the prepareMCP hook, concurrent/keep-alive/WebSocket relay tests, per-relay connection cap, live Playwright check.
 - **SEC** [`c-3b9252`] Capture-proxy upstream connection reuse across scopes (rules checked only at dial time).
 - **SEC** [`c-9b48b7`] Report go-mitmproxy keep-alive host pinning upstream; drop `unpinHostChange` once fixed.
 - **SEC** [`c-dadc14`] Verify the security branch on Linux root, in Docker and against Postgres, plus the web typecheck.
