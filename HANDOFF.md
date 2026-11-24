@@ -339,6 +339,13 @@ Card ids in brackets:
 - **SEC** [`c-12df03`] Single-uid start-up fails on a socket in a run dir; MCP uid is not egress-filtered.
 - **SEC** [`c-e70e5c`] Per-task uids: release ended tasks at start-up; per-key lock.
 - **SEC** [`c-cc25b6`] Low-severity audit items.
+- **SEC** [`c-d689e2`] First GitHub run of the c-cc25b6 SHA-pinned workflows — **blocked until branch
+  `ej/20261124-140001-18dcf1` is merged to main and pushed** (it is in neither as of 2026-11-24 14:30).
+  Pre-checked offline 2026-11-24: all 15 pinned SHAs resolve to their tagged commits (gh api). Before the
+  `release.yml` workflow_dispatch dry run, gate `actions/attest-build-provenance` on
+  `github.event_name == 'push'`: the repo is public, so a dry run would otherwise write a repo attestation
+  and a public Sigstore log entry. Dependabot `github-actions` PRs start only once the new `dependabot.yml`
+  is on main (origin/main's has no `github-actions` entry).
 - **E8 follow-ups** [`c-f1518c`] first live run, [`c-75c593`] bench
   image from a clean clone, [`c-d73308`] optional provider sampling seed per LLM profile.
 - **E10** [`c-72dd9d`] Code-security testing lane (SAST/dependency ingest) feeding the same dual-graph + evidence model.
