@@ -21,8 +21,14 @@ carries prompt or response content.
   in the group is priced.
 - Efficiency in the UI: cache hit rate = cache_read / input; output/input ratio; EUR per 1M tokens;
   average latency per call.
-- Limits: archived tasks' usage leaves `llm_usage` and is not in this view (the dashboard's
-  per-profile card does include archived aggregates).
+- Archived tasks: their usage leaves `llm_usage` when archived, so the view folds in the archive
+  aggregate (`db/llm_cost_archive.go`). Archives record `aggregate_stats.cost_cells`, one bucket per
+  (profile, worker, model, UTC day) with calls, errors, tokens, latency and first/last call, so they
+  count in every dimension; a day window keeps a bucket whose last call is inside it (exact to the UTC
+  day). Archives made before cost_cells existed hold only per-profile totals: they count under All
+  time by task or profile, and are reported as `archived_omitted` (the page says how many) otherwise.
+  Their rows have `first_ts`/`last_ts` null. The response also carries `archived_included` and
+  `tasks`, the distinct task total (the rows' `tasks` overlap across profiles, workers and models).
 
 ## OpenTelemetry export
 
