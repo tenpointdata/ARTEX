@@ -99,13 +99,14 @@ type TaskControl struct {
 	TargetGate     bool
 	DispatchClosed string
 	DeadlineAt     int64 // unix seconds, 0 = none
+	DeadlinePassed bool  // deadline_at is in the past on the database clock
 	FirstRunAt     int64
 	TimeoutSeconds int
 }
 
 // Claimable reports whether a new intent of the task may be claimed.
 func (c TaskControl) Claimable() bool {
-	return c.Exists && !c.Paused && !c.Queued && !IsTerminal(c.Status) && c.DispatchClosed == ""
+	return c.Exists && !c.Paused && !c.Queued && !IsTerminal(c.Status) && c.DispatchClosed == "" && !c.DeadlinePassed
 }
 
 // GetTaskControl reads a task's control state. A missing task returns
@@ -113,8 +114,9 @@ func (c TaskControl) Claimable() bool {
 func (d *DB) GetTaskControl(taskID int64) (TaskControl, error) {
 	var c TaskControl
 	var deadline, firstRun sql.NullTime
-	err := d.QueryRow(`SELECT COALESCE(status,''), paused, queued, target_gate, dispatch_closed, deadline_at, first_run_at, timeout_seconds
-FROM tasks WHERE id=$1 AND deleted_at IS NULL`, taskID).Scan(&c.Status, &c.Paused, &c.Queued, &c.TargetGate, &c.DispatchClosed, &deadline, &firstRun, &c.TimeoutSeconds)
+	err := d.QueryRow(`SELECT COALESCE(status,''), paused, queued, target_gate, dispatch_closed, deadline_at, first_run_at, timeout_seconds,
+  COALESCE(deadline_at < now(), false)
+FROM tasks WHERE id=$1 AND deleted_at IS NULL`, taskID).Scan(&c.Status, &c.Paused, &c.Queued, &c.TargetGate, &c.DispatchClosed, &deadline, &firstRun, &c.TimeoutSeconds, &c.DeadlinePassed)
 	if err == sql.ErrNoRows {
 		return TaskControl{}, nil
 	}
