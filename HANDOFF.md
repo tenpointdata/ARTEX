@@ -59,6 +59,27 @@ See `docs/ARCHITECTURE.md` for the code-level map. Summary:
 
 ## Current state
 
+**2026-11-24 — E5 engagement governance (card `c-669406`)** is on branch `ej/20261124-055929-bd2253`. It
+is tested against Postgres 17 on macOS; see `docs/GOVERNANCE.md`.
+- **Roles.** `admin`, `operator`, `reviewer` and `client_read` work over the existing JWT. The users
+  are in `artex_users` and managed at `/api/users`. The policy table is `server/rbac_policy.go`,
+  enforced in `requireAuth`. `ARTEX` stays the break-glass admin.
+- **Authorization artifact.** Each task can have a versioned, immutable artifact covering scope, time
+  window and technique classes (`/api/tasks/{id}/authorization`). It is enforced only inside the
+  existing target gate (`intercept/authorization.go`, called from `CheckTargets`/`run`,
+  `CheckUngated`/`ungated`, and the dial and redirect paths). A spawned child task inherits it.
+- **Audit chain.** `audit_chain` is hash-chained and written by row triggers on `intercept_pending`,
+  `artex_users` and `engagement_authorizations`. Logins and refusals by role are appended too.
+  `GET /api/intercept/history/chain` lists it and `/chain/verify` checks it.
+- **Migration numbering.** Migration **0016** holds the schema, because 0015 is taken by the E2
+  integrations branch. If E2 has not merged when this branch lands, renumber whichever merges second.
+  The loader fails closed on a pending version older than one already applied.
+- **Tests.** With `ARTEX_PG_DSN`, all of `go test ./...` passes except three tests:
+  - `TestGateOffTaskIsUnchanged`, which also fails on base `1abe24f` (card `c-3157b4`);
+  - `TestConnectWithoutPasswordRealPG`, because the local Postgres uses trust auth;
+  - the SOCKS5 UDP test, because macOS cannot bind 127.0.0.2.
+- **Not done.** There is no web UI for E5 yet (card `c-869050`). The login page still assumes `ARTEX`.
+
 **2026-11-23** — Fixes for the High and Medium findings from the 2026-11-23 security audit are on the
 local branch `ej/20261123-145205-6a3af6` (not pushed). It covers audit findings #1–#16 except as listed
 under Open work. `go build ./...`, `go vet ./...` and `go test ./...` pass on macOS. Not yet run: the
@@ -87,6 +108,11 @@ Linux-root tests, the Docker egress iptables rules, the Postgres-backed tests an
 ## Triage (next handful)
 
 **Agents' lane**
+0. *(unclaimed)* — **E5: audit-chain head-lock contention** (M), card `c-ba9f64`. Done = archive concurrent
+   with gate decisions doesn't stall; verify still passes.
+0. *(unclaimed)* — **E5: bind client_read to a client** (M), card `c-5b5421`. Done = PG test: bound user
+   sees only its company.
+0. *(unclaimed)* — **E5: web UI for users / authorization / chain** (M), card `c-869050`.
 1. *(unclaimed)* — **SEC: gorilla/websocket bump, GO-2026-6278** (XS), card `c-c10f2c`; needs network.
    Done = govulncheck clean.
 2. *(unclaimed)* — **SEC: upstream-gate residuals** (M), card `c-5a6f96`: task-scoped rules on proxy
@@ -104,8 +130,10 @@ Linux-root tests, the Docker egress iptables rules, the Postgres-backed tests an
   Postgres tests and the web typecheck. Needed before the security branch goes anywhere public.
 - Revisit tracking: E1–E10 are on the private Composite board (decided 2026-11-23, repo is public).
   File GitHub issues only if the repo goes private or you want them public.
-- Decide engagement-governance direction (E5): how formal the rules-of-engagement/authorization
-  artifact should be for your use.
+- E5 shipped a lightweight artifact (reference, signatory, scope, window, technique classes). Decide
+  whether tasks with an artifact must have the target gate forced on (card `c-f4115c` item 2), and
+  whether the extra admin-only routes in `server/rbac_policy.go` (tools, MCP, agents, LLM config,
+  notify) suit how operators work.
 
 **Blocked**
 - Nothing blocked.
@@ -132,7 +160,9 @@ Card ids in brackets:
 - **E2** [`c-6def05`] Finding/ticketing integrations out (Jira, GitHub issues, DefectDojo) and more ingest in (Nuclei, Nmap, ZAP/Burp, Semgrep).
 - **E3** [`c-d25ff9`] Loop-B lesson library graduation + Loop-C benchmark gate per the `RSI.md` contract (owner-approval, immutable surfaces).
 - **E4** [`c-c0bb07`] Methodology-driven coverage (OWASP WSTG / API Top 10 as structured checklists).
-- **E5** [`c-669406`] Engagement lifecycle & governance: RBAC, per-engagement authorization artifact, scope expiry, tamper-evident (hash-chained) audit log.
+- **E5** [`c-669406`] Engagement governance. The backend is done on `ej/20261124-055929-bd2253`. Follow-ups:
+  `c-ba9f64` (head-lock contention), `c-5b5421` (client binding), `c-869050` (UI), `c-f4115c` (lifecycle gaps).
+- **TEST** [`c-3157b4`] `TestGateOffTaskIsUnchanged` fails on main with Postgres (also fails before E5).
 - **E6** [`c-cb0093`] Cost/observability dashboard + OpenTelemetry export, building on existing context telemetry.
 - **E7** [`c-d60149`] Distributed/remote workers (queue-backed intents) for larger engagements; Helm chart.
 - **E8** [`c-5487e8`] Planner/worker evaluation suite (regression targets, prompt-version A/B via the benchmark gate).
@@ -155,6 +185,10 @@ Card ids in brackets:
   untrusted-output boundary, audit trail — never weaken/bypass/route around them. `RSI.md`
   "immutable surfaces" must never enter an automated search space.
 - **Migrations fix forward** — a published `db/migrations/*.sql` is never edited.
+- **Audit chain is append-only:** `UPDATE`, `DELETE` and `TRUNCATE` on `audit_chain` fail, and artifact
+  rows reject `UPDATE`. A test database that gets polluted has to be recreated, not cleaned. Verify only
+  catches a full consistent rewrite by a DB superuser if `head_hash` is compared with a copy kept
+  outside the database.
 - **Embedded UI** requires `-tags embedui`; a plain `go build` omits the web assets.
 - **Secrets** are AES-256-GCM sealed with per-column AAD; losing the key (`keys/secret.key` or
   `ARTEX_SECRET_KEY`) loses stored secrets.
@@ -180,6 +214,14 @@ Card ids in brackets:
   self-signed targets set `ARTEX_CAPTURE_INSECURE_UPSTREAM=1` for that run only, until per-target trust
   (card `c-8d54d5`) exists. Reason: the goproxy setting is global, so turning it on also leaves package
   downloads through the proxy open to tampering.
+
+- **2026-11-24** — E5: the engagement is the task. The artifact is enforced only by the existing target
+  gate, so there is one enforcement path, and refusals are decided intercept rows. Names are never
+  resolved for the scope match, so a name must be listed by name; this fails closed. The technique
+  classifier is a declared check driven by a data table, not a sandbox; unclassified calls are not
+  limited. The audit chain is fed by DB row triggers (atomic with every writer, present and future),
+  and the hashed payload is stored as text so the bytes are hashed exactly. Users' roles are read from
+  the DB on every request, not from the token, so revocation is immediate.
 
 ## Deltas
 
