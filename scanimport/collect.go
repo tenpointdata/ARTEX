@@ -82,6 +82,9 @@ func (c *collector) finding(f Finding, detail map[string]any) bool {
 		return false
 	}
 	f.Title = cleanText(f.Title, MaxTitleBytes)
+	if f.Lane == "" {
+		f.Lane = LaneOf(c.res.Format)
+	}
 	f.Key = makeKey(f.Tool, f.RuleID, f.Target, f.Location, f.Line)
 	if c.keys[f.Key] {
 		c.res.Duplicates++

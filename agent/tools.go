@@ -588,7 +588,8 @@ func (t *ToolSet) graphOverviewData() map[string]any {
 	vulnNodes, _ := t.ts.ListByKind(db.KindFinding, 1000)
 	factNodes, _ := t.ts.ListByKind(db.KindFact, 1000) // newest first
 	// findings_total is what goal judgment reads. A false_positive, duplicate,
-	// or ignored triage label is not an open finding, so it does not count.
+	// or ignored triage label is not an open finding, so it does not count;
+	// neither does an imported scanner claim.
 	// finding_list still shows those rows, with status, so the planner can see them.
 	out["findings_total"] = countActionableFindings(vulnNodes)
 	out["facts"] = len(factNodes) // number of exploration facts/conclusions (including negative conclusions)
@@ -623,6 +624,9 @@ func (t *ToolSet) graphOverviewData() map[string]any {
 		}
 		if from := factFrom[n.ID]; from > 0 {
 			m["from_intent"] = from // which intent produced this finding
+		}
+		if lane, ok := fp["lane"].(string); ok && fp["source"] == db.ImportSourceOrigin {
+			m["imported"] = lane // an unverified scanner claim (runtime|sast|sca): a lead to test, not a result
 		}
 		findingList = append(findingList, m)
 	}
@@ -1114,10 +1118,23 @@ func findingTriageBlocksGoal(status string) bool {
 	return db.FindingStatusInvalidatesGoal(status)
 }
 
+// findingIsImported is true for a finding node written by a scanner import
+// (E2/E10): an unverified scanner claim, not a result of this task's work.
+func findingIsImported(n *db.Node) bool {
+	var p struct {
+		Source string `json:"source"`
+	}
+	_ = json.Unmarshal(n.Payload, &p)
+	return p.Source == db.ImportSourceOrigin
+}
+
+// countActionableFindings counts the findings goal judgment may lean on:
+// neither triaged away nor an imported scanner claim (prove_goal refuses
+// those anyway, since they carry no verified traffic).
 func countActionableFindings(nodes []*db.Node) int {
 	n := 0
 	for _, node := range nodes {
-		if !findingTriageBlocksGoal(findingPayloadStatus(node)) {
+		if !findingTriageBlocksGoal(findingPayloadStatus(node)) && !findingIsImported(node) {
 			n++
 		}
 	}

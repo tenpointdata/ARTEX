@@ -31,6 +31,8 @@ type ScanImport struct {
 	Skipped          int       `json:"skipped"`
 	Informational    int       `json:"informational"`
 	Truncated        bool      `json:"truncated"`
+	FactNodeID       *int64    `json:"fact_node_id,omitempty"`     // the import's exploration fact (task imports)
+	AnchorAssetIDs   []int64   `json:"anchor_asset_ids,omitempty"` // runtime assets the code findings anchor to
 	CreatedAt        time.Time `json:"created_at"`
 }
 
@@ -63,7 +65,7 @@ func (d *DB) ListScanImports(ctx context.Context, limit int) ([]*ScanImport, err
 		limit = 100
 	}
 	rows, err := d.QueryContext(ctx, `SELECT id, format, tool_name, tool_version, file_name, file_sha256, task_id, imported_by,
-	records, assets, findings_new, findings_existing, skipped, informational, truncated, created_at
+	records, assets, findings_new, findings_existing, skipped, informational, truncated, fact_node_id, anchor_asset_ids, created_at
 FROM scan_imports ORDER BY created_at DESC, id DESC LIMIT $1`, limit)
 	if err != nil {
 		return nil, err
@@ -72,11 +74,17 @@ FROM scan_imports ORDER BY created_at DESC, id DESC LIMIT $1`, limit)
 	var out []*ScanImport
 	for rows.Next() {
 		var im ScanImport
-		var task sql.NullInt64
+		var task, fact sql.NullInt64
+		var anchors []byte
 		if err := rows.Scan(&im.ID, &im.Format, &im.ToolName, &im.ToolVersion, &im.FileName, &im.FileSHA256, &task, &im.ImportedBy,
-			&im.Records, &im.Assets, &im.FindingsNew, &im.FindingsExisting, &im.Skipped, &im.Informational, &im.Truncated, &im.CreatedAt); err != nil {
+			&im.Records, &im.Assets, &im.FindingsNew, &im.FindingsExisting, &im.Skipped, &im.Informational, &im.Truncated,
+			&fact, &anchors, &im.CreatedAt); err != nil {
 			return nil, err
 		}
+		if fact.Valid {
+			im.FactNodeID = &fact.Int64
+		}
+		_ = json.Unmarshal(anchors, &im.AnchorAssetIDs)
 		if task.Valid {
 			im.TaskID = &task.Int64
 		}
@@ -110,6 +118,16 @@ type ImportedFinding struct {
 	DedupKey  string
 	Record    string
 	Note      string // verification note, e.g. "imported from nuclei; not verified"
+
+	// Lane is runtime, sast or sca; Location and Line are the repo-relative
+	// code location of a code finding (empty for runtime findings).
+	Lane     string
+	Location string
+	Line     int
+	// FactNodeID, when set, is the import's exploration fact (AddScanImportFact):
+	// a new finding then also becomes a finding node of the task's exploration
+	// graph, anchored to AssetIDs, that the fact yields. Requires TaskID.
+	FactNodeID int64
 }
 
 // ErrImportedFindingInvalid is returned for a missing dedup key or bad severity.
@@ -144,10 +162,18 @@ func (d *DB) AddImportedFinding(ctx context.Context, f ImportedFinding) (id int6
 		aids = []int64{}
 	}
 	aidsJSON, _ := json.Marshal(aids)
+	var node any
+	if f.FactNodeID > 0 {
+		nid, gerr := importedFindingNodeTx(ctx, tx, f)
+		if gerr != nil {
+			return 0, false, gerr
+		}
+		node = nid
+	}
 	err = tx.QueryRowContext(ctx, `INSERT INTO findings
-	(task_id, vulnclass, name, severity, summary, evidence, worker, asset_ids, status, verification_status, poe_level, verification_note)
-VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9,$10,0,$11) RETURNING id`,
-		nullTask(f.TaskID), f.VulnClass, f.Name, f.Severity, f.Summary, f.Evidence, f.Worker, string(aidsJSON),
+	(task_id, node_id, vulnclass, name, severity, summary, evidence, worker, asset_ids, status, verification_status, poe_level, verification_note)
+VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb,$10,$11,0,$12) RETURNING id`,
+		nullTask(f.TaskID), node, f.VulnClass, f.Name, f.Severity, f.Summary, f.Evidence, f.Worker, string(aidsJSON),
 		FindingPending, VerificationUnverified, f.Note).Scan(&id)
 	if err != nil {
 		return 0, false, err
@@ -156,8 +182,8 @@ VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9,$10,0,$11) RETURNING id`,
 	if f.ImportID > 0 {
 		imp = f.ImportID
 	}
-	if _, err = tx.ExecContext(ctx, `INSERT INTO finding_import_sources(finding_id, import_id, tool, rule_id, dedup_key, record)
-VALUES ($1,$2,$3,$4,$5,$6)`, id, imp, f.Tool, f.RuleID, f.DedupKey, f.Record); err != nil {
+	if _, err = tx.ExecContext(ctx, `INSERT INTO finding_import_sources(finding_id, import_id, tool, rule_id, dedup_key, record, lane, location, line)
+VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`, id, imp, f.Tool, f.RuleID, f.DedupKey, f.Record, f.Lane, f.Location, f.Line); err != nil {
 		return 0, false, err
 	}
 	return id, true, tx.Commit()
@@ -171,6 +197,9 @@ type FindingImportSource struct {
 	RuleID    string    `json:"rule_id"`
 	DedupKey  string    `json:"dedup_key"`
 	Record    string    `json:"record"`
+	Lane      string    `json:"lane"`
+	Location  string    `json:"location,omitempty"`
+	Line      int       `json:"line,omitempty"`
 	CreatedAt time.Time `json:"created_at"`
 }
 
@@ -179,8 +208,9 @@ type FindingImportSource struct {
 func (d *DB) FindingImportSourceByFinding(ctx context.Context, findingID int64) (*FindingImportSource, error) {
 	var s FindingImportSource
 	var imp sql.NullInt64
-	err := d.QueryRowContext(ctx, `SELECT finding_id, import_id, tool, rule_id, dedup_key, record, created_at
-FROM finding_import_sources WHERE finding_id=$1`, findingID).Scan(&s.FindingID, &imp, &s.Tool, &s.RuleID, &s.DedupKey, &s.Record, &s.CreatedAt)
+	err := d.QueryRowContext(ctx, `SELECT finding_id, import_id, tool, rule_id, dedup_key, record, lane, location, line, created_at
+FROM finding_import_sources WHERE finding_id=$1`, findingID).Scan(&s.FindingID, &imp, &s.Tool, &s.RuleID, &s.DedupKey, &s.Record,
+		&s.Lane, &s.Location, &s.Line, &s.CreatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
