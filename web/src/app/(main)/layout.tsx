@@ -7,8 +7,8 @@ import { AppSidebar } from "@/app/(main)/_components/sidebar/app-sidebar";
 import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
 import { SessionProvider } from "@/hooks/use-session";
 import { auth } from "@/lib/auth";
-import type { SessionInfo } from "@/lib/governance-types";
 import { getClientCookie } from "@/lib/cookie.client";
+import type { SessionInfo } from "@/lib/governance-types";
 import {
   SIDEBAR_COLLAPSIBLE_VALUES,
   SIDEBAR_VARIANT_VALUES,
@@ -69,28 +69,28 @@ export default function Layout({ children }: Readonly<{ children: ReactNode }>) 
 
   return (
     <SessionProvider value={session}>
-    <SidebarProvider
-      defaultOpen={defaultOpen}
-      style={
-        {
-          "--sidebar-width": "calc(var(--spacing) * 68)",
-        } as React.CSSProperties
-      }
-    >
-      <AppSidebar variant={variant} collapsible={collapsible} />
-      <SidebarInset
-        className={cn(
-          "[html[data-content-layout=centered]_&>*]:mx-auto",
-          "[html[data-content-layout=centered]_&>*]:w-full",
-          "[html[data-content-layout=centered]_&>*]:max-w-screen-2xl",
-          "peer-data-[variant=inset]:border",
-          "[--dashboard-header-height:--spacing(12)]",
-          "min-w-0 overflow-x-hidden",
-        )}
+      <SidebarProvider
+        defaultOpen={defaultOpen}
+        style={
+          {
+            "--sidebar-width": "calc(var(--spacing) * 68)",
+          } as React.CSSProperties
+        }
       >
-        <MainContent>{children}</MainContent>
-      </SidebarInset>
-    </SidebarProvider>
+        <AppSidebar variant={variant} collapsible={collapsible} />
+        <SidebarInset
+          className={cn(
+            "[html[data-content-layout=centered]_&>*]:mx-auto",
+            "[html[data-content-layout=centered]_&>*]:w-full",
+            "[html[data-content-layout=centered]_&>*]:max-w-screen-2xl",
+            "peer-data-[variant=inset]:border",
+            "[--dashboard-header-height:--spacing(12)]",
+            "min-w-0 overflow-x-hidden",
+          )}
+        >
+          <MainContent>{children}</MainContent>
+        </SidebarInset>
+      </SidebarProvider>
     </SessionProvider>
   );
 }

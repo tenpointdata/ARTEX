@@ -33,8 +33,7 @@ function chainQuery(f: AuditFilter): string {
 
 export const governanceApi = {
   // ---- users (admin) ----
-  users: () =>
-    http<UserList>("/users").then((r) => ({ users: r.users ?? [], roles: r.roles ?? [] })),
+  users: () => http<UserList>("/users").then((r) => ({ users: r.users ?? [], roles: r.roles ?? [] })),
   createUser: (u: NewUser) => http<ConsoleUser>("/users", json("POST", u)),
   updateUser: (id: number, patch: UserPatch) => http<ConsoleUser>(`/users/${id}`, json("PATCH", patch)),
   deleteUser: (id: number) => http<{ ok: boolean }>(`/users/${id}`, json("DELETE")),

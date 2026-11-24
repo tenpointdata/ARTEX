@@ -74,7 +74,7 @@ export const sidebarItems: NavGroup[] = [
     id: 1,
     label: t("Functions"),
     items: [
-      { id: "dashboard", title: t("Dashboard"), url: "/dashboard", icon: LayoutDashboard, need: "client_read" },
+      { id: "dashboard", title: t("Dashboard"), url: "/dashboard", icon: LayoutDashboard },
       { id: "chat", title: t("Chat"), url: "/chat", icon: MessageSquare, need: "operate" },
       { id: "tasks", title: t("Tasks"), url: "/function/tasks", icon: Target },
       { id: "findings", title: t("Findings"), url: "/function/findings", icon: Bug, need: "client_read" },
@@ -113,9 +113,7 @@ export function navFor(groups: NavGroup[], allowed: (p: Permission) => boolean):
   return groups
     .map((g) => ({
       ...g,
-      items: g.items
-        .filter(ok)
-        .map((it) => (it.subItems ? { ...it, subItems: it.subItems.filter(ok) } : it)),
+      items: g.items.filter(ok).map((it) => (it.subItems ? { ...it, subItems: it.subItems.filter(ok) } : it)),
     }))
     .filter((g) => g.items.length > 0);
 }

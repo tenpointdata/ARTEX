@@ -58,7 +58,8 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
             </SidebarMenuButton>
           </SidebarMenuItem>
         </SidebarMenu>
-        <CompanySwitcher />
+        {/* The switcher lists every company; a client_read session may not (GET /api/companies needs read). */}
+        {can(session, "read") && <CompanySwitcher />}
       </SidebarHeader>
       <SidebarContent>
         <NavMain items={items} />
