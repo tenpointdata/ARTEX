@@ -394,9 +394,10 @@ def tally(gt_findings, verdicts, scanner_findings, invalid_ids) -> dict:
     }
 
 
-def write_report(out_dir: pathlib.Path, corpus: str, args, task_info, status, findings, verdicts, result) -> None:
+def write_report(out_dir: pathlib.Path, corpus: str, args, task_info, status, findings, verdicts, result,
+                 outcome: dict | None = None) -> dict:
     out_dir.mkdir(parents=True, exist_ok=True)
-    (out_dir / "results.json").write_text(json.dumps({
+    payload = {
         "method_version": METHOD_VERSION,
         "corpus": corpus,
         "ground_truth_version": args.gt_version,
@@ -408,7 +409,10 @@ def write_report(out_dir: pathlib.Path, corpus: str, args, task_info, status, fi
         "result": result,
         "verdicts": verdicts,
         "findings": findings,
-    }, indent=2))
+        "task_outcome": outcome,
+        "task_timeout_seconds": getattr(args, "task_timeout", None),
+    }
+    (out_dir / "results.json").write_text(json.dumps(payload, indent=2))
     lines = [
         f"# ARTEX benchmark run: {corpus}",
         f"- method `{METHOD_VERSION}`, ground truth `{args.gt_version}`, subject model `{args.subject_model}`, judge `{args.judge_model}`",
@@ -444,11 +448,22 @@ def write_report(out_dir: pathlib.Path, corpus: str, args, task_info, status, fi
     lines += ["", "A rate without its denominator or interval must not be quoted as a capability claim.", ""]
     (out_dir / "report.md").write_text("\n".join(lines))
     print(f"[out] {out_dir / 'report.md'}")
+    return payload
+
+
+def fetch_outcome(api: Api, tid) -> dict | None:
+    """The task's production and cost record (GET /api/tasks/{id}/outcome), so a
+    comparison can show both arms spent the same budget. Best-effort: older
+    servers without the route still produce a scored result."""
+    try:
+        return api.get(f"/api/tasks/{tid}/outcome")
+    except (SystemExit, Exception):
+        return None
 
 
 # ---------------------------------------------------------------- main
 
-def main() -> None:
+def build_parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--corpus", default="juice-shop", help="ground-truth file stem under ground_truth/ (image mode; also the run label in drost mode)")
     ap.add_argument("--corpus-type", choices=("image", "drost"), default="image", help="image: single docker image; drost: one DrostBench challenge (see README)")
@@ -472,8 +487,13 @@ def main() -> None:
     ap.add_argument("--judge-timeout", type=int, default=900)
     ap.add_argument("--allow-self-judge", action="store_true")
     ap.add_argument("--keep", action="store_true", help="keep the corpus container running after the run")
-    args = ap.parse_args()
+    ap.add_argument("--out-root", default="benchmark-results", help="directory that receives <corpus>/<run-id>/")
+    return ap
 
+
+def prepare(args) -> str:
+    """Validate the run configuration; returns the ARTEX bearer token ("" for --deploy-only)."""
+    token = ""
     args.judge_key = os.environ.get("JUDGE_API_KEY", "")
     if args.corpus_type == "drost":
         if not (args.drost_repo and args.drost_id):
@@ -501,7 +521,12 @@ def main() -> None:
     # A model never judges its own output (capability-matrix standing rule 5).
     if judge_enabled and args.judge_model == args.subject_model and not args.allow_self_judge:
         raise SystemExit(f"judge model equals subject model ({args.judge_model}); refusing. Pass --allow-self-judge to override knowingly.")
+    return token
 
+
+def run(args, token: str) -> dict | None:
+    """One benchmark run end to end; returns the results.json payload (None for --deploy-only)."""
+    judge_enabled = bool(args.judge_url and args.judge_model and args.judge_key)
     if args.corpus_type == "drost":
         args.corpus = f"drost-{args.drost_id}"
         gt = drost.derive_ground_truth(args.drost_repo, args.drost_id)
@@ -527,7 +552,7 @@ def main() -> None:
             print(f"[drost] deploy-only: up at {corpus_url}, flag {flag}")
             print(f"[drost] stop it later with: docker compose -p {dep['project']} down --remove-orphans"
                   f"  (cwd {dep['challenge_dir']})")
-            return
+            return None
 
         task_url = corpus_url
         if args.target_host != "127.0.0.1":
@@ -577,9 +602,11 @@ def main() -> None:
             result["flag_captured"] = flag_captured
             result["flag_used"] = flag
 
-        out_dir = pathlib.Path("benchmark-results") / args.corpus / args.run_id
-        write_report(out_dir, args.corpus, args, task_info, status, findings, verdicts, result)
+        out_dir = pathlib.Path(args.out_root) / args.corpus / args.run_id
+        payload = write_report(out_dir, args.corpus, args, task_info, status, findings, verdicts, result,
+                               fetch_outcome(api, task_info["id"]))
         print(json.dumps(result, indent=2)[:1500])
+        return payload
     finally:
         # The corpus is torn down even when a step fails halfway: a crash in
         # deploy, scoring or reporting must not leave the challenge running
@@ -589,6 +616,11 @@ def main() -> None:
                 drost.teardown(drost_project, drost_cdir)
         elif not (args.keep or args.corpus_url):
             subprocess.run(["docker", "rm", "-f", f"bench-{args.corpus}-{args.run_id}"], capture_output=True)
+
+
+def main() -> None:
+    args = build_parser().parse_args()
+    run(args, prepare(args))
 
 
 if __name__ == "__main__":
