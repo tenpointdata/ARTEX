@@ -38,6 +38,13 @@ CREATE TABLE IF NOT EXISTS rsi_proposal_evidence (
 );
 CREATE INDEX IF NOT EXISTS idx_rsi_evidence_proposal ON rsi_proposal_evidence(proposal_id, id DESC);
 
+-- Task ledger: a benchmark task backs at most one evidence row, across every
+-- proposal, so a run cannot be replayed for another proposal or upload.
+CREATE TABLE IF NOT EXISTS rsi_evidence_tasks (
+    task_id     BIGINT PRIMARY KEY,
+    evidence_id BIGINT NOT NULL REFERENCES rsi_proposal_evidence(id) ON DELETE CASCADE
+);
+
 CREATE TABLE IF NOT EXISTS rsi_adoption_log (
     id          BIGSERIAL PRIMARY KEY,
     proposal_id BIGINT REFERENCES rsi_proposals(id),
@@ -56,3 +63,8 @@ END $$ LANGUAGE plpgsql;
 DROP TRIGGER IF EXISTS trg_rsi_adoption_log_immutable ON rsi_adoption_log;
 CREATE TRIGGER trg_rsi_adoption_log_immutable BEFORE UPDATE OR DELETE ON rsi_adoption_log
     FOR EACH ROW EXECUTE FUNCTION rsi_adoption_log_immutable();
+
+-- Lesson usage tells the graduated and benchmark-pinned modes apart from inject.
+ALTER TABLE rsi_lesson_usage DROP CONSTRAINT IF EXISTS rsi_lesson_usage_mode_check;
+ALTER TABLE rsi_lesson_usage ADD CONSTRAINT rsi_lesson_usage_mode_check
+    CHECK (mode IN ('shadow','inject','adopted','bench'));

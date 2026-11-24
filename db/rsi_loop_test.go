@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"testing"
+	"time"
 )
 
 func rsiTestDB(t *testing.T) *DB {
@@ -44,7 +45,7 @@ func oneEdit(int) int { return 1 }
 
 func passEvidence(t *testing.T, d *DB, id int64, passed bool) int64 {
 	t.Helper()
-	ev, err := d.AddRSIEvidence(context.Background(), id, passed, []byte(`{"passed":true}`), []byte(`{"stamp":{}}`), []byte(`{"stamp":{}}`), "loop")
+	ev, err := d.AddRSIEvidence(context.Background(), id, passed, []byte(`{"passed":true}`), []byte(`{"stamp":{}}`), []byte(`{"stamp":{}}`), nil, 10, "loop")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -59,35 +60,44 @@ func TestRSIPromptLifecyclePG(t *testing.T) {
 	}
 	beforeVer, _ := rsiAgentBody(t, d, "planner")
 
-	p, err := d.CreateRSIProposal(ctx, RSIProposal{Round: 3, Surface: "prompt_body", Target: "planner",
-		Body: "planner candidate {{.Goal}}", BodySHA: "x", Rationale: "r", CreatedBy: "loop"}, oneEdit)
+	p, err := d.CreateRSIProposal(ctx, RSIProposal{Round: 0, Surface: "prompt_body", Target: "planner",
+		Body: "planner candidate {{.Goal}}", BodySHA: "x", Rationale: "r", CreatedBy: "loop"}, oneEdit, 10)
 	if err != nil {
 		t.Fatal(err)
 	}
 	// Budget and forward-only rounds.
-	if _, err := d.CreateRSIProposal(ctx, RSIProposal{Round: 3, Surface: "lesson", LessonIDs: []int64{1}}, oneEdit); !errors.Is(err, ErrRSIConflict) {
+	if _, err := d.CreateRSIProposal(ctx, RSIProposal{Round: 0, Surface: "lesson", LessonIDs: []int64{1}}, oneEdit, 10); !errors.Is(err, ErrRSIConflict) {
 		t.Fatalf("over budget: want conflict, got %v", err)
 	}
-	if _, err := d.CreateRSIProposal(ctx, RSIProposal{Round: 2, Surface: "lesson", LessonIDs: []int64{1}}, oneEdit); !errors.Is(err, ErrRSIConflict) {
+	if _, err := d.CreateRSIProposal(ctx, RSIProposal{Round: 2, Surface: "lesson", LessonIDs: []int64{1}}, oneEdit, 10); !errors.Is(err, ErrRSIConflict) {
+		t.Fatalf("skipping a round: want conflict, got %v", err)
+	}
+	if _, err := d.CreateRSIProposal(ctx, RSIProposal{Round: 1, Surface: "lesson", LessonIDs: []int64{1}}, oneEdit, 1); !errors.Is(err, ErrRSIConflict) {
+		t.Fatalf("open cap: want conflict, got %v", err)
+	}
+	if _, err := d.CreateRSIProposal(ctx, RSIProposal{Round: 1, Surface: "lesson", LessonIDs: []int64{1}}, oneEdit, 10); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.CreateRSIProposal(ctx, RSIProposal{Round: 0, Surface: "lesson", LessonIDs: []int64{1}}, oneEdit, 10); !errors.Is(err, ErrRSIConflict) {
 		t.Fatalf("closed round: want conflict, got %v", err)
 	}
 	// No adoption without passing evidence; failed evidence blocks too.
-	if _, err := d.AdoptRSIProposal(ctx, p.ID, 1, "owner", func(RSIPromptState) error { return nil }); !errors.Is(err, ErrRSIConflict) {
+	if _, err := d.AdoptRSIProposal(ctx, p.ID, 1, "owner", func(RSIPromptState) error { return nil }, nil); !errors.Is(err, ErrRSIConflict) {
 		t.Fatalf("adopt without evidence: %v", err)
 	}
 	failed := passEvidence(t, d, p.ID, false)
-	if _, err := d.AdoptRSIProposal(ctx, p.ID, failed, "owner", func(RSIPromptState) error { return nil }); !errors.Is(err, ErrRSIConflict) {
+	if _, err := d.AdoptRSIProposal(ctx, p.ID, failed, "owner", func(RSIPromptState) error { return nil }, nil); !errors.Is(err, ErrRSIConflict) {
 		t.Fatalf("adopt failed evidence: %v", err)
 	}
 	old := passEvidence(t, d, p.ID, true)
 	ev := passEvidence(t, d, p.ID, true)
-	if _, err := d.AdoptRSIProposal(ctx, p.ID, old, "owner", func(RSIPromptState) error { return nil }); !errors.Is(err, ErrRSIConflict) {
+	if _, err := d.AdoptRSIProposal(ctx, p.ID, old, "owner", func(RSIPromptState) error { return nil }, nil); !errors.Is(err, ErrRSIConflict) {
 		t.Fatalf("adopt stale evidence id: %v", err)
 	}
 	// The live-baseline check sees the active prompt and can refuse.
 	stale := fmt.Errorf("%w: stale", ErrRSIConflict)
 	var seen RSIPromptState
-	if _, err := d.AdoptRSIProposal(ctx, p.ID, ev, "owner", func(s RSIPromptState) error { seen = s; return stale }); !errors.Is(err, ErrRSIConflict) {
+	if _, err := d.AdoptRSIProposal(ctx, p.ID, ev, "owner", func(s RSIPromptState) error { seen = s; return stale }, nil); !errors.Is(err, ErrRSIConflict) {
 		t.Fatalf("stale baseline: %v", err)
 	}
 	if seen.Body != "planner v-live {{.Goal}}" || !seen.Stored {
@@ -97,7 +107,7 @@ func TestRSIPromptLifecyclePG(t *testing.T) {
 		t.Fatal("refused adoption changed the prompt")
 	}
 
-	got, err := d.AdoptRSIProposal(ctx, p.ID, ev, "owner", func(RSIPromptState) error { return nil })
+	got, err := d.AdoptRSIProposal(ctx, p.ID, ev, "owner", func(RSIPromptState) error { return nil }, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -106,7 +116,7 @@ func TestRSIPromptLifecyclePG(t *testing.T) {
 		*got.PromptVersionBefore != beforeVer || *got.PromptVersionAfter != ver {
 		t.Fatalf("adopt: %+v ver=%d body=%q", got, ver, body)
 	}
-	if _, err := d.AddRSIEvidence(ctx, p.ID, true, []byte(`{}`), []byte(`{}`), []byte(`{}`), "loop"); !errors.Is(err, ErrRSIConflict) {
+	if _, err := d.AddRSIEvidence(ctx, p.ID, true, []byte(`{}`), []byte(`{}`), []byte(`{}`), nil, 10, "loop"); !errors.Is(err, ErrRSIConflict) {
 		t.Fatalf("evidence after adoption: %v", err)
 	}
 	if err := d.RejectRSIProposal(ctx, p.ID, "owner", "x"); !errors.Is(err, ErrRSIConflict) {
@@ -153,12 +163,12 @@ func TestRSIRollbackRefusesAfterOwnerEditPG(t *testing.T) {
 	d := rsiTestDB(t)
 	ctx := context.Background()
 	p, err := d.CreateRSIProposal(ctx, RSIProposal{Round: 0, Surface: "prompt_body", Target: "worker",
-		Body: "worker candidate", Rationale: "r"}, oneEdit)
+		Body: "worker candidate", Rationale: "r"}, oneEdit, 10)
 	if err != nil {
 		t.Fatal(err)
 	}
 	ev := passEvidence(t, d, p.ID, true)
-	if _, err := d.AdoptRSIProposal(ctx, p.ID, ev, "owner", func(RSIPromptState) error { return nil }); err != nil {
+	if _, err := d.AdoptRSIProposal(ctx, p.ID, ev, "owner", func(RSIPromptState) error { return nil }, nil); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := d.SavePrompt(mustAgentID(t, d, "worker"), "owner edit", "", "ui"); err != nil {
@@ -183,7 +193,7 @@ func TestRSILessonGraduationPG(t *testing.T) {
 		}
 	}
 	t.Cleanup(func() { d.Exec(`DELETE FROM rsi_lessons WHERE id=ANY($1::bigint[])`, []int64{a, b}) })
-	p, err := d.CreateRSIProposal(ctx, RSIProposal{Round: 0, Surface: "lesson", LessonIDs: []int64{a, b}, Rationale: "r"}, oneEdit)
+	p, err := d.CreateRSIProposal(ctx, RSIProposal{Round: 0, Surface: "lesson", LessonIDs: []int64{a, b}, Rationale: "r"}, oneEdit, 10)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -191,7 +201,7 @@ func TestRSILessonGraduationPG(t *testing.T) {
 		t.Fatalf("lesson ids %v", p.LessonIDs)
 	}
 	ev := passEvidence(t, d, p.ID, true)
-	if _, err := d.AdoptRSIProposal(ctx, p.ID, ev, "owner", nil); err != nil {
+	if _, err := d.AdoptRSIProposal(ctx, p.ID, ev, "owner", nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	got, err := d.LessonsByIDs(ctx, []int64{a, b})
@@ -204,6 +214,35 @@ func TestRSILessonGraduationPG(t *testing.T) {
 	got, _ = d.LessonsByIDs(ctx, []int64{a, b})
 	if got[0].Status != "candidate" || got[1].Status != "candidate" {
 		t.Fatalf("rolled back: %+v", got)
+	}
+}
+
+func TestRSIEvidenceLedgerAndCapPG(t *testing.T) {
+	d := rsiTestDB(t)
+	ctx := context.Background()
+	p, err := d.CreateRSIProposal(ctx, RSIProposal{Round: 0, Surface: "lesson", LessonIDs: []int64{1}, Rationale: "r"}, oneEdit, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	add := func(passed bool, tasks []int64, cap int) error {
+		_, err := d.AddRSIEvidence(ctx, p.ID, passed, []byte(`{}`), []byte(`{}`), []byte(`{}`), tasks, cap, "loop")
+		return err
+	}
+	if err := add(true, []int64{9001, 9002}, 5); err != nil {
+		t.Fatal(err)
+	}
+	if err := add(true, []int64{9002, 9003}, 5); !errors.Is(err, ErrRSIConflict) {
+		t.Fatalf("replayed task: want conflict, got %v", err)
+	}
+	if err := add(false, []int64{9002}, 5); err != nil {
+		t.Fatalf("failing evidence may name a used task: %v", err)
+	}
+	if err := add(false, nil, 2); !errors.Is(err, ErrRSIConflict) {
+		t.Fatalf("upload cap: want conflict, got %v", err)
+	}
+	bad, err := d.RSIEvidenceTasksInvalid(ctx, []int64{9001}, time.Time{})
+	if err != nil || len(bad) != 1 {
+		t.Fatalf("ledger task must be invalid for new evidence: %v %v", bad, err)
 	}
 }
 

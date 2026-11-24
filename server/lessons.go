@@ -67,13 +67,11 @@ func (s *Server) wireTaskLessons(t *Task, wk *agent.Worker, pl *agent.Planner) {
 	if block == "" {
 		return
 	}
-	logMode := "shadow"
 	if mode != "shadow" {
-		logMode = "inject"
 		wk.SetLessonsBlock(block)
 		pl.SetLessonsBlock(block)
 	}
-	if err := s.m.PG().LogLessonUsage(context.Background(), taskID, ids, logMode); err != nil {
+	if err := s.m.PG().LogLessonUsage(context.Background(), taskID, ids, mode); err != nil {
 		log.Printf("[rsi] lesson usage log failed for task %s: %v", t.ID, err)
 	}
 }

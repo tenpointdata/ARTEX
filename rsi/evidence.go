@@ -1,9 +1,11 @@
 package rsi
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"reflect"
+	"strconv"
 )
 
 // The evidence types mirror the per-arm files written by
@@ -12,9 +14,12 @@ import (
 // instead of trusting a comparison the loop computed itself.
 
 // InvariantStamps must be identical between the arms (same model, seed,
-// budget, judge, method and ground truth); suite_stats.INVARIANT_STAMPS.
+// budget, judge, method and ground truth); suite_stats.INVARIANT_STAMPS plus
+// suite_run, so both arms come from one suite run and files from different
+// runs cannot be paired.
 var InvariantStamps = []string{"method_version", "subject_model", "llm_profiles", "judge_model",
-	"task_timeout_seconds", "seed", "suite", "suite_version", "replicates", "ground_truth_versions"}
+	"task_timeout_seconds", "seed", "suite", "suite_version", "replicates", "ground_truth_versions",
+	"suite_run"}
 
 // Stamp is one arm's stamp: the typed fields the gate reads plus every raw
 // field, so invariants are compared on exactly what the harness wrote.
@@ -69,7 +74,7 @@ type Payload struct {
 		FlagCaptured *bool `json:"flag_captured"`
 	} `json:"result"`
 	Task struct {
-		ID int64 `json:"id"`
+		ID TaskID `json:"id"`
 	} `json:"task"`
 }
 
@@ -121,4 +126,30 @@ func stampMismatches(a, b Stamp) []string {
 		}
 	}
 	return out
+}
+
+// TaskID accepts a task id as a JSON number or a decimal string (the task API
+// answers ids as strings; run_bench stores what it got back).
+type TaskID int64
+
+// UnmarshalJSON reads 12 or "12"; anything else is an error.
+func (t *TaskID) UnmarshalJSON(b []byte) error {
+	b = bytes.TrimSpace(b)
+	if bytes.Equal(b, []byte("null")) {
+		*t = 0
+		return nil
+	}
+	if len(b) > 0 && b[0] == '"' {
+		var s string
+		if err := json.Unmarshal(b, &s); err != nil {
+			return err
+		}
+		b = []byte(s)
+	}
+	n, err := strconv.ParseInt(string(b), 10, 64)
+	if err != nil {
+		return fmt.Errorf("task id %s is not an integer", b)
+	}
+	*t = TaskID(n)
+	return nil
 }

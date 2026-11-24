@@ -23,6 +23,9 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"unicode"
+
+	"golang.org/x/text/unicode/norm"
 )
 
 // SurfaceKind names what an edit changes.
@@ -154,13 +157,7 @@ func ValidateEdit(e Edit, forbiddenMarkers []string) error {
 		if len(e.Body) > MaxBodyBytes {
 			return fmt.Errorf("body is %d bytes, over the %d byte cap", len(e.Body), MaxBodyBytes)
 		}
-		low := strings.ToLower(e.Body)
-		for _, m := range forbiddenMarkers {
-			if m != "" && strings.Contains(low, strings.ToLower(m)) {
-				return fmt.Errorf("%w: body contains %q, which belongs to a code-owned prompt tail", ErrOutsideSearchSpace, m)
-			}
-		}
-		return nil
+		return CheckMarkers(e.Body, forbiddenMarkers)
 	case SurfaceLesson:
 		if e.Target != "" || e.Body != "" {
 			return errors.New("a lesson edit carries only lesson ids")
@@ -184,4 +181,43 @@ func contains(list []string, s string) bool {
 		}
 	}
 	return false
+}
+
+// NormalizeForMarkers folds text so look-alike spellings compare equal: NFKC,
+// every dash to '-', format characters (zero-width and the like) dropped,
+// whitespace runs to one space, lower case.
+func NormalizeForMarkers(text string) string {
+	text = norm.NFKC.String(text)
+	var b strings.Builder
+	space := false
+	for _, r := range text {
+		switch {
+		case unicode.Is(unicode.Cf, r):
+			continue
+		case unicode.IsSpace(r):
+			if !space {
+				b.WriteByte(' ')
+			}
+			space = true
+			continue
+		case unicode.Is(unicode.Pd, r):
+			r = '-'
+		}
+		space = false
+		b.WriteRune(unicode.ToLower(r))
+	}
+	return b.String()
+}
+
+// CheckMarkers refuses text that contains a code-owned tail marker after
+// normalization. Callers that render templates should check the rendered text
+// too, because template actions can assemble a marker from pieces.
+func CheckMarkers(text string, markers []string) error {
+	folded := NormalizeForMarkers(text)
+	for _, m := range markers {
+		if fm := NormalizeForMarkers(m); fm != "" && strings.Contains(folded, fm) {
+			return fmt.Errorf("%w: body contains %q, which belongs to a code-owned prompt tail", ErrOutsideSearchSpace, m)
+		}
+	}
+	return nil
 }

@@ -20,21 +20,26 @@ type lockedAgent struct {
 	state RSIPromptState
 }
 
+// lockAgentPrompt locks the agent row first and reads its prompt in a second
+// statement, so the prompt read sees the pointer as it is after the lock (a
+// joined FOR UPDATE can re-check the agent row and keep a stale prompt row).
 func lockAgentPrompt(ctx context.Context, tx *sql.Tx, key string) (*lockedAgent, error) {
 	var a lockedAgent
-	var ver sql.NullInt64
-	var body sql.NullString
-	err := tx.QueryRowContext(ctx, `
-		SELECT a.id, p.version, p.template_text
-		FROM agents a LEFT JOIN agent_prompts p ON p.id=a.current_prompt_id
-		WHERE a.key=$1 FOR UPDATE OF a`, key).Scan(&a.id, &ver, &body)
+	var cur sql.NullInt64
+	err := tx.QueryRowContext(ctx, `SELECT id, current_prompt_id FROM agents WHERE key=$1 FOR UPDATE`, key).Scan(&a.id, &cur)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, rsiConflict("agent %q does not exist", key)
 	}
 	if err != nil {
 		return nil, err
 	}
-	a.state = RSIPromptState{Version: int(ver.Int64), Body: body.String, Stored: ver.Valid}
+	if cur.Valid {
+		if err := tx.QueryRowContext(ctx, `SELECT version, template_text FROM agent_prompts WHERE id=$1`, cur.Int64).
+			Scan(&a.state.Version, &a.state.Body); err != nil {
+			return nil, err
+		}
+		a.state.Stored = true
+	}
 	return &a, nil
 }
 
@@ -45,7 +50,8 @@ func lockAgentPrompt(ctx context.Context, tx *sql.Tx, key string) (*lockedAgent,
 // prompt (stale evidence). For lessons it moves each one from candidate to
 // adopted. The proposal row, the prompt or lesson change and the log row
 // commit together.
-func (d *DB) AdoptRSIProposal(ctx context.Context, id, evidenceID int64, actor string, checkLive func(RSIPromptState) error) (*RSIProposal, error) {
+func (d *DB) AdoptRSIProposal(ctx context.Context, id, evidenceID int64, actor string, checkLive func(RSIPromptState) error,
+	checkLessons func([]Lesson) error) (*RSIProposal, error) {
 	var out *RSIProposal
 	err := d.rsiTx(ctx, func(tx *sql.Tx) error {
 		p, err := lockRSIProposal(ctx, tx, id)
@@ -97,6 +103,25 @@ func (d *DB) AdoptRSIProposal(ctx context.Context, id, evidenceID int64, actor s
 			}
 			detail["agent"], detail["prompt_version_before"], detail["prompt_version_after"] = p.Target, before, ver
 		case "lesson":
+			// Lock the lessons, then let the caller compare what they render to
+			// now with what the benchmark ran.
+			if _, err := tx.ExecContext(ctx, `SELECT 1 FROM rsi_lessons WHERE id = ANY($1::bigint[]) FOR UPDATE`, nonNilIDs(p.LessonIDs)); err != nil {
+				return err
+			}
+			lrows, err := tx.QueryContext(ctx, `SELECT `+lessonSelectCols+`
+				FROM rsi_lessons l WHERE l.id = ANY($1::bigint[]) AND l.status <> 'retired' ORDER BY l.id`, nonNilIDs(p.LessonIDs))
+			if err != nil {
+				return err
+			}
+			current, err := scanLessons(lrows)
+			if err != nil {
+				return err
+			}
+			if checkLessons != nil {
+				if err := checkLessons(current); err != nil {
+					return err
+				}
+			}
 			res, err := tx.ExecContext(ctx, `UPDATE rsi_lessons SET status='adopted', updated_at=now()
 				WHERE id = ANY($1::bigint[]) AND status='candidate'`, nonNilIDs(p.LessonIDs))
 			if err != nil {

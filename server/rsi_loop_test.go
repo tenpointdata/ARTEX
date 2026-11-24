@@ -90,7 +90,7 @@ func rsiArm(role string, sha map[string]string, runs map[string][]string, tasks 
 				"gates": map[string]bool{"component": ok, "class": ok, "keywords": ok, "proof": ok}})
 		}
 		records = append(records, map[string]any{"target": target, "replicate": 0, "run_id": fmt.Sprint(role, target),
-			"payload": map[string]any{"task_status": "done", "verdicts": verdicts, "task": map[string]any{"id": tasks[i]}}})
+			"payload": map[string]any{"task_status": "done", "verdicts": verdicts, "task": map[string]any{"id": strconv.FormatInt(tasks[i], 10)}}})
 		i++
 	}
 	return map[string]any{"stamp": stamp, "records": records}
@@ -147,6 +147,11 @@ func TestRSIGateEndToEndPG(t *testing.T) {
 	if code, _ := h.call("POST", "/api/rsi/proposals", map[string]any{"round": 0, "surface": "tool_allowlist", "body": "x", "rationale": "r"}); code != 400 {
 		t.Fatalf("immutable surface: status %d", code)
 	}
+	assembled := map[string]any{"round": 0, "surface": "prompt_body", "target": "planner",
+		"body": liveBody + "\nARTEX_{{/* */}}DATA", "rationale": "r"}
+	if code, out := h.call("POST", "/api/rsi/proposals", assembled); code != 400 {
+		t.Fatalf("template-assembled marker: %d %v", code, out)
+	}
 	code, out := h.call("POST", "/api/rsi/proposals", proposal)
 	if code != 201 {
 		t.Fatalf("propose: %d %v", code, out)
@@ -164,23 +169,45 @@ func TestRSIGateEndToEndPG(t *testing.T) {
 		tasks = append(tasks, id)
 		defer func() { _ = m.pg.DeleteTask(id) }()
 	}
-	sha := map[string]string{"goals": "g0", "planner": rsi.SHA16(liveBody), "worker": "w0"}
-	candSHA := map[string]string{"goals": "g0", "planner": rsi.SHA16(body), "worker": "w0"}
+	g0, w0 := rsiLiveSHA(m.pg, "goals"), rsiLiveSHA(m.pg, "worker")
+	sha := map[string]string{"goals": g0, "planner": rsi.SHA16(liveBody), "worker": w0}
+	candSHA := map[string]string{"goals": g0, "planner": rsi.SHA16(body), "worker": w0}
 	baseArm := rsiArm("baseline", sha, map[string][]string{"B": {"GT-1"}}, tasks[:3])
-	candArm := rsiArm("candidate", candSHA, map[string][]string{"A": {"GT-1"}, "B": {"GT-1", "GT-2"}}, tasks[3:])
+	candArm := rsiArm("candidate", candSHA, map[string][]string{"A": {"GT-1"}, "B": {"GT-1", "GT-2"}}, tasks[3:6])
 
-	// A forged candidate (other body) fails the gate.
-	forged := rsiArm("candidate", sha, map[string][]string{"A": {"GT-1"}, "B": {"GT-1", "GT-2"}}, tasks[3:])
-	code, out = h.call("POST", base+"/evidence", map[string]any{"baseline": baseArm, "candidate": forged})
-	if code != 200 || out["evidence"].(map[string]any)["passed"] != false {
-		t.Fatalf("forged evidence: %d %v", code, out)
-	}
 	code, out = h.call("POST", base+"/evidence", map[string]any{"baseline": baseArm, "candidate": candArm})
 	ev := out["evidence"].(map[string]any)
 	if code != 200 || ev["passed"] != true {
 		t.Fatalf("evidence: %d %v", code, out)
 	}
 	evID := ev["id"]
+	// The same runs cannot back a second upload (task ledger).
+	if code, out := h.call("POST", base+"/evidence", map[string]any{"baseline": baseArm, "candidate": candArm}); code != 200 ||
+		out["evidence"].(map[string]any)["passed"] != false {
+		t.Fatalf("replayed evidence: %d %v", code, out)
+	}
+	// The replay is now the newest evidence; only a fresh passing upload re-opens adoption.
+	var fresh []int64
+	for i := 0; i < 6; i++ {
+		task, err := m.CreateTask("rsi", "goal", nil, 0, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		id, _ := strconv.ParseInt(task.ID, 10, 64)
+		fresh = append(fresh, id)
+		defer func() { _ = m.pg.DeleteTask(id) }()
+	}
+	baseArm = rsiArm("baseline", sha, map[string][]string{"B": {"GT-1"}}, fresh[:3])
+	candArm = rsiArm("candidate", candSHA, map[string][]string{"A": {"GT-1"}, "B": {"GT-1", "GT-2"}}, fresh[3:])
+	code, out = h.call("POST", base+"/evidence", map[string]any{"baseline": baseArm, "candidate": candArm})
+	if ev = out["evidence"].(map[string]any); code != 200 || ev["passed"] != true {
+		t.Fatalf("fresh evidence: %d %v", code, out)
+	}
+	evID = ev["id"]
+	// A fourth upload is over the per-proposal cap.
+	if code, _ := h.call("POST", base+"/evidence", map[string]any{"baseline": baseArm, "candidate": candArm}); code != 409 {
+		t.Fatalf("upload cap: %d", code)
+	}
 
 	// Adoption needs the owner password; the loop's bearer token is not enough.
 	for _, pw := range []string{"", "wrong"} {
@@ -218,7 +245,7 @@ func TestRSIGateEndToEndPG(t *testing.T) {
 		t.Fatal("rollback did not restore the previous prompt")
 	}
 	code, out = h.call("GET", base, nil)
-	if code != 200 || len(out["log"].([]any)) != 5 {
+	if code != 200 || len(out["log"].([]any)) != 6 {
 		t.Fatalf("log: %d %v", code, out["log"])
 	}
 }

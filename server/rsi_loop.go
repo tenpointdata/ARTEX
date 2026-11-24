@@ -42,7 +42,17 @@ var rsiForbiddenMarkers = []string{
 	"## Prior evidence from earlier tasks", // lesson block header (db.RenderLessons)
 	"ARTEX_DATA",                           // data envelope marker stem
 	"Data envelope (code-owned)",
+	"Extra duty: register the test asset scope", // goals scope tail (agent/goals.go)
+	"[Noise profile: ",                          // noise profile tail (agent/noise_profile.go)
 }
+
+const (
+	// rsiMaxOpen caps proposals that are open at once (proposed, passed, failed).
+	rsiMaxOpen = 4
+	// rsiMaxEvidenceUploads caps evidence uploads per proposal, so a proposal
+	// cannot be re-run until a noisy pass appears.
+	rsiMaxEvidenceUploads = 3
+)
 
 func (s *Server) rsiRequireLoop(w http.ResponseWriter) bool {
 	if !rsiLoopOn() {
@@ -142,6 +152,16 @@ func (s *Server) rsiCreateProposal(w http.ResponseWriter, r *http.Request) {
 			writeErr(w, 400, bad)
 			return
 		}
+		// Template actions can assemble a marker from pieces: check the rendering too.
+		rendered, err := renderPrompt(edit.Body, withGlobalVars(vars), nil)
+		if err != nil {
+			writeErr(w, 400, "template does not render: "+err.Error())
+			return
+		}
+		if err := rsi.CheckMarkers(rendered, rsiForbiddenMarkers); err != nil {
+			writeErr(w, 400, "rendered body: "+err.Error())
+			return
+		}
 	case rsi.SurfaceLesson:
 		lessons, err := pg.LessonsByIDs(r.Context(), edit.LessonIDs)
 		if err != nil {
@@ -165,7 +185,7 @@ func (s *Server) rsiCreateProposal(w http.ResponseWriter, r *http.Request) {
 	if edit.Surface == rsi.SurfacePromptBody {
 		p.BodySHA = rsi.SHA16(edit.Body)
 	}
-	out, err := pg.CreateRSIProposal(r.Context(), p, rsi.DefaultBudget.Edits)
+	out, err := pg.CreateRSIProposal(r.Context(), p, rsi.DefaultBudget.Edits, rsiMaxOpen)
 	if err != nil {
 		rsiWriteErr(w, "create proposal", err)
 		return
@@ -273,12 +293,12 @@ func (s *Server) rsiAddEvidence(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if len(bad) > 0 {
-			v.Reasons = append(v.Reasons, fmt.Sprintf("tasks %v are unknown here or older than the proposal", bad))
+			v.Reasons = append(v.Reasons, fmt.Sprintf("tasks %v are unknown here, older than the proposal, or already back other evidence", bad))
 			v.Passed = false
 		}
 	}
 	vj, _ := json.Marshal(v)
-	ev, err := pg.AddRSIEvidence(r.Context(), id, v.Passed, vj, req.Baseline, req.Candidate, s.rsiActor(r))
+	ev, err := pg.AddRSIEvidence(r.Context(), id, v.Passed, vj, req.Baseline, req.Candidate, v.TaskIDs, rsiMaxEvidenceUploads, s.rsiActor(r))
 	if err != nil {
 		rsiWriteErr(w, "store evidence", err)
 		return
@@ -333,19 +353,40 @@ func (s *Server) rsiAdopt(w http.ResponseWriter, r *http.Request) {
 		rsiWriteErr(w, "get proposal", err)
 		return
 	}
-	baselineSHA, err := rsiEvidenceBaselineSHA(pg, r, ev, req.EvidenceID, p.Target)
+	arms, err := rsiEvidenceArms(pg, r, ev, req.EvidenceID)
 	if err != nil {
 		rsiWriteErr(w, "read evidence", err)
 		return
+	}
+	// Roles the proposal does not edit must still run what the suite ran.
+	for _, role := range rsi.PromptRoles {
+		if role == p.Target {
+			continue
+		}
+		if live := rsiLiveSHA(pg, role); live != arms[0].Stamp.PromptSHA[role] {
+			writeErr(w, 409, fmt.Sprintf("%s changed since the suite ran (%s, evidence %s); re-run the suite",
+				role, live, arms[0].Stamp.PromptSHA[role]))
+			return
+		}
 	}
 	out, err := pg.AdoptRSIProposal(r.Context(), id, req.EvidenceID, s.rsiActor(r), func(live db.RSIPromptState) error {
 		body := live.Body
 		if !live.Stored {
 			body = agent.BuiltinPromptSeeds()[p.Target]
 		}
-		if rsi.SHA16(body) != baselineSHA {
+		want := arms[0].Stamp.PromptSHA[p.Target]
+		if rsi.SHA16(body) != want {
 			return fmt.Errorf("%w: the evidence baseline ran %s body %s, but %s is live now; re-run the suite",
-				db.ErrRSIConflict, p.Target, baselineSHA, rsi.SHA16(body))
+				db.ErrRSIConflict, p.Target, want, rsi.SHA16(body))
+		}
+		return nil
+	}, func(current []db.Lesson) error {
+		// The lessons must render now to the block the candidate arm ran.
+		block, rendered := db.RenderLessons(current, 1800)
+		want, _ := arms[1].Stamp.Raw["lessons_block_sha"].(string)
+		if len(rendered) != len(p.LessonIDs) || block == "" || rsi.SHA16(block) != want {
+			return fmt.Errorf("%w: the lessons changed since the suite ran (block %s, evidence %s); re-run the suite",
+				db.ErrRSIConflict, rsi.SHA16(block), want)
 		}
 		return nil
 	})
@@ -357,26 +398,37 @@ func (s *Server) rsiAdopt(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]any{"proposal": out})
 }
 
-// rsiEvidenceBaselineSHA returns the baseline arm's prompt sha for role from
-// the stored evidence row (empty for lesson proposals, which do not check it).
-func rsiEvidenceBaselineSHA(pg *db.DB, r *http.Request, ev []db.RSIEvidence, evidenceID int64, role string) (string, error) {
-	if role == "" {
-		return "", nil
-	}
+// rsiEvidenceArms returns the [baseline, candidate] arms of one evidence row of
+// this proposal.
+func rsiEvidenceArms(pg *db.DB, r *http.Request, ev []db.RSIEvidence, evidenceID int64) ([2]rsi.ArmResult, error) {
+	var out [2]rsi.ArmResult
 	for _, e := range ev {
-		if e.ID == evidenceID {
-			base, err := pg.RSIEvidenceBaseline(r.Context(), evidenceID)
-			if err != nil {
-				return "", err
-			}
-			var arm rsi.ArmResult
-			if err := json.Unmarshal(base, &arm); err != nil {
-				return "", err
-			}
-			return arm.Stamp.PromptSHA[role], nil
+		if e.ID != evidenceID {
+			continue
 		}
+		base, cand, err := pg.RSIEvidenceArms(r.Context(), evidenceID)
+		if err != nil {
+			return out, err
+		}
+		if err := json.Unmarshal(base, &out[0]); err != nil {
+			return out, err
+		}
+		return out, json.Unmarshal(cand, &out[1])
 	}
-	return "", fmt.Errorf("%w: evidence %d does not belong to this proposal", db.ErrRSIConflict, evidenceID)
+	return out, fmt.Errorf("%w: evidence %d does not belong to this proposal", db.ErrRSIConflict, evidenceID)
+}
+
+// rsiLiveSHA is the sha of the body role runs now (its stored prompt, else the
+// built-in default), the value the harness stamps.
+func rsiLiveSHA(pg *db.DB, role string) string {
+	body := ""
+	if a, err := pg.GetAgentByKey(role); err == nil && a != nil {
+		body, _ = pg.CurrentPrompt(a.ID)
+	}
+	if body == "" {
+		body = agent.BuiltinPromptSeeds()[role]
+	}
+	return rsi.SHA16(body)
 }
 
 func (s *Server) rsiReasonAction(w http.ResponseWriter, r *http.Request, op string,

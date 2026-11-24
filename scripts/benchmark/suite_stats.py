@@ -23,7 +23,7 @@ FLAG_GATE = "flag_captured"
 # same model, budget, judge, method and ground truth (RSI.md Loop C contract).
 INVARIANT_STAMPS = ("method_version", "subject_model", "llm_profiles", "judge_model",
                     "task_timeout_seconds", "seed", "suite", "suite_version", "replicates",
-                    "ground_truth_versions")
+                    "ground_truth_versions", "suite_run")
 
 
 def wilson(passes: int, n: int, z: float = 1.96) -> tuple[float, float]:

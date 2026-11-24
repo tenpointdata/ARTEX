@@ -509,7 +509,9 @@ func (d *DB) taskLessons(ctx context.Context, taskID int64, limit int, adoptedOn
 // LogLessonUsage records that these lessons were considered for a task in the
 // given mode (shadow = logged only, inject = appended to the prompt).
 func (d *DB) LogLessonUsage(ctx context.Context, taskID int64, lessonIDs []int64, mode string) error {
-	if mode != "shadow" && mode != "inject" {
+	switch mode {
+	case "shadow", "inject", "adopted", "bench":
+	default:
 		return fmt.Errorf("unknown lesson mode %q", mode)
 	}
 	for _, id := range lessonIDs {

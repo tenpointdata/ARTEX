@@ -112,8 +112,10 @@ func Evaluate(base, cand ArmResult, b Binding, p Policy) Verdict {
 				v.Runs[i][1]++
 				continue
 			}
-			judged++
-			id := r.Payload.Task.ID
+			if len(r.observations()) > 0 {
+				judged++
+			}
+			id := int64(r.Payload.Task.ID)
 			if id <= 0 {
 				fail("run %s has no task id", r.RunID)
 			} else if tasks[id] {
@@ -125,7 +127,7 @@ func Evaluate(base, cand ArmResult, b Binding, p Policy) Verdict {
 		}
 		role := [2]string{"baseline", "candidate"}[i]
 		if judged < p.MinJudgedRunsPerArm {
-			fail("%s has %d completed runs, need %d", role, judged, p.MinJudgedRunsPerArm)
+			fail("%s has %d completed runs with observations, need %d", role, judged, p.MinJudgedRunsPerArm)
 		}
 		if att := v.Runs[i][0]; att > 0 && float64(v.Runs[i][1])/float64(att) > p.MaxFailedFraction {
 			fail("%s failed %d of %d runs, over the %.0f%% limit", role, v.Runs[i][1], att, p.MaxFailedFraction*100)
@@ -183,6 +185,17 @@ func checkBinding(base, cand Stamp, edit Edit, fail func(string, ...any)) {
 	}
 }
 
+// failedRuns are the (target, replicate) runs of an arm that produced no payload.
+func failedRuns(arm ArmResult) map[[2]string]bool {
+	out := map[[2]string]bool{}
+	for _, r := range arm.Records {
+		if r.Payload == nil {
+			out[[2]string{r.Target, fmt.Sprint(r.Replicate)}] = true
+		}
+	}
+	return out
+}
+
 func index(arm ArmResult) map[pairKey]bool {
 	out := map[pairKey]bool{}
 	for _, r := range arm.Records {
@@ -219,10 +232,16 @@ func paired(v *Verdict, base, cand ArmResult, fail func(string, ...any), p Polic
 	net := map[string]int{}                // per target, over all gates
 	lostAt := map[string]map[string]bool{} // gate -> targets with a lost pair
 	pairs := 0
+	candFailed := failedRuns(cand)
 	for k, bp := range bi {
 		cp, ok := ci[k]
 		if !ok {
-			continue
+			// A candidate run that crashed where the baseline ran is not
+			// dropped: what the baseline passed there counts as lost.
+			if !candFailed[[2]string{k.target, fmt.Sprint(k.replicate)}] {
+				continue
+			}
+			cp = false
 		}
 		pairs++
 		g := gateOf(k.obs)

@@ -71,8 +71,12 @@ password + newest passing evidence id + evidence baseline equal to the live prom
 with the flag off). `ARTEX_RSI_LESSONS` gains `adopted` (only graduated lessons) and `bench` (a
 pinned set, `PUT /api/rsi/bench-lessons`). This branch merges the unmerged E8 suite branch
 (`ej/20261124-084655-ccdab2`); harness gains lesson arms and `scripts/benchmark/rsi_submit.py`.
-Verified: `go test ./rsi`, the RSI DB and server tests against Postgres 16, 65 benchmark Python
-tests, `scripts/verify.sh`. Not verified: any live suite run through the gate (`c-772190`); no UI
+An adversarial review (opus) found real-upload breakage (string task ids) and replay/forgery
+paths; fixed here: task ledger across proposals, `suite_run` invariant, 3 uploads per proposal,
+crashed candidate runs count as losses, rendered + normalized marker checks, ≤4 open proposals
+with forward-only rounds, split agent lock, lesson block sha and unedited-role shas re-checked at
+adoption. Remaining findings: `c-0d277f`. Verified: `go test ./rsi`, the RSI DB and server tests
+against Postgres 16, 65 benchmark Python tests, `scripts/verify.sh`. Not verified: any live suite run through the gate (`c-772190`); no UI
 (`c-936308`).
 
 **2026-11-24 (c-75c593)** — The benchmark subject instance (`docker-compose.bench.yml`) now builds from a
@@ -208,6 +212,8 @@ body, through the versioned prompt API, and the starting bodies are restored aft
    coverage against a codified methodology checklist, not only asset touch. Done = planner can
    read a methodology and the coverage graph shows checklist completion.
 
+- *(unclaimed)* — **RSI gate hardening** (M), card `c-0d277f`: server-side per-task arm ledger, suite
+  pre-registration, adopted-lesson retire sync. Done = Postgres tests for each.
 - *(unclaimed)* — **RSI gate web UI** (M), card `c-936308`. Done = adopt/rollback from a proposals table in ≤2 clicks + password.
 
 **Human lane**
@@ -255,7 +261,7 @@ Card ids in brackets:
 
 - **E1** [`c-8f9cca`] Client-grade reporting & deliverables (scoring, remediation, framework mappings, branded export).
 - **E2** [`c-6def05`] Finding/ticketing integrations out (Jira, GitHub issues, DefectDojo) and more ingest in (Nuclei, Nmap, ZAP/Burp, Semgrep).
-- **E3** [`c-d25ff9`] — gate built (in review). Follow-ups: UI `c-936308`, first live run `c-772190`, proposer/critic `c-c89f5b`.
+- **E3** [`c-d25ff9`] — gate built (in review). Follow-ups: hardening `c-0d277f`, UI `c-936308`, first live run `c-772190`, proposer/critic `c-c89f5b`.
 - **E4** [`c-c0bb07`] Methodology-driven coverage (OWASP WSTG / API Top 10 as structured checklists).
 - **E5** [`c-669406`] Engagement lifecycle & governance: RBAC, per-engagement authorization artifact, scope expiry, tamper-evident (hash-chained) audit log.
 - **E6** [`c-cb0093`] Cost/observability dashboard + OpenTelemetry export, building on existing context telemetry.
@@ -328,7 +334,10 @@ Card ids in brackets:
   sha) so a stale comparison cannot be adopted. Rollback and reject stay open with the flag off; only
   propose/evidence/adopt need it. Skills and tool descriptions stay git-PR-only. Lesson graduation uses
   the same gate via a scope-free benchmark pin (`ARTEX_RSI_LESSONS=bench`), and the new `adopted` mode
-  injects only graduated lessons; `inject` is unchanged. Budget 4·0.6^round (floor 1), rounds forward-only.
+  injects only graduated lessons; `inject` is unchanged. Budget 4·0.6^round (floor 1), rounds forward-only
+  one step at a time, ≤4 open proposals. Reject and rollback need only a session (they return toward the
+  owner-approved prior state; open question in `c-0d277f`). Failing uploads also consume their tasks in
+  the ledger, so a run never backs two uploads.
 
 - **2026-11-24** — c-75c593: the bench subject instance builds from the production `Dockerfile` instead
   of a separate `Dockerfile.bench`, so the benchmark measures the shipped image and there is one image

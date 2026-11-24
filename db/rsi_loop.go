@@ -129,23 +129,32 @@ func setRSIStatusTx(ctx context.Context, tx *sql.Tx, id int64, status string) er
 }
 
 // CreateRSIProposal stores a validated proposal if its round still has budget.
-// budget maps a round to its edit allowance. Rounds only move forward: a
-// proposal for a round older than the newest one is refused, so revisiting an
-// early, larger round cannot reset the annealing.
-func (d *DB) CreateRSIProposal(ctx context.Context, p RSIProposal, budget func(round int) int) (*RSIProposal, error) {
+// budget maps a round to its edit allowance. Rounds only move forward, one at
+// a time: a round older than the newest is closed (revisiting an early, larger
+// round cannot reset the annealing) and the next round is at most newest+1.
+// At most maxOpen proposals may be open (proposed, passed or failed) at once,
+// so stepping through rounds cannot pile up unbounded work.
+func (d *DB) CreateRSIProposal(ctx context.Context, p RSIProposal, budget func(round int) int, maxOpen int) (*RSIProposal, error) {
 	var out *RSIProposal
 	err := d.rsiTx(ctx, func(tx *sql.Tx) error {
 		if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock($1)`, rsiLockKey); err != nil {
 			return err
 		}
 		var maxRound sql.NullInt64
-		var used int
-		if err := tx.QueryRowContext(ctx, `SELECT max(round), count(*) FILTER (WHERE round=$1) FROM rsi_proposals`,
-			p.Round).Scan(&maxRound, &used); err != nil {
+		var used, open int
+		if err := tx.QueryRowContext(ctx, `SELECT max(round), count(*) FILTER (WHERE round=$1),
+			count(*) FILTER (WHERE status IN ('proposed','passed','failed')) FROM rsi_proposals`,
+			p.Round).Scan(&maxRound, &used, &open); err != nil {
 			return err
 		}
 		if maxRound.Valid && int64(p.Round) < maxRound.Int64 {
 			return rsiConflict("round %d is closed; the newest round is %d", p.Round, maxRound.Int64)
+		}
+		if next := maxRound.Int64 + 1; (maxRound.Valid && int64(p.Round) > next) || (!maxRound.Valid && p.Round != 0) {
+			return rsiConflict("round %d skips ahead; the next round is %d", p.Round, map[bool]int64{true: next, false: 0}[maxRound.Valid])
+		}
+		if open >= maxOpen {
+			return rsiConflict("%d proposals are open (cap %d); adopt, reject or close one first", open, maxOpen)
 		}
 		if allowed := budget(p.Round); used >= allowed {
 			return rsiConflict("round %d has used its edit budget (%d of %d)", p.Round, used, allowed)
@@ -247,12 +256,14 @@ func (d *DB) RSILog(ctx context.Context, proposalID int64, limit int) ([]RSILogE
 }
 
 // RSIEvidenceTasksInvalid returns the task ids among ids that do not exist,
-// are deleted, or were created before since (evidence must be fresh runs made
-// after the proposal, not tasks picked from history).
+// are deleted, were created before since (evidence must be fresh runs made
+// after the proposal, not tasks picked from history), or already back other
+// evidence (the ledger).
 func (d *DB) RSIEvidenceTasksInvalid(ctx context.Context, ids []int64, since time.Time) ([]int64, error) {
 	rows, err := d.QueryContext(ctx, `
 		SELECT x FROM unnest($1::bigint[]) AS x
 		WHERE NOT EXISTS (SELECT 1 FROM tasks t WHERE t.id=x AND t.deleted_at IS NULL AND t.created_at >= $2)
+		   OR EXISTS (SELECT 1 FROM rsi_evidence_tasks l WHERE l.task_id=x)
 		ORDER BY x`, nonNilIDs(ids), since)
 	if err != nil {
 		return nil, err
@@ -271,8 +282,11 @@ func (d *DB) RSIEvidenceTasksInvalid(ctx context.Context, ids []int64, since tim
 
 // AddRSIEvidence stores a comparison and the server's verdict, and moves the
 // proposal to passed or failed. Adopted, rejected and rolled-back proposals
-// take no more evidence.
-func (d *DB) AddRSIEvidence(ctx context.Context, proposalID int64, passed bool, verdict, baseline, candidate []byte, actor string) (*RSIEvidence, error) {
+// take no more evidence, and a proposal takes at most maxUploads. The run
+// tasks enter the ledger, so none of them can back other evidence; passing
+// evidence whose tasks are already in the ledger is refused.
+func (d *DB) AddRSIEvidence(ctx context.Context, proposalID int64, passed bool, verdict, baseline, candidate []byte,
+	taskIDs []int64, maxUploads int, actor string) (*RSIEvidence, error) {
 	var out RSIEvidence
 	err := d.rsiTx(ctx, func(tx *sql.Tx) error {
 		p, err := lockRSIProposal(ctx, tx, proposalID)
@@ -284,11 +298,26 @@ func (d *DB) AddRSIEvidence(ctx context.Context, proposalID int64, passed bool, 
 		default:
 			return rsiConflict("proposal %d is %s and takes no more evidence", p.ID, p.Status)
 		}
+		var uploads int
+		if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM rsi_proposal_evidence WHERE proposal_id=$1`, proposalID).Scan(&uploads); err != nil {
+			return err
+		}
+		if uploads >= maxUploads {
+			return rsiConflict("proposal %d already has %d evidence uploads (cap %d); propose again in a new round", p.ID, uploads, maxUploads)
+		}
 		if err := tx.QueryRowContext(ctx, `INSERT INTO rsi_proposal_evidence(proposal_id,passed,verdict,baseline,candidate)
 			VALUES($1,$2,$3,$4,$5) RETURNING id, proposal_id, passed, verdict, created_at`,
 			proposalID, passed, verdict, baseline, candidate).
 			Scan(&out.ID, &out.ProposalID, &out.Passed, &out.Verdict, &out.CreatedAt); err != nil {
 			return err
+		}
+		res, err := tx.ExecContext(ctx, `INSERT INTO rsi_evidence_tasks(task_id, evidence_id)
+			SELECT x, $2 FROM unnest($1::bigint[]) AS x ON CONFLICT DO NOTHING`, nonNilIDs(taskIDs), out.ID)
+		if err != nil {
+			return err
+		}
+		if n, _ := res.RowsAffected(); passed && int(n) != len(taskIDs) {
+			return rsiConflict("a run task already backs other evidence")
 		}
 		status := "failed"
 		if passed {
@@ -329,12 +358,12 @@ func nonNilIDs(ids []int64) []int64 {
 	return ids
 }
 
-// RSIEvidenceBaseline returns the stored baseline arm file of one evidence row.
-func (d *DB) RSIEvidenceBaseline(ctx context.Context, evidenceID int64) ([]byte, error) {
-	var b []byte
-	err := d.QueryRowContext(ctx, `SELECT baseline FROM rsi_proposal_evidence WHERE id=$1`, evidenceID).Scan(&b)
+// RSIEvidenceArms returns the stored baseline and candidate arm files of one
+// evidence row.
+func (d *DB) RSIEvidenceArms(ctx context.Context, evidenceID int64) (baseline, candidate []byte, err error) {
+	err = d.QueryRowContext(ctx, `SELECT baseline, candidate FROM rsi_proposal_evidence WHERE id=$1`, evidenceID).Scan(&baseline, &candidate)
 	if errors.Is(err, sql.ErrNoRows) {
-		return nil, ErrRSINotFound
+		return nil, nil, ErrRSINotFound
 	}
-	return b, err
+	return baseline, candidate, err
 }
