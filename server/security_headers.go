@@ -20,7 +20,8 @@ func (s *Server) securityHeaders(next http.Handler) http.Handler {
 		h.Set("Referrer-Policy", "same-origin")
 		// The API is JSON, but a proxied error page must still not be framed.
 		h.Set("X-Frame-Options", "SAMEORIGIN")
-		h.Set("Content-Security-Policy", "frame-ancestors 'self'")
+		// Locked down for API replies; consoleHeaders replaces it on documents.
+		h.Set("Content-Security-Policy", apiCSP)
 		if s.isHTTPS(r) {
 			// Ignored by browsers over plain HTTP, so it only takes effect behind
 			// the TLS-terminating proxy this deployment is documented to use.
@@ -38,6 +39,9 @@ func consoleHeaders(h http.Header) {
 	// Separate the console's browsing context from the tabs it opens.
 	h.Set("Cross-Origin-Opener-Policy", "same-origin")
 	h.Set("Cross-Origin-Resource-Policy", "same-origin")
+	// Baseline document policy: same-origin scripts only. HTML documents get their
+	// own inline-script hashes added when served (see webuiHandler / cspForHTML).
+	h.Set("Content-Security-Policy", consoleCSP(nil))
 }
 
 // isHTTPS reports whether the request reached us over TLS, either directly or

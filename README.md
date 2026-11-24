@@ -229,7 +229,12 @@ worker remains confined to the intent it claimed.
   - Use the site normally; text requests/responses are batched to `POST /api/traffic/ingest`
     (authenticated). Binary bodies (images, fonts) are skipped, bodies are truncated at 256 KiB,
     batches are capped at 50 entries;
-  - Press **Stop** when done. Everything stays in your local traffic store.
+  - Press **Stop** when done. Everything stays in your local traffic store;
+  - Permissions: the extension asks Chrome only for access to your ARTEX server (needed to upload),
+    on the first **Start capture**; it has no access to the sites you browse beyond the
+    debugger on the tab you start. Sign-in provider hosts (Google, Microsoft, Okta, Auth0,
+    OneLogin, Duo, Apple, Live; edit the list in the popup) are never captured, including the
+    pages' own subresources, so their cookies and tokens never reach ARTEX.
 
   </details>
 - **Verified findings**: findings carry a POE level, a verification status and a note; a finding is

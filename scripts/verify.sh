@@ -143,6 +143,8 @@ if want_web; then
   run_step "web replay tests" bash -c 'cd web && npm run test:replay'
   run_step "web upload tests" bash -c 'cd web && npm run test:upload'
   run_step "web traffic stream tests" bash -c 'cd web && npm run test:traffic-stream'
+  run_step "web markdown image tests" bash -c 'cd web && npm run test:markdown-image'
+  run_step "extension host skip-list tests" node --test extension/hosts.test.mjs
   if [ "$FULL" -eq 1 ]; then
     run_step "web static build" bash -c 'cd web && npm run build:static'
   fi

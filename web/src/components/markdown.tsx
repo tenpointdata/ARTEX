@@ -2,6 +2,8 @@
 
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { t } from "@/i18n";
+import { classifyMarkdownImage } from "@/lib/markdown-image";
 
 // Tailwind-styled element overrides (no typography plugin in this project, so we
 // style each element). `node` is stripped — it's not a valid DOM attribute.
@@ -17,6 +19,32 @@ const components: Components = {
   a: ({ node, ...p }) => (
     <a className="text-primary underline underline-offset-2" target="_blank" rel="noreferrer" {...p} />
   ),
+  // Remote images never auto-load (see lib/markdown-image.ts): the operator gets a
+  // link to open on purpose instead of a silent request to an attacker's server.
+  img: ({ src, alt }) => {
+    // No `window` while the static export prerenders; relative srcs then resolve against a placeholder.
+    const origin = typeof window === "undefined" ? "http://localhost" : window.location.origin;
+    const image = classifyMarkdownImage(typeof src === "string" ? src : undefined, origin);
+    if (image.kind === "inline") {
+      // biome-ignore lint/performance/noImgElement: arbitrary same-origin Markdown image; the static export has no image optimizer
+      return <img src={image.src} alt={alt ?? ""} className="my-1 max-w-full rounded-md" loading="lazy" />;
+    }
+    if (image.kind === "remote") {
+      return (
+        <a
+          className="text-primary underline underline-offset-2"
+          href={image.href}
+          target="_blank"
+          rel="noreferrer noopener"
+          title={image.href}
+        >
+          {t("Remote image blocked ({host}): click to open", { host: image.host })}
+          {alt ? ` — ${alt}` : ""}
+        </a>
+      );
+    }
+    return <span className="text-muted-foreground">{alt ?? ""}</span>;
+  },
   hr: () => <hr className="my-2 border-border" />,
   blockquote: ({ node, ...p }) => (
     <blockquote className="my-1 border-l-2 border-border pl-2.5 text-muted-foreground" {...p} />

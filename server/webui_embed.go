@@ -32,6 +32,14 @@ func (s *Server) webuiHandler() http.Handler {
 	if err != nil {
 		panic(err)
 	}
+	// serve sets the per-document CSP (inline-script hashes) for HTML before
+	// handing the file to serveWebAsset.
+	serve := func(w http.ResponseWriter, r *http.Request, name string, immutable bool) bool {
+		if e, err := loadAsset(root, name); err == nil && strings.HasPrefix(e.ctype, "text/html") {
+			w.Header().Set("Content-Security-Policy", documentCSP(name, e.raw))
+		}
+		return serveWebAsset(w, r, root, name, immutable)
+	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		p := strings.TrimPrefix(path.Clean(r.URL.Path), "/")
 		if p == "" {
@@ -42,11 +50,11 @@ func (s *Server) webuiHandler() http.Handler {
 		// 3) <p>.html
 		// 4) SPA fallback → index.html (hand it to client-side routing)
 		for _, cand := range []string{p, p + "/index.html", p + ".html"} {
-			if serveWebAsset(w, r, root, cand, webuiImmutable(cand)) {
+			if serve(w, r, cand, webuiImmutable(cand)) {
 				return
 			}
 		}
-		if !serveWebAsset(w, r, root, "index.html", false) {
+		if !serve(w, r, "index.html", false) {
 			http.NotFound(w, r)
 		}
 	})
