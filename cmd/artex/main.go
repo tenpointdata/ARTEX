@@ -248,7 +248,7 @@ func run() int {
 	ctx, shutdown := shutdownContext(sigCtx)
 	defer shutdown(agent.AbortShutdown)
 
-	mgr, err := server.NewManager(*dataDir, *proxy)
+	mgr, err := server.NewManagerForNode(*dataDir, *proxy, node)
 	if err != nil {
 		log.Fatalf("open stores: %v", err)
 	}

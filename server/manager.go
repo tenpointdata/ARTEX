@@ -299,6 +299,11 @@ type Manager struct {
 	tavilyKey        string
 	keenableKey      string
 	webSearchProxy   string
+	// node is this process's role (E7). remoteProxy and remoteCACert are set on
+	// a worker node only: the control node's proxy and its published CA file.
+	node         NodeConfig
+	remoteProxy  *remoteTaskProxy
+	remoteCACert string
 	// globalProxy is the egress proxy all target traffic routes through
 	// (http/https/socks5, optional user:pass). Empty = direct. When traffic
 	// capture is on it becomes the MITM's upstream; when capture is off it is
@@ -405,6 +410,28 @@ func (m *Manager) Enrich() *enrich.Engine { return m.enrich }
 // NewManager connects to PostgreSQL and, if proxyAddr is non-empty, starts the
 // traffic-recording proxy. PostgreSQL is required (it is the single data source).
 func NewManager(dir, proxyAddr string) (*Manager, error) {
+	return NewManagerForNode(dir, proxyAddr, NodeConfig{Role: RoleAll, Workers: -1})
+}
+
+// NewManagerForNode is NewManager for one role of a distributed deployment
+// (E7, docs/DISTRIBUTED.md). A control node lets worker nodes use its
+// recording proxy (scope tokens resolved through the database) and publishes
+// its CA certificate. A worker node starts no proxy of its own: with capture
+// on, its agents' traffic goes through the control node's proxy at
+// node.ControlProxy, and a node that cannot set that up does not start.
+func NewManagerForNode(dir, proxyAddr string, node NodeConfig) (*Manager, error) {
+	m, err := newManager(dir, proxyAddr, node)
+	if err != nil {
+		return nil, err
+	}
+	if err := m.configureNodeProxy(); err != nil {
+		_ = m.Close()
+		return nil, err
+	}
+	return m, nil
+}
+
+func newManager(dir, proxyAddr string, node NodeConfig) (*Manager, error) {
 	cfg, err := config.Load()
 	if err != nil {
 		return nil, err
@@ -566,9 +593,14 @@ func NewManager(dir, proxyAddr string) (*Manager, error) {
 		}
 	}
 	m.enrich = enrich.New(m.assets, m.ProxyAddr, 4)
+	m.node = node
 	// Reconcile the seeded browser MCP with the persisted capture state, so a
 	// restart with capture already on keeps Playwright routed through the proxy.
-	m.syncBrowserMCPProxy()
+	// Not on a worker node: the MCP row is shared, and the worker has no proxy
+	// of its own to write into it.
+	if node.Role != RoleWorker {
+		m.syncBrowserMCPProxy()
+	}
 	return m, nil
 }
 
@@ -904,6 +936,9 @@ func (m *Manager) ProxyAddr() string {
 	if m.traffic != nil && m.TrafficEnabled() {
 		return m.traffic.ProxyAddr()
 	}
+	if m.remoteProxy != nil && m.TrafficEnabled() {
+		return m.remoteProxy.Ended() // worker node: only task-scoped traffic may use the control proxy
+	}
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return m.globalProxy
@@ -919,6 +954,13 @@ func (m *Manager) ProxyAddr() string {
 // loaded gets a URL whose dials are refused: minting it a token again would
 // leave one that nothing frees.
 func (m *Manager) TaskProxyAddr(t *Task) string {
+	if t != nil && m.remoteProxy != nil && m.TrafficEnabled() {
+		n, err := strconv.ParseInt(t.ID, 10, 64)
+		if err != nil {
+			return m.remoteProxy.Ended()
+		}
+		return m.remoteProxy.URL(n)
+	}
 	if t == nil || m.traffic == nil || !m.TrafficEnabled() {
 		return m.ProxyAddr()
 	}
@@ -966,6 +1008,9 @@ func (m *Manager) toolUsesProxy(key string) bool {
 // preserves real target certs, so no custom CA is needed there. Its emptiness is
 // also the worker's "recording off" signal (see workerSystem).
 func (m *Manager) ProxyCACert() string {
+	if m.traffic == nil && m.remoteProxy != nil && m.TrafficEnabled() {
+		return m.remoteCACert
+	}
 	if m.traffic == nil || !m.TrafficEnabled() {
 		return ""
 	}
@@ -1838,6 +1883,15 @@ func (m *Manager) forgetTask(id string, numericID int64) {
 	if m.traffic != nil {
 		m.traffic.ForgetScope(id) // a proxy client still naming the task is refused
 	}
+	if m.node.Role == RoleControl && m.pg != nil {
+		// Worker node tokens: a delete is a soft delete, so the FK cascade does not run.
+		if err := m.pg.ForgetProxyScopeTokens(numericID); err != nil {
+			log.Printf("[traffic] task %s: drop worker node scope tokens: %v", id, err)
+		}
+	}
+	if m.remoteProxy != nil {
+		m.remoteProxy.Forget(numericID)
+	}
 	m.mu.Lock()
 	delete(m.tasks, id)
 	for _, task := range m.tasks {
@@ -1859,6 +1913,9 @@ func (m *Manager) forgetTask(id string, numericID int64) {
 		}
 	}
 	m.mu.Unlock()
+	if m.traffic != nil {
+		m.traffic.ForgetScope(id) // after the unload: a worker token lookup starting now is refused too
+	}
 }
 
 type stagedTaskPath struct {
@@ -2167,4 +2224,34 @@ func (m *Manager) forgetTaskHandle(id string) {
 	m.mu.Lock()
 	delete(m.tasks, id)
 	m.mu.Unlock()
+	if n, err := strconv.ParseInt(id, 10, 64); err == nil && m.remoteProxy != nil {
+		m.remoteProxy.Forget(n)
+	}
+}
+
+// configureNodeProxy sets up the recording-proxy path of this node's role.
+func (m *Manager) configureNodeProxy() error {
+	switch m.node.Role {
+	case RoleControl:
+		if err := m.enableRemoteProxyScopes(); err != nil {
+			return fmt.Errorf("let worker nodes use the recording proxy: %w", err)
+		}
+	case RoleWorker:
+		if m.traffic != nil {
+			return fmt.Errorf("a worker node runs no recording proxy of its own: start it with -proxy \"\"")
+		}
+		if m.node.ControlProxy == "" {
+			return fmt.Errorf("a worker node needs ARTEX_CONTROL_PROXY (the control node's recording proxy, e.g. http://artex-control:8788)")
+		}
+		rp, err := newRemoteTaskProxy(m.pg, m.node.ControlProxy, m.node.NodeID)
+		if err != nil {
+			return fmt.Errorf("ARTEX_CONTROL_PROXY: %w", err)
+		}
+		ca, err := fetchProxyCACert(m.pg, m.dir)
+		if err != nil {
+			return fmt.Errorf("control node CA certificate (start the control node first): %w", err)
+		}
+		m.remoteProxy, m.remoteCACert = rp, ca
+	}
+	return nil
 }

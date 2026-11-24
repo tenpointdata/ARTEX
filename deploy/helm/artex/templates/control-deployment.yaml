@@ -36,7 +36,7 @@ spec:
           envFrom:
             {{- include "artex.envFrom" . | nindent 12 }}
           env:
-            {{- include "artex.sharedEnv" (dict "ctx" . "extra" (merge (dict "ARTEX_ROLE" "control" "ARTEX_LOCAL_WORKERS" (toString .Values.control.localWorkers)) .Values.control.extraEnv)) | nindent 12 }}
+            {{- include "artex.sharedEnv" (dict "ctx" . "extra" (merge (dict "ARTEX_ROLE" "control" "ARTEX_LOCAL_WORKERS" (toString .Values.control.localWorkers) "ARTEX_PROXY_ALLOW_NONLOOPBACK" "1") .Values.control.extraEnv)) | nindent 12 }}
           ports:
             - {name: http, containerPort: 8787}
           startupProbe:

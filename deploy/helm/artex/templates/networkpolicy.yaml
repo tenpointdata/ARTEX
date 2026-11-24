@@ -21,3 +21,29 @@ spec:
         {{- end }}
       {{- end }}
 {{- end }}
+
+{{- if .Values.networkPolicy.enabled }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "artex.fullname" . }}-control
+  labels:
+    {{- include "artex.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "artex.selector" (dict "ctx" . "component" "control") | nindent 6 }}
+  policyTypes: [Ingress]
+  ingress:
+    # UI/API from anywhere the Service or Ingress routes.
+    - ports:
+        - {protocol: TCP, port: 8787}
+    # The recording proxy from worker pods only.
+    - ports:
+        - {protocol: TCP, port: 8788}
+      from:
+        - podSelector:
+            matchLabels:
+              {{- include "artex.selector" (dict "ctx" . "component" "worker") | nindent 14 }}
+{{- end }}

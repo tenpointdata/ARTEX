@@ -966,6 +966,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/settings", s.getSettings)
 	mux.HandleFunc("PUT /api/settings", s.putSettings)
 	mux.HandleFunc("GET /api/settings/noise", s.noiseStatus) // current noise profile + per-host counters (no reset)
+	mux.HandleFunc("GET /api/settings/nodes", s.listNodes)   // control and worker nodes sharing this database (E7)
 	// Vulnerability IM push. Channels are "multi-instance + per-instance filter rules" resources, so they get their own group of
 	// REST endpoints instead of being stuffed into the flat /api/settings key-value store.
 	mux.HandleFunc("GET /api/notify/meta", s.notifyMeta)

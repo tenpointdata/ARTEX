@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"net/http"
 	"os"
 	"strconv"
 	"strings"
@@ -186,4 +187,14 @@ func (s *Server) runNodeHeartbeat(ctx context.Context) {
 			beat(false)
 		}
 	}
+}
+
+// listNodes reports the processes sharing this database (GET /api/settings/nodes).
+func (s *Server) listNodes(w http.ResponseWriter, r *http.Request) {
+	nodes, err := s.m.pg.ListNodes()
+	if err != nil {
+		writeErr(w, 500, err.Error())
+		return
+	}
+	writeJSON(w, 200, map[string]any{"self": s.node.NodeID, "role": s.node.Role, "nodes": nodes})
 }

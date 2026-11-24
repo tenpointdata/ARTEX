@@ -47,15 +47,16 @@ spec:
         - name: artex
           image: {{ include "artex.image" . | quote }}
           imagePullPolicy: {{ .Values.image.pullPolicy }}
-          # The capture proxy is loopback only and never exposed.
-          args: ["-role", "worker", "-proxy", "127.0.0.1:8788", "-health-addr", ":{{ $w.healthPort }}"]
+          # No local capture proxy: tool traffic goes through the control node's
+          # recording proxy (ARTEX_CONTROL_PROXY) with a per-task scope token.
+          args: ["-role", "worker", "-proxy", "", "-health-addr", ":{{ $w.healthPort }}"]
           envFrom:
             {{- include "artex.envFrom" . | nindent 12 }}
           env:
             - name: ARTEX_NODE_ID
               valueFrom:
                 fieldRef: {fieldPath: metadata.name}
-            {{- include "artex.sharedEnv" (dict "ctx" . "extra" (merge (dict "ARTEX_ROLE" "worker" "ARTEX_NODE_WORKERS" (toString $w.concurrency) "ARTEX_HEALTH_ADDR" (printf ":%v" $w.healthPort)) $w.extraEnv)) | nindent 12 }}
+            {{- include "artex.sharedEnv" (dict "ctx" . "extra" (merge (dict "ARTEX_ROLE" "worker" "ARTEX_NODE_WORKERS" (toString $w.concurrency) "ARTEX_HEALTH_ADDR" (printf ":%v" $w.healthPort) "ARTEX_CONTROL_PROXY" (printf "http://%s-control-proxy:8788" (include "artex.fullname" .))) $w.extraEnv)) | nindent 12 }}
           ports:
             - {name: health, containerPort: {{ $w.healthPort }}}
           startupProbe:
