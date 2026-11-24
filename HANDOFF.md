@@ -59,6 +59,27 @@ See `docs/ARCHITECTURE.md` for the code-level map. Summary:
 
 ## Current state
 
+**2026-11-24 — E5 web UI (card `c-869050`, in review)** is on branch `ej/20261124-132958-94f4bf`, which
+merged `ej/20261124-110647-182fa9` (E5 PR #16 + client_read binding), so it carries E5 too.
+- **Session/roles:** `auth.session()` (`web/src/lib/auth.ts`) reads `role`/`permissions` from
+  `GET /api/auth/session`; `SessionProvider`/`useCan` (`web/src/hooks/use-session.tsx`) feed the UI. The
+  sidebar is filtered by permission (`navFor`, `need` on each item). A 403 shows `errorText`
+  (`web/src/lib/api-errors.ts`) and never logs out; only 401 does. The login form takes any username
+  (default `ARTEX`); a `client_read` session lands on Findings, other roles on Tasks.
+- **Pages:** `/system/users` (admin table: inline role/enabled, set password, delete, client company
+  bindings); task detail **Authorization** tab (status badge, version history table, admin-only new-version
+  form and revoke); Approval Records **Chain** tab (filters, paging, entry sheet, Verify with
+  `head_seq`/`head_hash`, `broken_at`, `rows_mismatched`). Client code: `web/src/lib/governance*.ts`.
+- **Verified** in headless Chromium against a real backend + Postgres 17: admin created a user, changed a
+  role, bound a client to a company, added and revoked an authorization, verified the chain; a reviewer saw
+  no Users/edit controls, got 403 on a forced revoke and stayed signed in, and saw "Broken at seq 6" after
+  a superuser edited an entry; a client landed on Findings with no refused calls.
+  `scripts/verify.sh --web-only` (now also runs the governance unit tests and the i18n check) and
+  `npm run build:static` pass. Go was not re-run on this branch (no Go change beyond the merge).
+- **Not done:** existing pages still show controls a reviewer/operator cannot use (`c-92bb52`); a client
+  bound to several companies cannot pick one, and the dashboard is hidden for clients (`c-7c4715`); the
+  chain pages oldest-first only (`c-601ec6`).
+
 **2026-11-24 (c-75c593)** — The benchmark subject instance (`docker-compose.bench.yml`) now builds from a
 clean clone: production `Dockerfile`, a sibling Postgres, named volumes, committed `bench/.env.example`
 with `ARTEX_RSI_LESSONS=off`. Verified on Docker Desktop arm64: `up --build` brings both containers up,
@@ -90,7 +111,7 @@ is tested against Postgres 17 on macOS; see `docs/GOVERNANCE.md`.
   write-then-lock deadlock is gone. 0018 rather than 0017 because the E1 branch
   (`ej/20261124-083744-02fa3c`) takes 0017. Tests: `db/audit_chain_concurrency_test.go` (both
   concurrency tests fail without 0018). This branch merged the E5 branch in, so it carries E5 too.
-- **Not done.** There is no web UI for E5 yet (card `c-869050`). The login page still assumes `ARTEX`.
+- **Web UI:** see the c-869050 entry above.
 
 **2026-11-24 — client_read bound to companies (card `c-5b5421`, in review)** is on branch
 `ej/20261124-110647-182fa9`. That branch merged the E5 branch (PR #16) in, so it carries E5 too.
@@ -206,7 +227,9 @@ the newer main (`-exec-uid-range`, #18).
 **Agents' lane**
 1. *(unclaimed)* — **SEC: per-task uid follow-ups** (S each): `c-12df03` (single-uid start-up fails on a
    socket; MCP uid not egress-filtered), `c-e70e5c` (release ended tasks at start-up; per-key lock). The "Done when" is on each card.
-2. *(unclaimed)* — **E5: web UI for users / authorization / chain / client bindings** (M), card `c-869050`.
+2. *(unclaimed)* — **E5 UI: hide role-lacking actions on existing pages** (M), card `c-92bb52`. Done = as
+   reviewer and operator, no visible control answers 403. Then `c-7c4715` (client_read console: my-companies
+   endpoint and switcher, M) and `c-601ec6` (chain newest-first paging, S).
 3. *(unclaimed)* — **SEC: gorilla/websocket bump, GO-2026-6278** (XS), card `c-c10f2c`; needs network.
    Done = govulncheck clean.
 4. *(unclaimed)* — **SEC: upstream-gate residuals** (M), card `c-5a6f96`: task-scoped rules on proxy
@@ -271,7 +294,8 @@ Card ids in brackets:
 - **E3** [`c-d25ff9`] Loop-B lesson library graduation + Loop-C benchmark gate per the `RSI.md` contract (owner-approval, immutable surfaces).
 - **E4** [`c-c0bb07`] Methodology-driven coverage (OWASP WSTG / API Top 10 as structured checklists).
 - **E5** [`c-669406`] Engagement governance. The backend is done on `ej/20261124-055929-bd2253`. Follow-ups:
-  `c-5b5421` (client binding), `c-869050` (UI), `c-f4115c` (lifecycle gaps).
+  `c-5b5421` (client binding), `c-869050` (UI, in review), `c-f4115c` (lifecycle gaps), `c-92bb52`
+  (role-aware controls on existing pages), `c-7c4715` (client_read console), `c-601ec6` (chain paging).
 - **TEST** [`c-3157b4`] `TestGateOffTaskIsUnchanged` fails on main with Postgres (also fails before E5).
 - **E6** [`c-cb0093`] Cost/observability dashboard + OpenTelemetry export, building on existing context telemetry.
 - **E7** [`c-d60149`] Distributed/remote workers (queue-backed intents) for larger engagements; Helm chart.
@@ -331,6 +355,12 @@ Card ids in brackets:
   `ARTEX_SECRET_KEY`) loses stored secrets.
 
 ## Decisions
+
+- **2026-11-24** — c-869050: the E5 UI branch merges the E5 + client_read branch rather than waiting
+  for PR #16, so the UI is built and browser-tested against the real API; merging it lands E5 too. The
+  governance client lives in `web/src/lib/governance-api.ts` (not `api.ts`, already over 600 lines) and
+  reuses its `http()`. The UI hides by permission only as a convenience; the server's policy stays the
+  enforcement. The Dashboard is hidden for `client_read` because its widgets call operator-wide routes.
 
 - **2026-11-24** — c-75c593: the bench subject instance builds from the production `Dockerfile` instead
   of a separate `Dockerfile.bench`, so the benchmark measures the shipped image and there is one image
