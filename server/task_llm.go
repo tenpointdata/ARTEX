@@ -819,6 +819,7 @@ func (s *Server) agentsForTask(t *Task) *taskAgentBundle {
 	window := workerRuntime.CompactionWindow()
 	wk := agent.NewWorker(workerRuntime, "task-router", s.m.dir, tx, window, s.agentMaxTurns("worker"))
 	wk.SetFindingRecorder(s.evidenceStore())
+	wk.SetTranscriptMirror(s.m.transcriptMirror()) // distributed: resume any intent on any node
 	wk.SetCompactionWindowResolver(workerRuntime.CompactionWindow)
 	wk.SetNonStreaming(workerRuntime.nonStreaming) // per the task's currently active profile streaming switch (read every turn)
 	wk.SetMaxTokens(workerRuntime.maxTokens)       // as above, the output cap also follows the currently active profile

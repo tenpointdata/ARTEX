@@ -182,6 +182,10 @@ func (s *Server) archiveTask(job *pgdb.TaskArchive) (runErr error) {
 		return pgdb.ErrTaskArchiveNotFound
 	}
 	_ = s.m.pg.UpdateTaskArchiveProgress(job.ID, "stage_files", 10)
+	// Worker nodes' transcripts live in the database; pack them with the rest.
+	if err := s.m.gatherTranscripts(drainCtx, task.ExplorationID); err != nil {
+		return err
+	}
 	fileStage, err := stageTaskArchiveFiles(s.m.dir, job.ID, taskID, task.ExplorationID)
 	if err != nil {
 		return err
@@ -429,6 +433,11 @@ func (s *Server) restoreTaskArchivePayload(job *pgdb.TaskArchive, snapshot *pgdb
 	}
 	if err := s.m.pg.CompleteTaskArchiveRestore(job.ID); err != nil {
 		return err
+	}
+	if err := s.m.seedTranscripts(s.ctx, snapshot.ExplorationID); err != nil {
+		// The task is restored; its intents still resume on this node, whose disk
+		// holds the files, and a later run here seeds the store.
+		log.Printf("[task-archive] task %d: %v", job.TaskID, err)
 	}
 	s.loadRestoredTask(job.TaskID)
 	return nil

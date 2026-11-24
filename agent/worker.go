@@ -14,6 +14,7 @@ import (
 	"github.com/Autumn-27/artex/db"
 	"github.com/Autumn-27/artex/egress"
 	"github.com/Autumn-27/artex/intercept"
+	"github.com/Autumn-27/artex/transcriptsync"
 	"github.com/Autumn-27/norma/agentcore"
 	"github.com/Autumn-27/norma/harness"
 	"github.com/Autumn-27/norma/llm"
@@ -92,6 +93,8 @@ type Worker struct {
 	// compression mechanism. Read per run, like nonStreaming. nil = off (built-in
 	// compaction).
 	noaEnabledFn func() bool
+	// mirror shares transcripts across nodes (transcript_mirror.go); nil = local only.
+	mirror *transcriptsync.Mirror
 	// maxTokensFn resolves the per-reply output cap in tokens, on the same
 	// per-run basis. nil or 0 = send no cap and let the endpoint decide.
 	maxTokensFn func() int
@@ -717,7 +720,14 @@ func (w *Worker) execute(ctx context.Context, name string, taskID int64, as *db.
 	if w.tx != nil {
 		// A corrupt or unreadable transcript stops the run before any model or tool
 		// call. No terminal reason: the engine marks the intent blocked without the
-		// model_error reruns, which would only fail the same way again.
+		// model_error reruns, which would only fail the same way again. The same
+		// holds when the shared transcript cannot be leased: resuming from a stale
+		// local file would repeat work another node already did.
+		release, err := w.leaseTranscript(ctx, opts.SessionID)
+		if err != nil {
+			return "", tsx.Writes(), err
+		}
+		defer release()
 		if err := resumeSession(s, opts.SessionID); err != nil {
 			return "", tsx.Writes(), err
 		}
