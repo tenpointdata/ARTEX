@@ -46,7 +46,8 @@ export function TrackerSheet({
   editing: TicketTracker | null;
   onSaved: (tracker: TicketTracker) => void;
 }) {
-  const defaultKind = meta?.kinds[0]?.kind ?? "github";
+  // GitHub first when offered: the common case; the server lists kinds alphabetically.
+  const defaultKind = meta?.kinds.find((k) => k.kind === "github")?.kind ?? meta?.kinds[0]?.kind ?? "github";
   const [form, setForm] = React.useState<TrackerForm>(() => formFor(editing, defaultKind));
   const [saving, setSaving] = React.useState(false);
 

@@ -199,7 +199,7 @@ function FindingDetailInner() {
                   <p className="text-sm leading-relaxed whitespace-pre-wrap">{finding.summary || t("(no digest)")}</p>
                 </CardContent>
               </Card>
-              <FindingRetestPanel key={id} findingId={id} readOnly={finding.inherited} onCompleted={load} />
+              <FindingRetestPanel key={`retest-${id}`} findingId={id} readOnly={finding.inherited} onCompleted={load} />
               <Card>
                 <CardHeader>
                   <CardTitle className="text-sm">{t("Evidence / PoC")}</CardTitle>
@@ -236,7 +236,7 @@ function FindingDetailInner() {
               )}
               <FindingIntegrationsPanel key={`integrations-${id}`} findingId={id} />
               <FindingTrafficPanel
-                key={id}
+                key={`traffic-${id}`}
                 findingId={id}
                 contextTask={contextTaskId || undefined}
                 readOnly={finding.inherited}

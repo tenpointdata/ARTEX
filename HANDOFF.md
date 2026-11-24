@@ -59,8 +59,22 @@ See `docs/ARCHITECTURE.md` for the code-level map. Summary:
 
 ## Current state
 
-**2026-11-24** — **E2 integrations** (card `c-6def05`) are on branch `ej/20261124-055326-6bcfa9`.
-This is backend and API only; there is no web UI yet (card `c-597eb6`). See `docs/integrations.md`.
+**2026-11-24** — **E2 integrations** (backend card `c-6def05`, UI card `c-597eb6`). The backend from
+branch `ej/20261124-055326-6bcfa9` was merged into the UI branch `ej/20261124-132955-7aef3f`, so both
+land together. See `docs/integrations.md`.
+- **UI (c-597eb6):** System → **Integrations** (`/system/integrations`) is a trackers table with an inline
+  enable switch, Sync, edit and delete (with a confirm). The add/edit sheet shows masked credential inputs driven by
+  `secret_keys` (the `ConfigField`/`lib/config-form.ts` now shared with Notifications) and an
+  `include_evidence` switch. **Scanner imports** (`/system/integrations/imports`) detects the format
+  from the file and lists past imports. The findings bulk bar has a **Push to tracker** select, which
+  batches requests at the server's 200 cap. The finding detail has a **Tickets** card (ticket links,
+  remote state, import provenance, a single push). Pure helpers live in `web/src/lib/integrations.ts`,
+  tested by `npm run test:integrations` (in verify.sh); the client is `web/src/lib/integrations-api.ts`.
+- Verified 2026-11-24: in real Chromium (Playwright) against the real backend, with a throwaway Postgres and a fake GitHub API on
+  loopback (`ARTEX_NOTIFY_ALLOW_LOCAL=1`). Add tracker, masked edit kept the token, a destination change
+  without the token was refused, nuclei import (3 new findings), push of 3 (created; a re-push updated),
+  the detail Tickets card with provenance, sync pulling a closed issue to `fixed`, and delete all passed.
+  Follow-ups: card `c-2d91eb`.
 - **Findings out:** package `ticketing` has GitHub Issues, Jira and DefectDojo adapters. All of
   them go through `notify.Do`, which carries the notify SSRF guard and redaction. Tracker configs
   are sealed at rest and masked on readback, and a destination change requires the credentials
@@ -297,6 +311,14 @@ Card ids in brackets:
 
 ## Decisions
 
+- **2026-11-24 E2 UI (c-597eb6):**
+  - The UI branch merges the unmerged E2 backend branch rather than waiting for it, because the UI is
+    useless without the routes. Only HANDOFF.md conflicted.
+  - Tracker field layout lives in the web (`tracker-fields.ts`); only `secret_keys` comes from the
+    server. This is the same split Notifications uses, so the shared masked-field component now serves both.
+  - Push has no confirmation: it is idempotent (an existing ticket is updated, never duplicated).
+    Delete keeps its confirmation.
+  - Integrations and Imports are System sidebar entries (the settings area), each one click away.
 - **2026-11-24 E2:**
   - Imported findings are scanner claims: `unverified`, POE 0, `worker=import:<tool>`. A known dedup
     key leaves the existing finding untouched.
