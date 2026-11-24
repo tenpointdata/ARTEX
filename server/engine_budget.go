@@ -17,7 +17,11 @@ func (e *Engine) budgetFor(taskID string) *agent.BudgetLedger {
 	if v, ok := e.budgets.Load(taskID); ok {
 		return v.(*agent.BudgetLedger)
 	}
-	created := agent.NewBudgetLedger(e.budgetConfig())
+	task, intent, known := e.budgetConfig()
+	if !known {
+		return nil // worker node before the published budget was read: claims are blocked, nothing is cached
+	}
+	created := agent.NewBudgetLedger(task, intent)
 	e.seedBudget(taskID, created)
 	v, loaded := e.budgets.LoadOrStore(taskID, created)
 	if loaded {

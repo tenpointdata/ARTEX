@@ -138,6 +138,7 @@ func TestTwoWorkerNodesShareOneTaskWithIdenticalGating(t *testing.T) {
 	if err := publishBudgets(pg); err != nil {
 		t.Fatal(err)
 	}
+	keepControlLive(t, pg)
 	created, err := control.CreateTaskWithOptions("e7 two nodes", "two worker nodes share one task", db.TaskCreateOptions{})
 	if err != nil {
 		t.Fatal(err)
@@ -283,6 +284,7 @@ func TestWorkerNodeFollowsControlState(t *testing.T) {
 	if err := publishBudgets(pg); err != nil {
 		t.Fatal(err)
 	}
+	stopControl := keepControlLive(t, pg)
 	ce := NewEngine(control)
 	ce.node = NodeConfig{Role: RoleControl, NodeID: "ctl", Workers: 0}
 	created, err := control.CreateTaskWithOptions("e7 control state", "a worker node follows the control node", db.TaskCreateOptions{})
@@ -332,21 +334,57 @@ func TestWorkerNodeFollowsControlState(t *testing.T) {
 	}
 	waitUntilFor(t, 30*time.Second, "the intent to run after resume", func() bool { return state(paused) == "done" })
 
-	// No published budget: fail closed.
+	// A fresh node's claim gate (no loops started): it needs a published
+	// budget and a live control node, and never falls back to its own env.
+	gate := func() string {
+		t.Helper()
+		e := NewEngine(control)
+		e.node = NodeConfig{Role: RoleWorker, NodeID: "node-gate", Workers: 1}
+		s := &Server{m: control, engine: e, ctx: context.Background(), node: e.node, taskAgents: map[string]*taskAgentBundle{}}
+		e.wnode = &workerNodeState{served: map[string]bool{"none": true}, misses: map[string]int{}}
+		s.workerDispatchOnce(context.Background())
+		return e.wnode.reason()
+	}
+	if r := gate(); r != "" {
+		t.Fatalf("gate with budget and control = %q, want claiming", r)
+	}
 	if _, err := pg.Exec(`DELETE FROM settings WHERE key=$1`, settingDistributedBudgets); err != nil {
 		t.Fatal(err)
 	}
-	time.Sleep(2 * distributedPoll)
-	unmetered, err := task.Store.AddIntent(map[string]any{"summary": "no budget"}, 1, nil, "planner")
-	if err != nil {
-		t.Fatal(err)
-	}
-	time.Sleep(3 * distributedPoll)
-	if st := state(unmetered); st != "open" {
-		t.Fatalf("intent claimed with no published budget: %q", st)
+	if r := gate(); !strings.Contains(r, "run budget") {
+		t.Fatalf("gate with no published budget = %q", r)
 	}
 	if err := publishBudgets(pg); err != nil {
 		t.Fatal(err)
 	}
-	waitUntilFor(t, 30*time.Second, "the intent to run once the budget is published", func() bool { return state(unmetered) == "done" })
+	stopControl()
+	if r := gate(); !strings.Contains(r, "control node") {
+		t.Fatalf("gate with no live control node = %q", r)
+	}
+}
+
+// keepControlLive keeps a control node row fresh in the registry: worker nodes
+// claim nothing without a live control node.
+func keepControlLive(t *testing.T, pg *db.DB) (stop func()) {
+	t.Helper()
+	ctx, cancel := context.WithCancel(context.Background())
+	row := db.WorkerNode{NodeID: "test-control", Role: string(RoleControl), Host: "test"}
+	if err := pg.HeartbeatNode(row, true); err != nil {
+		t.Fatal(err)
+	}
+	go func() {
+		tick := time.NewTicker(time.Second)
+		defer tick.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-tick.C:
+				_ = pg.HeartbeatNode(row, false)
+			}
+		}
+	}()
+	stop = func() { cancel(); _ = pg.RemoveNode(row.NodeID) }
+	t.Cleanup(stop)
+	return stop
 }

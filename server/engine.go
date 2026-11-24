@@ -224,7 +224,11 @@ func (e *Engine) AbortDelete(taskID string, keepPaused bool) {
 	}
 	e.deleteMu.Unlock()
 	if e.distributed() {
-		e.openDispatch(taskID)
+		if e.isSettling(taskID) {
+			e.closeDispatch(taskID, db.DispatchSettling) // the delete interrupted a settle: keep the fence
+		} else {
+			e.openDispatch(taskID)
+		}
 	}
 	if !keepPaused && e.m != nil {
 		if t, ok := e.m.Task(taskID); ok {
@@ -1122,11 +1126,20 @@ func (e *Engine) claimSweepLoop(ctx context.Context, t *Task) {
 // and retried on the next tick; the claim survives until db.IntentClaimTTL
 // passes without a heartbeat. stop blocks until the heartbeat has ended.
 func startClaimHeartbeat(store *db.ExplorationStore, interval time.Duration, label string, intentID int64, token string, cancel context.CancelCauseFunc) (stop func()) {
+	return startClaimHeartbeatSilence(store, interval, 0, label, intentID, token, cancel)
+}
+
+// startClaimHeartbeatSilence is startClaimHeartbeat that also cancels the run
+// (AbortWorkClaimLost) once no heartbeat has succeeded for maxSilence (0 = never).
+// A distributed node uses it so a worker cut off from the database stops before
+// its lease expires and another node re-runs the intent.
+func startClaimHeartbeatSilence(store *db.ExplorationStore, interval, maxSilence time.Duration, label string, intentID int64, token string, cancel context.CancelCauseFunc) (stop func()) {
 	quit, done := make(chan struct{}), make(chan struct{})
 	go func() {
 		defer close(done)
 		ticker := time.NewTicker(interval)
 		defer ticker.Stop()
+		lastOK := time.Now()
 		for {
 			select {
 			case <-quit:
@@ -1134,6 +1147,13 @@ func startClaimHeartbeat(store *db.ExplorationStore, interval time.Duration, lab
 			case <-ticker.C:
 			}
 			err := store.HeartbeatIntentClaim(intentID, token)
+			if err == nil {
+				lastOK = time.Now()
+			} else if maxSilence > 0 && time.Since(lastOK) > maxSilence {
+				log.Printf("[worker %s] intent #%d: no heartbeat reached the database for %s, cancelling this run: %v", label, intentID, maxSilence, err)
+				cancel(agent.AbortWorkClaimLost)
+				return
+			}
 			if errors.Is(err, db.ErrIntentClaimLost) {
 				log.Printf("[worker %s] intent #%d heartbeat rejected, cancelling this run: %v", label, intentID, err)
 				cancel(agent.AbortWorkClaimLost)
@@ -1213,6 +1233,9 @@ func (e *Engine) runWorkerStep(ctx context.Context, t *Task, name string, worker
 	if intent == nil {
 		return false
 	}
+	if !e.confirmRemoteClaim(t, name, intent.ID, token) {
+		return true
+	}
 	log.Printf("[worker %s] task %s claimed intent #%d", name, t.ID, intent.ID)
 	return e.runIntent(ctx, t, name, worker, intent, token, "", "")
 }
@@ -1262,7 +1285,7 @@ func (e *Engine) runIntent(ctx context.Context, t *Task, name string, worker *ag
 		return true
 	}
 	e.registerWork(intent.ID, workCancel)
-	stopHeartbeat := startClaimHeartbeat(t.Store, db.IntentClaimHeartbeatInterval, name, intent.ID, token, workCancel)
+	stopHeartbeat := startClaimHeartbeatSilence(t.Store, db.IntentClaimHeartbeatInterval, e.leaseSilence(), name, intent.ID, token, workCancel)
 	// wrap the guard hooks so steer_work can inject a mid-run course-correction
 	// for THIS intent (drained before the worker's next tool call).
 	iid := intent.ID
@@ -1514,7 +1537,7 @@ func taskExecutionPaused(cause error) bool {
 		return false
 	}
 	switch abort.Code {
-	case "paused_by_user", "paused_by_orchestrator", "paused_on_reload", "paused_race_guard",
+	case "paused_by_user", "paused_by_orchestrator", "paused_on_reload", "paused_race_guard", "control_unreachable",
 		"queued_for_admission", "llm_unavailable_queued", "task_deleted":
 		return true
 	default:

@@ -133,6 +133,7 @@ func TestIntentResumesOnAnotherNodeFromSharedTranscript(t *testing.T) {
 	if err := publishBudgets(pg); err != nil {
 		t.Fatal(err)
 	}
+	keepControlLive(t, pg)
 	created, err := control.CreateTaskWithOptions("c-29ff19 resume", "an intent resumes across nodes", db.TaskCreateOptions{})
 	if err != nil {
 		t.Fatal(err)

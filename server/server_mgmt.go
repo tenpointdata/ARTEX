@@ -288,11 +288,12 @@ func writeCommittedTaskDelete(w http.ResponseWriter, result DeleteTaskResult, er
 func (s *Server) waitTaskQuiescent(ctx context.Context, taskID string) error {
 	ticker := time.NewTicker(10 * time.Millisecond)
 	defer ticker.Stop()
+	remoteQuiet := s.remoteDrainDeadline(taskID)
 	for {
 		s.chatMu.Lock()
 		chatBusy := s.chatBusy[taskID]
 		s.chatMu.Unlock()
-		if s.engine.inflightCount(taskID) == 0 && !chatBusy {
+		if s.engine.inflightCount(taskID) == 0 && !chatBusy && !time.Now().Before(remoteQuiet) {
 			return nil
 		}
 		select {

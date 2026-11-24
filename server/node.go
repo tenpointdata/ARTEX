@@ -169,7 +169,10 @@ func (s *Server) runNodeHeartbeat(ctx context.Context) {
 		if err != nil {
 			return
 		}
-		base := startupNoiseProfile(pg)
+		base, ok := heartbeatNoiseProfile(pg)
+		if !ok {
+			return // the setting cannot be read: keep the current governor
+		}
 		if want := egress.Share(base, n); egress.CurrentProfile() != want {
 			egress.SetProfile(want)
 			log.Printf("[node %s] %d live node(s): noise profile %s at 1/%d", row.NodeID, n, base.Name, n)
@@ -197,4 +200,20 @@ func (s *Server) listNodes(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, 200, map[string]any{"self": s.node.NodeID, "role": s.node.Role, "nodes": nodes})
+}
+
+// heartbeatNoiseProfile is the noise profile a node applies on a heartbeat:
+// the stored setting when valid, else ARTEX_NOISE_PROFILE when none is stored
+// (the start-up rule). ok is false when the setting cannot be read or holds an
+// unknown name: the node then keeps its current governor rather than falling
+// back to an environment that may say off.
+func heartbeatNoiseProfile(pg *db.DB) (egress.Profile, bool) {
+	v, found, err := pg.GetSetting(settingNoiseProfile)
+	if err != nil {
+		return egress.Profile{}, false
+	}
+	if !found {
+		return egress.ProfileFromEnv(), true
+	}
+	return egress.ProfileByName(v)
 }
