@@ -1,6 +1,8 @@
 // ARTEX domain model — types used across the UI.
 // Derived from the functional spec (section 7: key data shapes).
 
+import type { TaskAuthorizationSummary } from "./governance-types";
+
 export type TaskStatus = "created" | "queued" | "running" | "paused" | "done" | "failed" | "timeout";
 export type EngineMode = "exploring" | "paused" | "stalled" | "idle";
 
@@ -40,6 +42,8 @@ export interface Task {
   archive_blocked_by_task_id?: string; // live direct dependent that must be archived first
   company_ids?: number[]; // associated company scopes; current company assets join the task at creation
   coverage_enabled?: boolean; // asset coverage feature switch (fixed at creation, on by default); false = do not compute/show coverage
+  target_gate?: boolean; // approval gate for asset targets; required (locked on) while the task has an authorization
+  authorization?: TaskAuthorizationSummary; // newest engagement authorization version; absent = none
 }
 
 export interface TaskCategory {

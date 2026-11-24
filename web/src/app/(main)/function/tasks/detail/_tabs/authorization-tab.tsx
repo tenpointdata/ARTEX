@@ -18,7 +18,9 @@ import { StatusBadge, VersionDetails } from "./authorization-parts";
 // Authorization tab: the task's engagement authorization artifact (rules of
 // engagement the target gate enforces). Everyone with task access reads it;
 // only admins can add a version or revoke. See docs/GOVERNANCE.md.
-export function AuthorizationTab({ taskId }: { taskId: string }) {
+// onChanged tells the task view a version was stored, so its header (gate
+// lock, blocked resume) follows without waiting for the next poll.
+export function AuthorizationTab({ taskId, onChanged }: { taskId: string; onChanged?: () => void }) {
   const isAdmin = useCan("admin");
   const [view, setView] = React.useState<AuthorizationView | null>(null);
   const [error, setError] = React.useState("");
@@ -93,7 +95,10 @@ export function AuthorizationTab({ taskId }: { taskId: string }) {
               taskId={taskId}
               current={current}
               techniqueClasses={view.technique_classes ?? []}
-              onChanged={load}
+              onChanged={async () => {
+                onChanged?.();
+                await load();
+              }}
             />
           ) : null}
         </CardContent>

@@ -122,6 +122,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { intlLocale, t } from "@/i18n";
 import { setVisibleInterval } from "@/lib/polling";
 import { api } from "@/lib/api";
+import { resumeBlockedBy } from "@/lib/governance";
 import { getLocalStorageValue, setLocalStorageValue } from "@/lib/local-storage.client";
 import { type SortDirection, useStoredSortPreference } from "@/lib/sort-preference";
 import type {
@@ -140,6 +141,8 @@ import type {
 } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { useActiveCompanyID } from "@/stores/company/company-store";
+
+import { endedAuthorizationReason } from "./detail/_components/authorization-notices";
 
 // fmtBytes renders a human file size for the upload manifest.
 function fmtBytes(n: number): string {
@@ -253,9 +256,11 @@ const UNCATEGORIZED_VALUE = "uncategorized";
 const PAUSABLE_STATUSES = new Set<TaskStatus>(["created", "queued", "running"]);
 const ARCHIVABLE_STATUSES = new Set<TaskStatus>(["paused", "done", "failed", "timeout"]);
 
-function taskControlAction(status: TaskStatus): "pause" | "resume" | null {
-  if (status === "paused") return "resume";
-  if (PAUSABLE_STATUSES.has(status)) return "pause";
+// A paused task whose engagement authorization ended cannot resume (the server
+// answers 409 until a new version is stored), so it offers no action either.
+function taskControlAction(task: Pick<Task, "status" | "authorization">): "pause" | "resume" | null {
+  if (task.status === "paused") return resumeBlockedBy(true, task.authorization) ? null : "resume";
+  if (PAUSABLE_STATUSES.has(task.status)) return "pause";
   return null;
 }
 
@@ -703,11 +708,15 @@ export default function TasksPage() {
 
   const selectedTasks = React.useMemo(() => tasks.filter((task) => selectedIds.has(task.id)), [tasks, selectedIds]);
   const pausableTaskIDs = React.useMemo(
-    () => selectedTasks.filter((task) => taskControlAction(task.status) === "pause").map((task) => task.id),
+    () => selectedTasks.filter((task) => taskControlAction(task) === "pause").map((task) => task.id),
     [selectedTasks],
   );
   const resumableTaskIDs = React.useMemo(
-    () => selectedTasks.filter((task) => taskControlAction(task.status) === "resume").map((task) => task.id),
+    () => selectedTasks.filter((task) => taskControlAction(task) === "resume").map((task) => task.id),
+    [selectedTasks],
+  );
+  const resumeBlockedCount = React.useMemo(
+    () => selectedTasks.filter((task) => task.status === "paused" && resumeBlockedBy(true, task.authorization)).length,
     [selectedTasks],
   );
   const archivableTaskIDs = React.useMemo(
@@ -914,6 +923,13 @@ export default function TasksPage() {
                       size="sm"
                       variant="outline"
                       disabled={batchControlling !== null}
+                      title={
+                        resumeBlockedCount > 0
+                          ? t("{count} selected paused tasks are left out: their authorization ended", {
+                              count: resumeBlockedCount,
+                            })
+                          : undefined
+                      }
                       onClick={() => void controlSelectedTasks("resume", resumableTaskIDs)}
                     >
                       {batchControlling === "resume" ? (
@@ -1504,14 +1520,17 @@ function TaskControlButton({
   onControl: (id: string, action: "pause" | "resume") => Promise<void>;
 }) {
   const [pending, setPending] = React.useState(false);
-  const action = taskControlAction(task.status);
+  const action = taskControlAction(task);
   const label = action === "resume" ? t("Resume task") : t("Pause task");
+  const blocked = resumeBlockedBy(task.status === "paused", task.authorization);
+  let idleTitle = t("Cannot pause or resume in this state");
+  if (blocked) idleTitle = endedAuthorizationReason(blocked);
   return (
     <Button
       size="icon"
       variant="ghost"
-      aria-label={label}
-      title={action ? label : t("Cannot pause or resume in this state")}
+      aria-label={action ? label : idleTitle}
+      title={action ? label : idleTitle}
       disabled={!action || pending}
       onClick={async () => {
         if (!action) return;
@@ -1523,7 +1542,7 @@ function TaskControlButton({
         }
       }}
     >
-      {taskControlIcon(pending, action)}
+      {taskControlIcon(pending, blocked ? "resume" : action)}
     </Button>
   );
 }

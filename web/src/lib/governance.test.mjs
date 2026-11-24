@@ -8,6 +8,8 @@ import {
   guessScopeKind,
   isForbidden,
   parseScopeText,
+  resumeBlockedBy,
+  targetGateLocked,
   toLocalInput,
 } from "./governance.ts";
 
@@ -58,4 +60,17 @@ test("authorizationStatus matches the server's InForce window", () => {
   assert.equal(authorizationStatus(a, "2026-12-01T00:00:00Z"), "in_force");
   assert.equal(authorizationStatus(a, "2026-12-15T00:00:00Z"), "expired");
   assert.equal(authorizationStatus({ ...a, revoked: true }, "2026-12-02T00:00:00Z"), "revoked");
+});
+
+test("resumeBlockedBy and targetGateLocked follow the server's 409s", () => {
+  const ended = { version: 3, revoked: true, ended: true };
+  const inForce = { version: 2, revoked: false, ended: false };
+  assert.equal(resumeBlockedBy(true, ended), ended);
+  assert.equal(resumeBlockedBy(false, ended), null); // running: the sweep pauses it, nothing to resume
+  assert.equal(resumeBlockedBy(true, inForce), null);
+  assert.equal(resumeBlockedBy(true, undefined), null);
+  assert.equal(targetGateLocked(inForce), true);
+  assert.equal(targetGateLocked(ended), true);
+  assert.equal(targetGateLocked(undefined), false);
+  assert.equal(targetGateLocked(null), false);
 });

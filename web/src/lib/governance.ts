@@ -1,7 +1,7 @@
 // Pure helpers for the governance UI. No "@/" imports, so node --test can load
 // this file directly (governance.test.mjs).
 
-import type { AuthScopeEntry, Permission, ScopeKind, SessionInfo } from "./governance-types";
+import type { AuthScopeEntry, Permission, ScopeKind, SessionInfo, TaskAuthorizationSummary } from "./governance-types";
 
 const SCOPE_KIND_SET: ReadonlySet<string> = new Set<ScopeKind>(["domain", "host", "ip", "cidr"]);
 
@@ -84,4 +84,21 @@ export function authorizationStatus(
 // client_read account (it cannot list tasks).
 export function landingPath(session: Pick<SessionInfo, "permissions"> | null | undefined): string {
   return can(session, "read") ? "/function/tasks" : "/function/findings";
+}
+
+// resumeBlockedBy is the artifact that makes the server refuse to resume a
+// paused task (server/authorization_expiry.go: revoked or past not_after), or
+// null when resume is not refused for that reason. A window that has not
+// started yet does not block resume.
+export function resumeBlockedBy(
+  paused: boolean,
+  authorization: TaskAuthorizationSummary | null | undefined,
+): TaskAuthorizationSummary | null {
+  return paused && authorization?.ended ? authorization : null;
+}
+
+// targetGateLocked: a task with an authorization cannot turn its target gate
+// off (PATCH answers 409, db.ErrTargetGateRequired).
+export function targetGateLocked(authorization: TaskAuthorizationSummary | null | undefined): boolean {
+  return authorization != null;
 }

@@ -36,10 +36,14 @@ import { SidebarTrigger } from "@/components/ui/sidebar";
 import { Spinner } from "@/components/ui/spinner";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { useCan } from "@/hooks/use-session";
 import { t } from "@/i18n";
 import { api } from "@/lib/api";
+import { resumeBlockedBy } from "@/lib/governance";
 import type { LLMProfile, Task } from "@/lib/types";
 
+import { AuthorizationEndedNotice, endedAuthorizationReason } from "./_components/authorization-notices";
+import { TaskGateSwitch } from "./_components/task-gate-switch";
 import { AssetsTab } from "./_tabs/assets-tab";
 import { AuthorizationTab } from "./_tabs/authorization-tab";
 import { BroadcastTab } from "./_tabs/broadcast-tab";
@@ -231,6 +235,7 @@ function TaskDetailInner() {
   const [interceptPendingCount, setInterceptPendingCount] = React.useState(0);
   const [profiles, setProfiles] = React.useState<LLMProfile[]>([]);
   const [archiving, setArchiving] = React.useState(false);
+  const isAdmin = useCan("admin");
 
   React.useEffect(() => {
     api
@@ -295,6 +300,7 @@ function TaskDetailInner() {
 
   async function togglePause() {
     if (task && ["done", "failed", "timeout"].includes(task.status)) return;
+    if (resumeBlockedBy(paused, task?.authorization)) return;
     const next = !paused;
     try {
       await api.controlTask(id, next ? "pause" : "resume");
@@ -345,6 +351,8 @@ function TaskDetailInner() {
     );
   }
   const engineMode = paused ? "paused" : (task.engine_mode ?? "idle");
+  // An ended artifact makes the server refuse resume (409); say so instead.
+  const resumeBlock = resumeBlockedBy(paused, task.authorization);
   let controlVariant: "default" | "secondary" | "outline" = "outline";
   let controlIcon = <PauseIcon data-icon="inline-start" />;
   let controlLabel = t("Pause");
@@ -414,12 +422,34 @@ function TaskDetailInner() {
               <TooltipContent>{archiveDisabledReason}</TooltipContent>
             </Tooltip>
           )}
-          <Button size="sm" variant={controlVariant} onClick={togglePause} disabled={terminal}>
-            {controlIcon}
-            {controlLabel}
-          </Button>
+          <TaskGateSwitch task={task} onUpdated={load} />
+          {resumeBlock ? (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span className="inline-flex">
+                  <Button size="sm" variant="outline" disabled aria-label={endedAuthorizationReason(resumeBlock)}>
+                    {controlIcon}
+                    {controlLabel}
+                  </Button>
+                </span>
+              </TooltipTrigger>
+              <TooltipContent>{endedAuthorizationReason(resumeBlock)}</TooltipContent>
+            </Tooltip>
+          ) : (
+            <Button size="sm" variant={controlVariant} onClick={togglePause} disabled={terminal}>
+              {controlIcon}
+              {controlLabel}
+            </Button>
+          )}
         </div>
         <p className="truncate text-xs text-muted-foreground">{task.goal}</p>
+        {resumeBlock && (
+          <AuthorizationEndedNotice
+            authorization={resumeBlock}
+            isAdmin={isAdmin}
+            onStoreNewVersion={() => setTab("authorization")}
+          />
+        )}
         {/* Tabs */}
         <div className="no-scrollbar min-w-0 overflow-x-auto">
           <TabsList variant="default" className="min-w-max">
@@ -470,7 +500,7 @@ function TaskDetailInner() {
           <InterceptTab taskId={id} />
         </TabsContent>
         <TabsContent value="authorization" className="mt-0">
-          <AuthorizationTab taskId={id} />
+          <AuthorizationTab taskId={id} onChanged={load} />
         </TabsContent>
         <TabsContent value="report" className="mt-0">
           <ReportTab taskId={id} />

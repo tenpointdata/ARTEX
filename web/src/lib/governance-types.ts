@@ -79,6 +79,16 @@ export interface EngagementAuthorization extends AuthorizationInput {
   created_at: string;
 }
 
+// server.TaskAuthorizationDTO: the newest version's summary on every task
+// (GET /api/tasks and /api/tasks/{id}); absent when the task has none. Its
+// presence means the target gate is required; ended means resume is refused
+// until a new version is stored.
+export interface TaskAuthorizationSummary {
+  version: number;
+  revoked: boolean;
+  ended: boolean;
+}
+
 // GET /api/tasks/{id}/authorization. versions is newest first.
 export interface AuthorizationView {
   current: EngagementAuthorization | null;
