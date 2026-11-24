@@ -59,6 +59,23 @@ See `docs/ARCHITECTURE.md` for the code-level map. Summary:
 
 ## Current state
 
+**2026-11-24 (c-cc25b6, Low audit items)** — All 14 Low items from the 2026-11-23 audit have fixes on
+branch `ej/20261124-140001-18dcf1`, which merges the earlier run's branch `ej/20261124-131958-bab22c`:
+notifications dial through the shared `netguard` guard; RSI lessons are engagement-scoped and scrubbed
+before any cross-engagement sharing (migration **0021**; `adopted` mode keeps the same scope rule);
+SOCKS5 requires credentials; MITM CA is ECDSA P-256, 1 year, short-lived leaves; console CSP with
+inline-script hashes; no remote Markdown images; the extension asks for hosts at runtime and skips SSO
+hosts; `llm_records` bodies and `server_logs` text are sealed at rest. This run added: `Host` allowlist
+(`ARTEX_ALLOWED_HOSTS`, 421 otherwise), logout revokes the token's jti server-side (persisted, pruned at
+expiry), first-run setup moves the password version forward instead of resetting it, login limit keyed by
+IPv6 /64 plus a 100-failures/min global ceiling that recently successful sources bypass. Supply chain:
+every workflow action pinned by SHA (all 13 checked against their tags), release token least-privilege,
+`npm ci --ignore-scripts` in CI/release, bbot from a `--require-hashes` file, Playwright from a committed
+lockfile with `npm ci`. Verified: Go tests against Postgres 16 (only the known macOS 127.0.0.2 UDP test
+fails), web tsc + unit tests, extension tests, Docker image build (see Deltas for the result). Not
+verified: release/CI workflows on GitHub (run on the next push), Linux-root and arm64/amd64 cross builds.
+Residual: `bbot --install-all-deps` still downloads module tools unpinned (trust on first use).
+
 **2026-11-24 (c-d25ff9, E3)** — The `RSI.md` Loop C benchmark gate and Loop B lesson graduation are built,
 flag off (`ARTEX_RSI_LOOP`, default off, read per request). Pure core `rsi/` (search-space allowlist:
 `prompt_body` for goals/planner/worker and `lesson`; immutable and git-reviewed surfaces refused;
@@ -199,8 +216,8 @@ body, through the versioned prompt API, and the starting bodies are restored aft
    Done = govulncheck clean.
 3. *(unclaimed)* — **SEC: upstream-gate residuals** (M), card `c-5a6f96`: task-scoped rules on proxy
    dials, go-mitmproxy keep-alive host pinning, and the global-egress-proxy bypass. Done = a test or a decision for each.
-4. *(unclaimed)* — **SEC: logout revocation** (S), card `c-a0af33`. Done = a token replayed after
-   logout or a password change gets 401, by a test.
+4. *(unclaimed)* — **SEC: c-cc25b6 first CI run** (XS), card `c-d689e2`: after this branch reaches GitHub, confirm the
+   SHA-pinned ci.yml and release.yml (workflow_dispatch) pass. Done = green runs linked on the card.
 5. *(unclaimed)* — **SEC: Docker Desktop named volumes** (S), card `c-775dc2`. Done = `docker compose up`
    starts on a Mac with the isolation self-test passing; Linux bind-mount path documented.
 6. *(unclaimed)* — **E1 Client-grade reporting & deliverables** (M). Turn `report/` into
@@ -271,7 +288,7 @@ Card ids in brackets:
 - **SEC** [`c-3b9252`] Capture-proxy upstream connection reuse across scopes (rules checked only at dial time).
 - **SEC** [`c-9b48b7`] Report go-mitmproxy keep-alive host pinning upstream; drop `unpinHostChange` once fixed.
 - **SEC** [`c-dadc14`] Verify the security branch on Linux root, in Docker and against Postgres, plus the web typecheck.
-- **SEC** [`c-a0af33`] Logout does not revoke the session token (valid until the 7-day JWT TTL).
+- **SEC** [`c-a0af33`] Logout revocation — done by c-cc25b6 (jti revocation); do not merge the older branch `ej/20261123-192346-aa7ae3`.
 - **SEC** [`c-775dc2`] Docker Desktop bind mounts defeat executor isolation; stock compose will not start on a Mac.
 - [`c-834a5a`] web: 84 pre-existing biome lint errors; `npm run lint` cannot gate CI yet.
 - **SEC** [`c-8d54d5`] Capture proxy: insecure upstream only for in-scope targets.
@@ -279,13 +296,19 @@ Card ids in brackets:
 - **SEC** [`c-bd9a6d`] Residual gaps from the High/Medium fixes.
 - **SEC** [`c-12df03`] Single-uid start-up fails on a socket in a run dir; MCP uid is not egress-filtered.
 - **SEC** [`c-e70e5c`] Per-task uids: release ended tasks at start-up; per-key lock.
-- **SEC** [`c-cc25b6`] Low-severity audit items.
+- **SEC** [`c-cc25b6`] Low-severity audit items — all 14 fixed on `ej/20261124-140001-18dcf1`; residual: bbot's `--install-all-deps` tool downloads are unpinned (`c-2af578`).
 - **E8 follow-ups** [`c-f1518c`] first live run, [`c-75c593`] bench
   image from a clean clone, [`c-d73308`] optional provider sampling seed per LLM profile.
 - **E10** [`c-72dd9d`] Code-security testing lane (SAST/dependency ingest) feeding the same dual-graph + evidence model.
 
 ## Known issues and gotchas
 
+- **Migration 0021 (lesson scope/scrub) is the newest:** merge the branches holding 0015–0019 (E2, E5,
+  E1, c-ba9f64, c-5b5421) into main before the c-cc25b6 branch, or the runner refuses them as out of order.
+- **Upgrading ends existing sessions once:** tokens now need a jti and an exact password-version match,
+  so pre-upgrade tokens get 401. Browsing ARTEX by a DNS name needs `ARTEX_ALLOWED_HOSTS`.
+- **E5 RBAC branches touch `server/auth.go` session claims;** expect a conflict with the jti/revocation
+  change when they merge. Keep both: role claims and the jti check in `session()`.
 - **Migration 0020 (RSI) vs other branches' 0015–0019:** the runner refuses a pending migration older
   than the newest applied one, so merge 0015–0019 (E2, E5, E1, c-ba9f64, c-5b5421) before this branch
   reaches a database, or renumber 0020 forward at merge. `db/migrate_test.go` lists 0020 explicitly.
@@ -327,6 +350,11 @@ Card ids in brackets:
 
 ## Decisions
 
+- **2026-11-24** — c-cc25b6: revoked jtis live in the `settings` table (no new table), keyed under the
+  password-version key, and a failed read of that list rejects all sessions rather than reviving revoked
+  ones. The global login ceiling lets sources with a recent success keep trying, so a distributed guesser
+  cannot lock the operator out. Pinning bbot's own `--install-all-deps` downloads was left out: it would
+  mean vendoring bbot's ansible tool installs, a larger job than the audit item.
 - **2026-11-24** — E3 (c-d25ff9): "one explicit owner action" is an owner-password step-up on adopt,
   because on single-user ARTEX a bearer token minted from `jwt.key` (what the loop holds) is the same
   identity as the owner. The server recomputes every verdict from raw records rather than accepting the
