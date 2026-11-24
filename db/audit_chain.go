@@ -141,6 +141,17 @@ const maxMismatchReport = 200
 // and that the head row names the last entry, then compares each intercept
 // history row with the newest entry about it.
 func (d *DB) VerifyAudit(ctx context.Context) (AuditVerification, error) {
+	return verifyAudit(ctx, d.DB)
+}
+
+// auditQuerier is what verification reads through: the pool, or a
+// transaction (tests verify a tampered chain inside one and roll it back).
+type auditQuerier interface {
+	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
+	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
+}
+
+func verifyAudit(ctx context.Context, d auditQuerier) (AuditVerification, error) {
 	v := AuditVerification{OK: true, RowsMismatched: []int64{}}
 	prev, want := GenesisHash, int64(1)
 	for {
@@ -187,7 +198,7 @@ func (d *DB) VerifyAudit(ctx context.Context) (AuditVerification, error) {
 	if v.BrokenAt == 0 && (v.HeadSeq != want-1 || v.HeadHash != prev) {
 		v.BrokenAt, v.Problem = want, fmt.Sprintf("the head names entry %d but the last entry is %d: entries were removed", v.HeadSeq, want-1)
 	}
-	if err := d.verifyInterceptRows(ctx, &v); err != nil {
+	if err := verifyInterceptRows(ctx, d, &v); err != nil {
 		return v, err
 	}
 	v.OK = v.BrokenAt == 0 && len(v.RowsMismatched) == 0
@@ -196,7 +207,7 @@ func (d *DB) VerifyAudit(ctx context.Context) (AuditVerification, error) {
 
 // verifyInterceptRows compares every intercept_pending row with the newest
 // row entry about it, through the same audit_row_payload the trigger used.
-func (d *DB) verifyInterceptRows(ctx context.Context, v *AuditVerification) error {
+func verifyInterceptRows(ctx context.Context, d auditQuerier, v *AuditVerification) error {
 	var genesis sql.NullString
 	if err := d.QueryRowContext(ctx, `SELECT at FROM audit_chain WHERE seq = 1`).Scan(&genesis); err != nil && err != sql.ErrNoRows {
 		return err
