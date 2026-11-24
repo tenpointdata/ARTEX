@@ -166,10 +166,7 @@ Verified 2026-11-23 (card `c-dadc14`, done):
   runtime base, `[artex] egress: installed` is logged, `-m owner`/`-m addrtype` load on bookworm's
   nf_tables iptables 1.8.9, and the executor is refused for metadata, the gateway, host.docker.internal
   and :8787 while LAN, other containers and the internet stay reachable (full image too, `c-a6891b`).
-- Web: `npm ci` and `npx tsc --noEmit` clean. `npm run lint` fails with 84 errors, all already on main
-  and none in the changed files (`c-834a5a`). Headless Chromium: setup, login, Sign out over the
-  HttpOnly SameSite=Strict cookie work and `document.cookie` is empty, **but a token copied before
-  logout stays valid for 7 days** (`c-a0af33`).
+- Web: `npm run lint` has 84 pre-existing errors (`c-834a5a`); a token copied before logout stays valid 7 days (`c-a0af33`).
 - The stock compose cannot start on Docker Desktop for Mac: bind mounts ignore permissions, so the
   isolation self-test fails closed (also on main; `c-775dc2`). Use named volumes there.
 
