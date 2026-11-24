@@ -59,6 +59,27 @@ See `docs/ARCHITECTURE.md` for the code-level map. Summary:
 
 ## Current state
 
+**2026-11-24 — E7 distributed workers + Helm (`c-d60149`, in review)** on `ej/20261124-150525-1a95b3`; design
+and limits in `docs/DISTRIBUTED.md`. `-role all|control|worker` (`server/node.go`): worker nodes are the same
+binary and `server.New` wiring (guard, intercept rules, LLM reviewer, target gate, budgets, isolation,
+egress filter), run only intent worker loops (`server/worker_node.go`), and serve only `GET /healthz`. They
+claim through the existing fenced lease. Control state moved to Postgres (migration **0023**: `worker_nodes`,
+`work_signals`, `tasks.dispatch_closed`, `proxy_scope_tokens`): pause, queued, terminal, deadline, the
+settle/delete fence and target gate are read per claim or call (fail closed); budgets are published by the
+control node and spend is synced every 2 s; intercept rules follow a DB revision and ask approvals poll
+their row; kill/pause/cancel/steer go through `work_signals`; the noise governor is split across live nodes.
+Worker traffic goes through the control node's recording proxy with DB-resolved per-task tokens (token-less
+remote clients refused; CA cert published). `GET /api/settings/nodes` lists nodes. Helm chart
+`deploy/helm/artex` (control + worker Deployment with hard host anti-affinity) and
+`docker-compose.distributed.yml`. Verified against Postgres 17: two worker nodes ran one task's intents, each
+blocked by a rule added on the control node after they started and seeing the control's gate switch
+(`TestTwoWorkerNodesShareOneTaskWithIdenticalGating`); kill/pause/no-budget/no-control
+(`TestWorkerNodeFollowsControlState`); proxy path recorded on the control node, forged and deleted tokens
+refused (`TestWorkerNodeUsesControlRecordingProxy`); `helm lint`/`template` clean. An opus adversarial
+review found 12 issues; H1–M9, L10, L11 fixed (`c0210dd5`). **Not verified:** a real install on two hosts
+(`c-8cfbfe`). **Gaps:** worker findings cannot bind captured traffic (`c-3b781a`), transcripts are per host
+(`c-29ff19`), smaller items `c-18f7a8`.
+
 **2026-11-24 — SSE 401 after console login (`c-13e86c`, fixed; pre-E5).** Streams are same-origin only
 (`web/src/lib/sse.ts`), dev gzip off, `openSSE` writes `: open`. Test `server/activity_stream_auth_pg_test.go`;
 browser-checked on the E5 stack.
@@ -227,7 +248,12 @@ body, through the versioned prompt API, and the starting bodies are restored aft
   pre-registration, adopted-lesson retire sync. Done = Postgres tests for each.
 - *(unclaimed)* — **RSI gate web UI** (M), card `c-936308`. Done = adopt/rollback from a proposals table in ≤2 clicks + password.
 
+- *(unclaimed)* — **E7: evidence and traffic tools on worker nodes** (M), card `c-3b781a`. Done = a
+  finding recorded on a worker node binds its captured exchange, by a two-manager test.
+
 **Human lane**
+- **E7 live install on two hosts** (card `c-8cfbfe`): `helm install` on a ≥2-node cluster, a task whose
+  intents run on both worker pods, capability set confirmed, worker egress deny of Postgres/control API.
 - **First live run through the RSI gate** (card `c-772190`, after `c-f1518c`): propose → held-out
   suite → evidence → adopt (password) → rollback on the bench instance with `ARTEX_RSI_LOOP=on`.
 - **E8 first live held-out run** (card `c-f1518c`): needs a bench instance, an LLM, a judge key and a
@@ -254,6 +280,10 @@ body, through the versioned prompt API, and the starting bodies are restored aft
 - **Web deps:** `cd web && npm ci`, then `npx tsc --noEmit` (clean) and `npm run lint` (84 known errors, `c-834a5a`). **Embedded-UI build:** `./build.sh`.
 - **Run (Docker):** `cp .env.example .env` (set `POSTGRES_PASSWORD`), `docker compose up -d --build`,
   open http://localhost:8787, setup token via `docker compose logs artex | grep "Setup token"`.
+- **Distributed (E7):** one `-role control` node plus `-role worker` nodes sharing Postgres and
+  `ARTEX_SECRET_KEY`; workers need `ARTEX_CONTROL_PROXY`. Helm: `deploy/helm/artex` (lint with
+  `docker run --rm -v "$PWD/deploy/helm/artex:/chart" alpine/helm:3 lint /chart`); local: `docker compose -f
+  docker-compose.yml -f docker-compose.distributed.yml up -d --build`. See `docs/DISTRIBUTED.md`.
 - **Verify (reproduces CI):** `scripts/verify.sh` (fast set, no Docker); `--full` adds `go test -race`
   + web static build; `--security` runs `govulncheck ./...`.
 - **Benchmark harness:** `scripts/benchmark` against the subject instance `docker-compose.bench.yml`
@@ -284,7 +314,9 @@ Card ids in brackets:
   (role-aware controls on existing pages), `c-7c4715` (client_read console, in review), `c-601ec6` (chain paging).
 - **TEST** [`c-3157b4`] `TestGateOffTaskIsUnchanged` fails on main with Postgres (also fails before E5).
 - **E6** [`c-cb0093`] Cost/observability dashboard + OpenTelemetry export, building on existing context telemetry.
-- **E7** [`c-d60149`] Distributed/remote workers (queue-backed intents) for larger engagements; Helm chart.
+- **E7** [`c-d60149`] Distributed workers + Helm: built, in review (see Current state). Follow-ups:
+  `c-3b781a` (evidence on workers), `c-29ff19` (transcripts across hosts), `c-8cfbfe` (live two-host
+  install), `c-18f7a8` (browser MCP relay, finding wake-ups, proxy TLS, smaller gaps).
 - **E8** [`c-5487e8`] Planner/worker evaluation suite (regression targets, prompt-version A/B via the benchmark gate).
 - **E9** [`c-73af97`] Frontend/UX pass (tables over cards, fewer-clicks triage workflow, live engagement dashboard).
 - **SEC** [`c-517c2d`] Live Playwright task check of the scope relay (human/bench: needs an LLM key and an authorized target).
@@ -363,6 +395,15 @@ Card ids in brackets:
   `ARTEX_SECRET_KEY`) loses stored secrets.
 
 ## Decisions
+
+- **2026-11-24** — E7 (`c-d60149`): the queue is the existing `exploration_nodes` lease, not a broker.
+  It already had atomic claims, fencing tokens and lease takeover, so a broker would have added a
+  second source of truth. Worker nodes are the same binary and wiring, so the gating is identical by
+  construction; every control decision a single process kept in memory is now read from Postgres, and
+  a read failure blocks the claim. Worker traffic is recorded by the control node's proxy (tokens
+  stored only as SHA-256), not by per-host stores. A worker never falls back to its own budget env,
+  and claims nothing without a live control node or while a `role=all` node shares the database.
+  Migration **0023** — renumber if another branch lands 0023 first.
 
 - **2026-11-24** — c-13e86c: SSE streams are same-origin only, with no cross-origin override. The cookie is
   the only credential a script-free EventSource can present, and the backend's CORS answers `*`, which a
