@@ -70,6 +70,17 @@ the archive round-trip, `TestCreateTaskMethodologies` (server), the full `go tes
 known macOS 127.0.0.2 SOCKS5 test fails), web `tsc` and i18n. Not checked: the form in a browser.
 Gaps carded as `c-aed5fd`: no "none" choice, and the choice is fixed at creation.
 
+**2026-11-24 — client_read console (`c-7c4715`, in review)** on `ej/20261124-144554-67afc9`. New
+`GET /api/me/companies` and `GET /api/me/tasks?company=` (`server/client_console.go`, binders
+`bindBound`/`bindCompany`), both `client_read`. Web: `ClientCompanyGate` (`web/src/app/(main)/_components/`)
+loads the bound companies and holds pages until one is active; the sidebar switcher in bound mode offers
+only those; new **Reports** page `/function/reports` (client landing; hidden for `read` holders via the
+nav item's new `hideWith`) lists the company's engagements in a table with the selected one's outcome
+and Markdown report. Verified: `TestClientReadBoundToCompanyPG` (now also a client bound to two
+companies reading each one's tasks, findings, report, stats and outcome with no refusal), the RBAC route
+tests, web `tsc`, governance unit tests and i18n. Browser check: see the Deltas entry for this branch.
+Still open: a client Dashboard replacement beyond the Reports page (`c-7c4715` follow-up card).
+
 **2026-11-24 — E5 web UI (`c-869050`, in review)** on `ej/20261124-132958-94f4bf` (carries E5 + client_read).
 `/system/users`, task **Authorization** tab, Approval Records **Chain** tab with Verify; sidebar filtered by
 `useCan` (`web/src/hooks/use-session.tsx`); 403 never logs out (`web/src/lib/api-errors.ts`); login takes any
@@ -267,8 +278,8 @@ body, through the versioned prompt API, and the starting bodies are restored aft
 1. *(unclaimed)* — **SEC: per-task uid follow-ups** (S each): `c-12df03` (single-uid start-up fails on a
    socket; MCP uid not egress-filtered), `c-e70e5c` (release ended tasks at start-up; per-key lock). The "Done when" is on each card.
 2. *(unclaimed)* — **E5 UI: hide role-lacking actions on existing pages** (M), card `c-92bb52`. Done = as
-   reviewer and operator, no visible control answers 403. Then `c-7c4715` (client_read console: my-companies
-   endpoint and switcher, M) and `c-601ec6` (chain newest-first paging, S).
+   reviewer and operator, no visible control answers 403. Then `c-601ec6` (chain newest-first paging, S).
+   (`c-7c4715`, the client_read console, is built and in review on `ej/20261124-144554-67afc9`.)
 3. *(unclaimed)* — **SEC: gorilla/websocket bump, GO-2026-6278** (XS), card `c-c10f2c`; needs network.
    Done = govulncheck clean.
 4. *(unclaimed)* — **SEC: upstream-gate residuals** (M), card `c-5a6f96`: task-scoped rules on proxy
@@ -340,7 +351,7 @@ Card ids in brackets:
   [`c-ca2bd0`] an operator-chosen methodology per task (landed, in review; gaps `c-aed5fd`); [`c-ed937d`] checklist completion in the report export (after E1).
 - **E5** [`c-669406`] Engagement governance. The backend is done on `ej/20261124-055929-bd2253`. Follow-ups:
   `c-5b5421` (client binding), `c-869050` (UI, in review), `c-f4115c` (lifecycle gaps), `c-92bb52`
-  (role-aware controls on existing pages), `c-7c4715` (client_read console), `c-601ec6` (chain paging).
+  (role-aware controls on existing pages), `c-7c4715` (client_read console, in review), `c-601ec6` (chain paging).
 - **TEST** [`c-3157b4`] `TestGateOffTaskIsUnchanged` fails on main with Postgres (also fails before E5).
 - **E6** [`c-cb0093`] Cost/observability dashboard + OpenTelemetry export, building on existing context telemetry.
 - **E7** [`c-d60149`] Distributed/remote workers (queue-backed intents) for larger engagements; Helm chart.
@@ -424,6 +435,12 @@ Card ids in brackets:
   without notice. A stored id whose checklist has since been removed is skipped. The migration is
   numbered 0022 because 0015–0021 are taken on open branches, and the migrate test refuses an
   out-of-order version, so 0022 must land after them.
+- **2026-11-24** — c-7c4715: the client's pickers are new `/api/me/*` routes rather than opening
+  `GET /api/companies` / `GET /api/tasks` to `client_read`: those return operator data (scope rules,
+  goal text, tokens, task-wide finding counts that span other clients), and a narrow DTO keeps that out
+  by construction. The client task list uses the operator-made company scope rows only (same rule as
+  `TaskCompaniesIn`). The Reports page, not a client Dashboard, is the client landing: it covers report
+  and outcome per bound task with routes already open to clients.
 - **2026-11-24** — c-869050: the E5 UI branch merges the E5 + client_read branch rather than waiting
   for PR #16, so the UI is built and browser-tested against the real API; merging it lands E5 too. The
   governance client lives in `web/src/lib/governance-api.ts` (not `api.ts`, already over 600 lines) and
