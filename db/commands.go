@@ -162,15 +162,20 @@ func (d *DB) EnsureLLMRecordsTable() error {
 	return d.execEmbeddedMigration(llmRecordsMigration)
 }
 
-// InsertLLMRecord stores one LLM call record.
+// InsertLLMRecord stores one LLM call record; the four bodies are sealed at
+// rest (secrets_bulk.go), the metadata stays in clear for filtering.
 func (d *DB) InsertLLMRecord(r *LLMRecord) error {
-	_, err := d.Exec(`
+	reqBody, respBody, rawReq, rawResp, err := sealLLMRecordBodies(r)
+	if err != nil {
+		return fmt.Errorf("seal llm record: %w", err)
+	}
+	_, err = d.Exec(`
 INSERT INTO llm_records(model, profile_name, session_id, task_id, worker, latency_ms, input_tokens, output_tokens, cache_read, cache_write, status, error, request_body, response_body, raw_request, raw_response)
 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)`,
 		r.Model, nullIfEmpty(r.ProfileName), r.SessionID, nullIfEmpty(r.TaskID), nullIfEmpty(r.Worker),
 		r.LatencyMs, r.InputTokens, r.OutputTokens, r.CacheRead, r.CacheWrite,
-		r.Status, nullIfEmpty(r.Error), nullIfEmpty(r.RequestBody), nullIfEmpty(r.ResponseBody),
-		nullIfEmpty(r.RawRequest), nullIfEmpty(r.RawResponse))
+		r.Status, nullIfEmpty(r.Error), nullIfEmpty(reqBody), nullIfEmpty(respBody),
+		nullIfEmpty(rawReq), nullIfEmpty(rawResp))
 	return err
 }
 
@@ -298,6 +303,9 @@ func (d *DB) GetLLMRecord(id int64) (*LLMRecord, error) {
 	r.ResponseBody = respBody.String
 	r.RawRequest = rawReq.String
 	r.RawResponse = rawResp.String
+	if err := openLLMRecordBodies(&r); err != nil {
+		return nil, err
+	}
 	return &r, nil
 }
 

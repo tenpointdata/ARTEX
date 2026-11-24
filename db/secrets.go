@@ -302,6 +302,9 @@ func (d *DB) InitSecrets(keyDir string) error {
 				return fmt.Errorf("secret key check: %w", err)
 			}
 		}
+		if err := checkBulkSecretKey(ctx, conn, box); err != nil {
+			return err
+		}
 		n, err := backfillSecrets(ctx, conn, box)
 		if err != nil {
 			return err
@@ -339,6 +342,15 @@ func loadSecretKey(ctx context.Context, conn *sql.Conn, keyDir string) ([]byte, 
 	var n int64
 	if err := conn.QueryRowContext(ctx, `SELECT `+strings.Join(parts, "+")).Scan(&n); err != nil {
 		return nil, err
+	}
+	if n == 0 {
+		bulk, err := bulkSealedExists(ctx, conn)
+		if err != nil {
+			return nil, err
+		}
+		if bulk {
+			n = 1 // at least one sealed log line or LLM record body
+		}
 	}
 	if n > 0 {
 		return nil, fmt.Errorf("the database holds %d encrypted secret(s) but no key is available: set %s or restore %s (refusing to generate a new key over encrypted data)", n, secretKeyEnv, path)
