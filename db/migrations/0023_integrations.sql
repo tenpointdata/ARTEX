@@ -1,4 +1,4 @@
--- E2 integrations: findings out to ticket trackers, scanner data in with provenance.
+-- E2 integrations (renumbered from 0015 before release, so it follows main's 0016-0022): findings out to ticket trackers, scanner data in with provenance.
 
 -- A configured external tracker (GitHub Issues, Jira, DefectDojo). kind is validated by the
 -- server against the ticketing registry, no CHECK (same as notification_channels.kind).

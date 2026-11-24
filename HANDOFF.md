@@ -59,6 +59,37 @@ See `docs/ARCHITECTURE.md` for the code-level map. Summary:
 
 ## Current state
 
+**2026-11-24 — E10 code-security lane (card `c-72dd9d`, in review)** on `ej/20261124-150533-1ba29e`,
+which merges the E2 backend branch `ej/20261124-055326-6bcfa9` (so E2 lands with it). SAST and SCA
+results come in as SARIF through the E2 import API and now share the runtime record:
+- `scanimport` gives each finding a lane (`runtime`/`sast`/`sca`, from the tool, an advisory-style
+  rule id, or a manifest or lockfile; `scanimport/lane.go`).
+- `POST /api/integrations/imports?format=sarif&task_id=N&asset_ids=…` writes one exploration fact
+  for the scan run that `yields` a finding node per new finding (`findings.node_id` set), anchored to
+  the runtime assets the code serves (`db/code_findings.go`, `server/scan_import_lane.go`).
+- `GET /api/report` lists code and runtime findings together, with a Source line
+  (lane, tool, rule, `path:line`, import id) and a per-lane summary (`report/source.go`).
+- `findings_total` skips imported claims and `finding_list` marks them; `prove_goal` already refused them.
+- Migration `0024_code_security_lane.sql` adds lane/location/line and fact/anchor columns. E2's
+  unreleased `0015_integrations.sql` is renumbered to `0023_integrations.sql` here, so an existing
+  main database (0022 applied) can start; the loader refuses a pending version older than an applied one.
+- E2 × E5 fix: `GET /api/exploration/findings/{id}/integrations` now needs `read`, not client_read.
+- Verified against Postgres 16: `TestCodeScanJoinsTaskGraphAndReport` (semgrep + trivy/osv SARIF
+  plus a runtime finding in one task report), the `db`, `agent`, `report` and `scanimport` suites, and
+  `scripts/verify.sh`. The `./server` suite passes except `TestManagerSOCKS5UDP…` (no `127.0.0.2` alias on macOS).
+- Docs: `docs/integrations.md` § Code-security lane. Follow-ups: `c-d059ae` (UI and exports),
+  `c-c978e3` (SAST-guided runtime verification), `c-5c4009` (tracker RBAC).
+
+**2026-11-24** — **E2 integrations** (card `c-6def05`, branch `ej/20261124-055326-6bcfa9`, landing with
+E10's branch; UI `c-597eb6` on `ej/20261124-132955-7aef3f`). See `docs/integrations.md`.
+- Findings out: package `ticketing` (GitHub Issues, Jira, DefectDojo) over `notify.Do` (SSRF guard,
+  redaction); tracker configs sealed at rest and masked; `/api/integrations/trackers` (CRUD, `push`,
+  `sync`); status round-trips, tracker wins on conflict, verification never touched.
+- Scanner data in: package `scanimport` (Nmap XML, Nuclei JSONL, ZAP JSON, Burp XML, SARIF);
+  `POST /api/integrations/imports` writes assets with provenance and unverified POE-0 findings; a
+  re-import never edits or promotes. Migration renumbered `0015` → `0023_integrations.sql` on the E10
+  branch (other E2 branches still carry 0015: merge main first).
+
 **2026-11-24 (c-ca2bd0, E4 follow-up)** — An operator can choose a task's methodologies. Migration
 **0022** adds `tasks.methodologies TEXT[]` (empty `{}` = automatic, as before). The create request
 (`methodologies`, ids matched loosely, stored canonical, unknown id = 400) and the create form
@@ -113,89 +144,28 @@ with `ARTEX_RSI_LESSONS=off`. Verified on Docker Desktop arm64: `up --build` bri
 isolation self-test passes, egress filter installed, UI 200, `ARTEX_RSI_LESSONS=off` in the container.
 No benchmark run was made against it.
 
-**2026-11-24 — E5 engagement governance (card `c-669406`)** is on branch `ej/20261124-055929-bd2253`. It
-is tested against Postgres 17 on macOS; see `docs/GOVERNANCE.md`.
-- **Roles.** `admin`, `operator`, `reviewer` and `client_read` work over the existing JWT. The users
-  are in `artex_users` and managed at `/api/users`. The policy table is `server/rbac_policy.go`,
-  enforced in `requireAuth`. `ARTEX` stays the break-glass admin.
-- **Authorization artifact.** Each task can have a versioned, immutable artifact covering scope, time
-  window and technique classes (`/api/tasks/{id}/authorization`). It is enforced only inside the
-  existing target gate (`intercept/authorization.go`, called from `CheckTargets`/`run`,
-  `CheckUngated`/`ungated`, and the dial and redirect paths). A spawned child task inherits it.
-- **Audit chain.** `audit_chain` is hash-chained and written by row triggers on `intercept_pending`,
-  `artex_users` and `engagement_authorizations`. Logins and refusals by role are appended too.
-  `GET /api/intercept/history/chain` lists it and `/chain/verify` checks it.
-- **Migration numbering.** Migration **0016** holds the schema, because 0015 is taken by the E2
-  integrations branch. If E2 has not merged when this branch lands, renumber whichever merges second.
-  The loader fails closed on a pending version older than one already applied.
-- **Tests.** With `ARTEX_PG_DSN`, all of `go test ./...` passes except three tests:
-  - `TestGateOffTaskIsUnchanged`, which also fails on base `1abe24f` (card `c-3157b4`);
-  - `TestConnectWithoutPasswordRealPG`, because the local Postgres uses trust auth;
-  - the SOCKS5 UDP test, because macOS cannot bind 127.0.0.2.
-- **Head-lock contention fixed (card `c-ba9f64`).** Migration **0018** recreates the three audit row
-  triggers as `DEFERRABLE INITIALLY DEFERRED` constraint triggers, so `audit_chain_head` is locked
-  only at commit. A task archive no longer stalls gate decisions or logins, and the
-  write-then-lock deadlock is gone. 0018 rather than 0017 because the E1 branch
-  (`ej/20261124-083744-02fa3c`) takes 0017. Tests: `db/audit_chain_concurrency_test.go` (both
-  concurrency tests fail without 0018). This branch merged the E5 branch in, so it carries E5 too.
-- **Web UI:** see the c-869050 entry above.
-
-**2026-11-24 — client_read bound to companies (card `c-5b5421`, in review)** is on branch
-`ej/20261124-110647-182fa9`. That branch merged the E5 branch (PR #16) in, so it carries E5 too.
-- A `client_read` user sees only the companies in `artex_user_companies` (migration **0019**, audited at
-  commit). Admins set them with `GET/PUT /api/users/{id}/companies`. An unbound client gets 403.
-- `server/client_scope.go`: every route open to `client_read` has a binder that runs after the role
-  check. Findings routes go through the #425 company filter with `StrictCompany`, which ignores
-  agent-added `task_scope` rows. Tasks and ids outside the binding answer 404. A route without a binder
-  is refused, and `TestClientBindersCoverClientRoutes` enforces that. The test found
-  `findings/{id}/traffic` and its body route open to clients without a binder, so both are now bound.
-- A client's report counts only its own companies' assets, and its `/api/stats` drops the global
-  traffic and asset totals. `findings/retests/active` now needs `read`.
-- Tests: `server/client_scope_pg_test.go`, checked by mutation. `go test ./db ./server` with PG passes
-  except `TestConnectWithoutPasswordRealPG` (trust auth) and the SOCKS5 UDP test (macOS). verify.sh passes.
-- **Migration order:** 0016 (E5), 0018, 0019 (this branch), with E1 holding 0017. The loader refuses a
-  pending version older than an applied one, so renumber E1 above 0019 if it lands later.
+**2026-11-24 — E5 engagement governance (card `c-669406`)**, see `docs/GOVERNANCE.md`:
+- Roles `admin`/`operator`/`reviewer`/`client_read` over the existing JWT (`artex_users`, `/api/users`),
+  policy table `server/rbac_policy.go` enforced in `requireAuth`; `ARTEX` stays break-glass admin.
+- A versioned, immutable per-task authorization artifact (scope, window, technique classes) enforced
+  only inside the existing target gate (`intercept/authorization.go`); children inherit it.
+- Hash-chained `audit_chain` written by deferred row triggers (migrations 0016, 0018 for `c-ba9f64`);
+  `GET /api/intercept/history/chain` and `/chain/verify`.
+- `client_read` is bound to companies (`c-5b5421`, migration 0019, `server/client_scope.go`): every
+  client route needs a binder, enforced by `TestClientBindersCoverClientRoutes`; a client's report
+  and stats see only its own companies.
+- Known test gaps with PG on macOS: `TestGateOffTaskIsUnchanged` (`c-3157b4`),
+  `TestConnectWithoutPasswordRealPG` (trust auth), the SOCKS5 UDP test (no 127.0.0.2).
 
 **2026-11-23** — Fixes for the High and Medium findings from the 2026-11-23 security audit are on
 `main` (PR #1, branch `ej/20261123-145205-6a3af6`); the Linux/Docker verification fixes come from
 `ej/20261123-152406-fccff3`. It covers audit findings #1–#16 except as listed under Open work.
-Verified 2026-11-23 (card `c-dadc14`, done):
-- `go vet ./...` + `go test ./...` **as root on Linux** (golang:1.26.11-bookworm, arm64) with
-  `ARTEX_PG_DSN` set: all packages ok, including the `*AsRoot` executor/isolation tests,
-  `TestExecHomePerRunDirAsRoot` and the MCP uid-10002 split. Two test fixes were needed (commit
-  `fc8c3f9`): the isolation probe could not exec the `go test` binary from its 0700 build dir (also
-  broken on main), and `TestGateOffTaskIsUnchanged` still expected zero lookups with the gate off.
-- Docker egress: through the real `docker-compose.yml` (NET_ADMIN) on a slim image of the same
-  runtime base, `[artex] egress: installed` is logged, `-m owner`/`-m addrtype` load on bookworm's
-  nf_tables iptables 1.8.9, and the executor is refused for 169.254.169.254, 100.100.100.200, the
-  gateway, host.docker.internal (root reaches the host service) and :8787 on every local address,
-  while a LAN router, another container and the internet stay reachable. The full image gives the
-  same results (2026-11-24, `c-a6891b`, below).
-- Web: `npm ci` and `npx tsc --noEmit` clean. `npm run lint` fails with 84 errors, all already on main
-  and none in the changed files (`c-834a5a`). Headless Chromium: setup, login, Sign out over the
-  HttpOnly SameSite=Strict cookie work and `document.cookie` is empty, **but a token copied before
-  logout stays valid for 7 days** (`c-a0af33`).
-- The stock compose cannot start on Docker Desktop for Mac: bind mounts ignore permissions, so the
-  isolation self-test fails closed (also on main; `c-775dc2`). Use named volumes there.
+Verified 2026-11-23 (`c-dadc14`, done): `go test ./...` as root on Linux with Postgres; Docker egress
+rules refuse metadata, the gateway, host.docker.internal and :8787 for the executor; web `tsc` clean
+(`npm run lint` has 84 old errors, `c-834a5a`). A token copied before logout stays valid for 7 days
+(`c-a0af33`). Stock compose cannot start on Docker Desktop for Mac (bind mounts; `c-775dc2`): use named volumes.
 
 Operator-facing changes:
-
-**2026-11-24** — **E2 integrations** (card `c-6def05`) are on branch `ej/20261124-055326-6bcfa9`.
-This is backend and API only; there is no web UI yet (card `c-597eb6`). See `docs/integrations.md`.
-- **Findings out:** package `ticketing` has GitHub Issues, Jira and DefectDojo adapters. All of
-  them go through `notify.Do`, which carries the notify SSRF guard and redaction. Tracker configs
-  are sealed at rest and masked on readback, and a destination change requires the credentials
-  again. Routes are under `/api/integrations/trackers` (CRUD, `push`, `sync`). Finding status
-  round-trips in both directions; when both sides changed, the tracker wins. A ticket's status never
-  touches the finding's verification.
-- **Scanner data in:** package `scanimport` parses Nmap XML, Nuclei JSONL, ZAP JSON, Burp XML and
-  SARIF. `POST /api/integrations/imports` writes assets with provenance (`scan_import_assets`) and
-  unverified POE-0 findings (`finding_import_sources`). A re-import never edits or promotes a finding.
-- Migration `0015_integrations.sql` is new and has not been released.
-- Verified on macOS against a local Postgres: `go test` for `db`, `ticketing`, `scanimport`,
-  `notify` and `agent`, the new server tests, and `scripts/verify.sh`. `./server` still has three
-  failures that also fail at base `1abe24f`, because of the local environment: a trust-auth
-  Postgres, no `127.0.0.2` loopback alias, and DNS lookups.
 
 - Native (non-Linux-root) starts now refuse unless `ARTEX_ALLOW_UNSANDBOXED=1` is set; `dev.sh` sets it.
 - A non-loopback `-addr` without TLS is refused. Use `-tls-cert`/`-tls-key` (or
@@ -243,29 +213,16 @@ This is backend and API only; there is no web UI yet (card `c-597eb6`). See `doc
   released (dirs closed, processes reaped, files back to root) on a terminal status, a task delete or a
   conversation delete. `egress.sh` filters the range. Code: `server/execuid.go`,
   `server/execuid_unix.go`. Single-uid mode is still the default.
-  Verified: Linux-root tests (`server/execuid_root_linux_test.go`, where task A gets EACCES on
-  `tasks/B/i1` and `.artex-home`), the full server and agent suites as root in `golang:1.26.11-bookworm`,
-  and egress rules with iptables in a NET_ADMIN container.
-  Spill dirs follow the key too (card `c-dd160a`, `server/execuid_spill_unix.go`). A live key's
-  `<data>/spill/{tasks,sessions}/<id>` is `root:<uid>` 0750 with files `root:<uid>` 0640, so the
-  shared exec gid no longer reads another task's spills. It is regrouped on acquire, closed to
-  `root:root` 0700 at the start of release, and closed at start-up when the key holds no uid. Verified
-  by `TestExecUIDRangeSpillIsolationAsRoot`, where task A's shell and file tool get EACCES on B's spill,
-  plus the full server suite as root in Docker.
+  Verified as root in Docker (Linux-root tests, full server/agent suites, iptables in NET_ADMIN).
+  Spill dirs follow the key (`c-dd160a`, `server/execuid_spill_unix.go`): a live key's spill dir is
+  `root:<uid>` 0750, closed to `root:root` 0700 on release; `TestExecUIDRangeSpillIsolationAsRoot`.
   Root tests in Docker: build the test binary into a 0755 dir (`go test -c -o /t/server.test`). The
   default 0700 go-build dir makes the isolation self-tests fail on `main` too.
 
-**2026-11-24: full Docker image verified (card `c-a6891b`).** The complete image (bbot, chromium,
-Playwright) built from `1abe24f` with the committed Dockerfile on Docker Desktop arm64 in 34 min. The
-bbot layer's own dry-run grep passed: trufflehog installed cleanly this time, with no ERRR. Run through
-`docker-compose.yml` with named volumes, it logs `[artex] egress: installed for uid 10001 (ipv4)…(ipv6)`
-and the isolation self-test passes. Checked with `scripts/docker-egress-probe.sh` (new): the executor
-gets REJECT on 169.254.169.254, 127.0.0.1:8787, the container IP's :8787 and host.docker.internal; root
-reaches all of them except metadata, which Docker Desktop doesn't serve (timeout). Both reach the LAN
-router and example.com. `scripts/docker-login-probe.js` (new, uses the image's Playwright) passes
-login, HttpOnly + SameSite=Strict cookie, token hidden from scripts, Sign out → /login and 401. Replaying
-the pre-logout cookie still gets 200 because revocation (`c-a0af33`) is not on main yet. Not re-run on
-the newer main (`-exec-uid-range`, #18).
+**2026-11-24: full Docker image verified (card `c-a6891b`)** from `1abe24f` on Docker Desktop arm64:
+egress installed, isolation self-test passes, `scripts/docker-egress-probe.sh` and
+`scripts/docker-login-probe.js` (both new) pass; the pre-logout cookie still works until `c-a0af33`
+lands. Not re-run on newer main.
 
 **2026-11-24: E8 evaluation suite** (card `c-5487e8`) is in `scripts/benchmark`. `eval_suite.py run` runs a
 baseline and a candidate prompt arm over a held-out suite. Both arms share one stamp: model chain, schedule
@@ -299,6 +256,11 @@ body, through the versioned prompt API, and the starting bodies are restored aft
    CVSS/EPSS-scored, remediation-bearing, standards-mapped deliverables (OWASP ASVS/WSTG, MITRE
    ATT&CK). Done = a report export with per-finding CVSS vector + remediation + framework tags,
    covered by tests. Card `c-8f9cca`.
+
+8. *(unclaimed)* — **E2×E5 tracker RBAC** (S), card `c-5c4009`. Done = tracker create/update/delete
+   need admin (like notify channels), push/sync stay operator; RBAC tests pass.
+9. *(unclaimed)* — **E10 lane in UI and exports** (M), card `c-d059ae` (after the E2 UI branch lands).
+   Done = anchor picker on Scanner imports, lane badge/filter on findings, lane in both exports.
 
 - *(unclaimed)* — **RSI gate hardening** (M), card `c-0d277f`: server-side per-task arm ledger, suite
   pre-registration, adopted-lesson retire sync. Done = Postgres tests for each.
@@ -388,10 +350,16 @@ Card ids in brackets:
   is on main (origin/main's has no `github-actions` entry).
 - **E8 follow-ups** [`c-f1518c`] first live run, [`c-75c593`] bench
   image from a clean clone, [`c-d73308`] optional provider sampling seed per LLM profile.
-- **E10** [`c-72dd9d`] Code-security testing lane (SAST/dependency ingest) feeding the same dual-graph + evidence model.
+- **E10** [`c-72dd9d`] Code-security lane: built 2026-11-24, in review (see Current state). Follow-ups:
+  [`c-d059ae`] lane in UI and exports; [`c-c978e3`] SAST-guided runtime verification;
+  [`c-5c4009`] tracker RBAC (E2×E5).
 
 ## Known issues and gotchas
 
+- **E2's migration is 0023 now, not 0015** (renumbered on the E10 branch, `ej/20261124-150533-1ba29e`,
+  because main already applies 0016–0022 and the loader refuses an older pending version). The other
+  E2 branches (`…132955-7aef3f` UI, `…135159-6d9961` sync) still carry `0015_integrations.sql`: merge
+  main into them after E10 lands, and git takes the rename.
 - **Migration 0020 (RSI) vs other branches' 0015–0019:** the runner refuses a pending migration older
   than the newest applied one, so merge 0015–0019 (E2, E5, E1, c-ba9f64, c-5b5421) before this branch
   reaches a database, or renumber 0020 forward at merge. `db/migrate_test.go` lists 0020 explicitly.
@@ -489,6 +457,18 @@ Card ids in brackets:
   because the deny-list, operation-name and introspection middlewares only run in Expert mode (moved to
   notes). Added GT-012, stack traces on `/graphiql` (`format_custom_error`). The notes now say that
   difficulty is server-wide DB state, switched by `X-DVGA-MODE` or `/difficulty/<level>`, not chosen per request.
+- **2026-11-24 E10:**
+  - Code findings come in through the E2 SARIF import, not a new ingest path: one parser, and one
+    provenance table with a `lane` column, instead of a SAST-specific store.
+  - A task import writes into the task's exploration graph (a fact for the scan run that `yields`
+    finding nodes, `findings.node_id` set), so the existing report, planner tools and exports read one
+    record. No new node kind or edge relation, so no CHECK migration.
+  - Code is not a new asset type. Code findings anchor to existing runtime assets the operator
+    names (`asset_ids`), which is where a SAST and a runtime finding on one application meet. A
+    `repository` asset type can come later if a consumer needs it.
+  - Imported findings stay unverified leads: excluded from `findings_total`, and `prove_goal`
+    refuses them (no verified traffic). Only a reproduced worker finding proves a goal.
+  - SCA is classified from typed fields only (tool, advisory-style rule id, manifest file name).
 - **2026-11-24 E2:**
   - Imported findings are scanner claims: `unverified`, POE 0, `worker=import:<tool>`. A known dedup
     key leaves the existing finding untouched.

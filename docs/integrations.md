@@ -75,7 +75,7 @@ curl -H "Authorization: Bearer $TOKEN" --data-binary @semgrep.sarif \
   `sca`. A SARIF result is `sca` when its tool only scans dependencies (osv-scanner, grype, ...),
   its rule id is an advisory id (CVE, GHSA, PYSEC, RUSTSEC, GO-, SNYK-, ...) or its file is a
   manifest or lockfile; otherwise `sast`. A Trivy file can hold both. The lane, the repo-relative
-  path and the line are stored in `finding_import_sources` (migration 0023).
+  path and the line are stored in `finding_import_sources` (migration 0024).
 - **Exploration graph.** With `task_id`, the import writes one exploration **fact** for the scan
   run (format, tool, version, file hash, counts by lane; typed values only), and every new finding
   becomes a **finding node** of the task that the fact `yields`, with `findings.node_id` set, the
