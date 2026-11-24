@@ -231,6 +231,9 @@ func run() int {
 	ctx, shutdown := shutdownContext(sigCtx)
 	defer shutdown(agent.AbortShutdown)
 
+	stopTelemetry := startTelemetry(version)
+	defer stopTelemetry()
+
 	mgr, err := server.NewManager(*dataDir, *proxy)
 	if err != nil {
 		log.Fatalf("open stores: %v", err)
