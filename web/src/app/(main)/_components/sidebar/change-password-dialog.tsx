@@ -17,6 +17,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { t } from "@/i18n";
 import { api } from "@/lib/api";
+import { auth } from "@/lib/auth";
 
 export function ChangePasswordDialog({
   open,
@@ -52,18 +53,17 @@ export function ChangePasswordDialog({
     setSaving(true);
     api
       .changePassword(oldPassword, newPassword)
-      .then(() => {
-        toast.success(t("Password changed"));
+      .then(async () => {
+        // The change ends every session of this account, this one included, so the
+        // next request would be refused: sign out here and go to the login page.
+        toast.success(t("Password changed. Sign in again with the new password."));
         onOpenChange(false);
+        await auth.logout();
+        window.location.href = "/login";
       })
       .catch((err) => toast.error(t("Change failed: {error}", { error: (err as Error).message })))
       .finally(() => setSaving(false));
   }
-
-  // The username stays bold; it is placed through a placeholder so the sentence is translated whole.
-  const [descBefore, descAfter = ""] = t(
-    "The username is fixed as {username}. Enter the current password to verify; login tokens issued before the change stay valid until they expire.",
-  ).split("{username}");
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -72,9 +72,9 @@ export function ChangePasswordDialog({
           <DialogHeader>
             <DialogTitle>{t("Change password")}</DialogTitle>
             <DialogDescription>
-              {descBefore}
-              <b>ARTEX</b>
-              {descAfter}
+              {t(
+                "Enter the current password to verify. Changing the password ends every session of this account, including this one; sign in again with the new password.",
+              )}
             </DialogDescription>
           </DialogHeader>
           <div className="flex flex-col gap-3 py-4">
