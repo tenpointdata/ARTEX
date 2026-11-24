@@ -169,6 +169,23 @@ func clientIP(r *http.Request, trusted []netip.Prefix) string {
 	return addr.Unmap().WithZone("").String()
 }
 
+// limitKey is the rate-limit bucket for a client address: the address itself
+// for IPv4 (IPv4-mapped IPv6 counts as IPv4), and its /64 for IPv6. One
+// IPv6 subscriber or host is routinely handed a whole /64, so keying by the full
+// address would let it rotate through 2^64 fresh buckets. Anything that does
+// not parse is its own key.
+func limitKey(ip string) string {
+	a, err := netip.ParseAddr(ip)
+	if err != nil {
+		return ip
+	}
+	a = a.Unmap().WithZone("")
+	if a.Is4() {
+		return a.String()
+	}
+	return netip.PrefixFrom(a, 64).Masked().String()
+}
+
 func isTrusted(a netip.Addr, trusted []netip.Prefix) bool {
 	a = a.Unmap().WithZone("")
 	for _, p := range trusted {

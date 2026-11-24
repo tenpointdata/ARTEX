@@ -160,6 +160,12 @@ func run() int {
 		log.Printf("[config] ARTEX_TRUSTED_PROXIES: %v", err)
 		return 1
 	}
+	// Host names the console answers to besides localhost and IP literals (DNS-rebinding defence).
+	allowedHosts, err := server.ParseAllowedHosts(os.Getenv("ARTEX_ALLOWED_HOSTS"))
+	if err != nil {
+		log.Printf("[config] ARTEX_ALLOWED_HOSTS: %v", err)
+		return 1
+	}
 	trustedAddrs := make([]string, 0, len(trusted))
 	for _, p := range trusted {
 		trustedAddrs = append(trustedAddrs, p.String())
@@ -237,7 +243,7 @@ func run() int {
 	}
 	defer mgr.Close()
 
-	srv := server.New(ctx, mgr, skillDir, *dataDir, keyDir, server.WithSecretScrub(), server.WithTrustedProxies(trusted), server.WithExecPrivilege(priv), server.WithIsolationStatus(isolation))
+	srv := server.New(ctx, mgr, skillDir, *dataDir, keyDir, server.WithSecretScrub(), server.WithTrustedProxies(trusted), server.WithAllowedHosts(allowedHosts), server.WithExecPrivilege(priv), server.WithIsolationStatus(isolation))
 	// ReadTimeout bounds how long the request headers and body may take to arrive.
 	// It does not limit how long a handler runs, so an event stream stays open.
 	// WriteTimeout is left unset: a write deadline would cut that stream.

@@ -3,6 +3,7 @@ package db
 import (
 	"database/sql"
 	"strconv"
+	"time"
 )
 
 // Settings is a tiny key-value store for global app config the UI toggles at
@@ -105,9 +106,16 @@ RETURNING value`, versionKey).Scan(&raw); err != nil {
 	return n, nil
 }
 
-// InsertPassword writes the hash only when that key is absent, and sets the
-// version to 1 in the same transaction. inserted is false when the hash
+// InsertPassword writes the hash only when that key is absent, and moves the
+// version forward in the same transaction. inserted is false when the hash
 // already exists; the version row is then left as it was.
+//
+// The version never goes back: a first-run setup after the hash was removed
+// (an operator reset) must not reissue a version an old token carries. The new
+// version is the larger of the stored one plus one and the current Unix time
+// in milliseconds, so it also stays ahead of tokens from before a deleted
+// version row (a counter outruns the clock only with over 1000 password
+// changes a second). A stored value that is not a counter counts as 0.
 func (d *DB) InsertPassword(hashKey, hash, versionKey string) (version int64, inserted bool, err error) {
 	tx, err := d.Begin()
 	if err != nil {
@@ -131,15 +139,23 @@ ON CONFLICT (key) DO NOTHING`, hashKey, sealed)
 	if n == 0 {
 		return 0, false, nil
 	}
-	if _, err := tx.Exec(`
-INSERT INTO settings(key, value) VALUES ($1, '1')
-ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()`, versionKey); err != nil {
+	var raw string
+	if err := tx.QueryRow(`
+INSERT INTO settings(key, value) VALUES ($1, $2::bigint::text)
+ON CONFLICT (key) DO UPDATE SET value = GREATEST(
+	CASE WHEN settings.value ~ '^[0-9]{1,18}$' THEN settings.value::bigint ELSE 0 END + 1,
+	$2::bigint)::text, updated_at = now()
+RETURNING value`, versionKey, time.Now().UnixMilli()).Scan(&raw); err != nil {
+		return 0, false, err
+	}
+	version, err = strconv.ParseInt(raw, 10, 64)
+	if err != nil {
 		return 0, false, err
 	}
 	if err := tx.Commit(); err != nil {
 		return 0, false, err
 	}
-	return 1, true, nil
+	return version, true, nil
 }
 
 // GetBool returns the boolean setting, or def when unset/unparseable.

@@ -70,6 +70,8 @@ services:
       # first start).
       ARTEX_SECRET_KEY: ${ARTEX_SECRET_KEY:-}
       ARTEX_TRUSTED_PROXIES: ${ARTEX_TRUSTED_PROXIES:-}
+      # Host names the console answers to besides localhost and IP addresses (DNS-rebinding defence).
+      ARTEX_ALLOWED_HOSTS: ${ARTEX_ALLOWED_HOSTS:-}
       # Untrusted-output boundary: on by default (empty = on); set 0 to disable.
       ARTEX_UNTRUSTED_BOUNDARY: ${ARTEX_UNTRUSTED_BOUNDARY:-}
       ARTEX_UPDATE_CHECK: ${ARTEX_UPDATE_CHECK:-}

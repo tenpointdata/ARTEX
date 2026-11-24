@@ -722,7 +722,16 @@ server {
 }
 ```
 
-**Login rate limit behind a proxy**: login allows 10 attempts per minute per client IP. Behind a
+**Host names (DNS-rebinding defence)**: ARTEX answers only to `localhost`, `*.localhost`, IP
+addresses, and the names listed in `ARTEX_ALLOWED_HOSTS` (comma-separated; `*.example.com` matches
+every subdomain). Any other `Host` gets `421 Misdirected Request`, so a page on a foreign domain that
+re-points its DNS at your ARTEX cannot read the API. Behind a proxy, set
+`ARTEX_ALLOWED_HOSTS=your.domain.com`. From a peer in `ARTEX_TRUSTED_PROXIES`, `X-Forwarded-Host`
+(when the proxy sends it) is checked in place of `Host`.
+
+**Login rate limit behind a proxy**: login allows 10 attempts per minute per client IP (per /64
+for IPv6), and at most 100 failed logins per minute across all sources; past that bound only
+sources that logged in successfully within the last 7 days may keep trying until the minute ends. Behind a
 proxy every request comes from the proxy's address, so without further setup all users share one
 budget and an attacker who fails 10 logins blocks everyone, admin included, for up to 15 minutes.
 Keep the `X-Forwarded-For` line and set `ARTEX_TRUSTED_PROXIES` (comma-separated CIDRs, empty by

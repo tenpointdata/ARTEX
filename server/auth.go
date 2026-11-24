@@ -47,7 +47,8 @@ const (
 const errDataSourceUnavailable = "Data source temporarily unavailable, please retry later"
 
 // pwdState values. The zero value is unread, which still accepts a valid token
-// at version 0. unreadable means a startup read failed and every token is rejected.
+// whose version claim is 0. unreadable means a startup read (password version or
+// revocation list) failed and every token is rejected.
 const (
 	pwdUnread int32 = iota
 	pwdReady
@@ -173,7 +174,8 @@ func samePath(a, b string) bool {
 
 // sessionClaims carries the password version the token was signed under.
 // Two changes in the same second get different versions, so a cutoff based on
-// the issued-at second cannot leave the older token valid.
+// the issued-at second cannot leave the older token valid. The registered jti
+// (ID) names the token so logout can revoke it (auth_revoke.go).
 type sessionClaims struct {
 	Pwd int64 `json:"pwd"`
 	jwt.RegisteredClaims
@@ -186,9 +188,14 @@ func signJWT(key []byte) (string, error) {
 
 // signJWTVersion issues a 7-day HS256 token bound to a password version.
 func signJWTVersion(key []byte, version int64) (string, error) {
+	id := make([]byte, 16)
+	if _, err := rand.Read(id); err != nil {
+		return "", err
+	}
 	return jwt.NewWithClaims(jwt.SigningMethodHS256, sessionClaims{
 		Pwd: version,
 		RegisteredClaims: jwt.RegisteredClaims{
+			ID:        hex.EncodeToString(id),
 			Subject:   "ARTEX",
 			ExpiresAt: jwt.NewNumericDate(time.Now().Add(jwtTTL)),
 			IssuedAt:  jwt.NewNumericDate(time.Now()),
@@ -196,10 +203,20 @@ func signJWTVersion(key []byte, version int64) (string, error) {
 	}).SignedString(key)
 }
 
-// verifyJWT returns true when tokenStr is a valid, non-expired HS256 token.
-// version 0 means no password change is stored yet, and any valid token is
-// accepted. A later version requires the token's pwd claim to equal it.
+// verifyJWT returns true when tokenStr is a valid, non-expired HS256 token
+// that carries a jti and whose pwd claim equals version.
 func verifyJWT(tokenStr string, key []byte, version int64) bool {
+	_, ok := sessionToken(tokenStr, key, version)
+	return ok
+}
+
+// sessionToken parses tokenStr as verifyJWT does and returns its claims. The
+// version must match exactly, 0 included: version 0 (no counter stored, e.g. a
+// legacy install) once accepted every valid token, which let a token from a
+// later version outlive a lost or deleted counter. A token without a jti
+// predates revocable sessions and cannot be logged out, so it is refused;
+// upgrading ends those sessions once.
+func sessionToken(tokenStr string, key []byte, version int64) (*sessionClaims, bool) {
 	claims := &sessionClaims{}
 	t, err := jwt.ParseWithClaims(tokenStr, claims, func(t *jwt.Token) (any, error) {
 		if _, ok := t.Method.(*jwt.SigningMethodHMAC); !ok {
@@ -207,23 +224,18 @@ func verifyJWT(tokenStr string, key []byte, version int64) bool {
 		}
 		return key, nil
 	})
-	if err != nil || !t.Valid {
-		return false
+	if err != nil || !t.Valid || claims.Pwd != version || claims.ID == "" {
+		return nil, false
 	}
-	if version > 0 && claims.Pwd != version {
-		return false
-	}
-	return true
+	return claims, true
 }
 
 // sessionOK reports whether token is still a session for the password version
-// this process has loaded. A failed version read rejects every token until
-// login reads the counter again.
+// this process has loaded and has not been logged out. A failed version or
+// revocation read rejects every token until login reads them again.
 func (s *Server) sessionOK(token string) bool {
-	if s.pwdState.Load() == pwdUnreadable {
-		return false
-	}
-	return verifyJWT(token, s.jwtKey, s.pwdVersion.Load())
+	_, ok := s.session(token)
+	return ok
 }
 
 func (s *Server) passwordHashKey() string {
@@ -422,7 +434,7 @@ func (s *Server) initSetupToken() {
 }
 
 // loadPasswordVersion reads auth.password_version. A missing key leaves the
-// version at zero, which accepts every valid token. A read that still fails
+// version at zero, which accepts only tokens signed at version 0. A read that still fails
 // after three tries rejects every token. Login calls this again when the
 // state is unreadable, and stays closed if that read fails too.
 func (s *Server) loadPasswordVersion() {
@@ -603,7 +615,7 @@ func (s *Server) passwordChangeWait(r *http.Request) time.Duration {
 	if s.pwdLimit == nil {
 		return 0
 	}
-	ip := clientIP(r, s.trustedProxies)
+	ip := limitKey(clientIP(r, s.trustedProxies))
 	tok := pwdLimitTokenPrefix + extractToken(r)
 	return max(s.pwdLimit.allow(ip), s.pwdLimit.allow(tok))
 }
@@ -612,7 +624,7 @@ func (s *Server) passwordChangeReset(r *http.Request) {
 	if s.pwdLimit == nil {
 		return
 	}
-	s.pwdLimit.reset(clientIP(r, s.trustedProxies))
+	s.pwdLimit.reset(limitKey(clientIP(r, s.trustedProxies)))
 	s.pwdLimit.reset(pwdLimitTokenPrefix + extractToken(r))
 }
 
@@ -627,11 +639,17 @@ func (s *Server) authLogin(w http.ResponseWriter, r *http.Request) {
 
 // login is authLogin past the data-source check; getSetting is pg.GetSetting,
 // a parameter so tests can run it without PostgreSQL. Every attempt counts
-// against the caller's IP (s.loginLimit, keyed by clientIP) and a successful
-// one clears it. There is no per-account lockout and no password length check here.
+// against the caller's address (s.loginLimit, keyed by limitKey: the IPv4
+// address or the IPv6 /64) and a successful one clears it. Failures also count
+// toward s.loginCeiling, a bound across all sources (login_ceiling.go). There
+// is no per-account lockout and no password length check here.
 func (s *Server) login(w http.ResponseWriter, r *http.Request, getSetting func(string) (string, bool, error)) {
-	ip := clientIP(r, s.trustedProxies)
-	if wait := s.loginLimit.allow(ip); wait > 0 {
+	ip := limitKey(clientIP(r, s.trustedProxies))
+	wait := s.loginLimit.allow(ip)
+	if wait == 0 {
+		wait = s.loginCeiling.wait(ip)
+	}
+	if wait > 0 {
 		secs := int((wait + time.Second - 1) / time.Second)
 		w.Header().Set("Retry-After", strconv.Itoa(secs))
 		writeErr(w, 429, fmt.Sprintf("Too many login attempts, try again in %d seconds", secs))
@@ -646,6 +664,7 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request, getSetting func(s
 		return
 	}
 	if req.Username != "ARTEX" {
+		s.loginCeiling.fail()
 		writeErr(w, 401, "Incorrect username or password")
 		return
 	}
@@ -659,12 +678,14 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request, getSetting func(s
 		return
 	}
 	if err := bcrypt.CompareHashAndPassword([]byte(hash), []byte(req.Password)); err != nil {
+		s.loginCeiling.fail()
 		writeErr(w, 401, "Incorrect username or password")
 		return
 	}
 	s.loginLimit.reset(ip)
+	s.loginCeiling.succeed(ip)
 	if s.pwdState.Load() == pwdUnreadable {
-		s.loadPasswordVersion()
+		s.loadAuthState()
 	}
 	if s.pwdState.Load() == pwdUnreadable {
 		writeErr(w, 503, errDataSourceUnavailable)

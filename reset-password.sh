@@ -154,9 +154,9 @@ INSERT INTO settings(key, value)
 VALUES ('$PASS_KEY', crypt(:'newpw', gen_salt('bf', $BCRYPT_COST)))
 ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now();
 INSERT INTO settings(key, value)
-VALUES ('$VERSION_KEY', '1')
+VALUES ('$VERSION_KEY', (extract(epoch from now()) * 1000)::bigint::text)
 ON CONFLICT (key) DO UPDATE
-SET value = (settings.value::bigint + 1)::text, updated_at = now();
+SET value = GREATEST(settings.value::bigint + 1, (extract(epoch from now()) * 1000)::bigint)::text, updated_at = now();
 COMMIT;
 SQL
 )

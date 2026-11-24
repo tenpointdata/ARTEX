@@ -61,8 +61,8 @@ type Server struct {
 
 	setupMu    sync.Mutex
 	setupToken string // one-time token POST /api/auth/init requires; empty when none is active
-	// pwdVersion is auth.password_version, a counter. Zero means no password
-	// change is stored yet, and any valid token is accepted. pwdState is
+	// pwdVersion is auth.password_version, a monotonic counter; a token must
+	// carry exactly this version (0 only on installs with no counter). pwdState is
 	// pwdUnreadable when that counter could not be read; every session is
 	// rejected until login reads it again.
 	pwdVersion atomic.Int64
@@ -83,6 +83,9 @@ type Server struct {
 	loginLimit     *loginLimiter  // per-IP attempt limit on POST /api/auth/login
 	pwdLimit       *loginLimiter  // attempt limit on POST /api/auth/change-password (IP + session token)
 	trustedProxies []netip.Prefix // ARTEX_TRUSTED_PROXIES; see clientIP
+	allowedHosts   HostPolicy     // ARTEX_ALLOWED_HOSTS; see hostGuard
+	loginCeiling   *failCeiling   // global failed-login bound across all limiter keys
+	revoked        revocations    // logged-out token ids; see auth_revoke.go
 
 	// concMu serializes concurrency-cap decisions (admission + reconcile) so a
 	// scheduler tick and an HTTP settings change / task creation can't both count
@@ -202,13 +205,14 @@ func New(ctx context.Context, m *Manager, skillDir string, dataDir string, keyDi
 		profChatAgents: map[int64]*agent.ChatAgent{},
 		provByProfile:  map[int64]*provEntry{},
 		taskAgents:     map[string]*taskAgentBundle{}, archiveWake: make(chan struct{}, 1),
-		loginLimit: newLoginLimiter(time.Now), pwdLimit: newLoginLimiter(time.Now)}
+		loginLimit: newLoginLimiter(time.Now), pwdLimit: newLoginLimiter(time.Now),
+		loginCeiling: newFailCeiling(time.Now)}
 	s.llmHealth, s.llmHealthSync = newLLMHealthRegistry(ctx, m.pg)
 	for _, o := range opts {
 		o(s)
 	}
 	s.initSetupToken()
-	s.loadPasswordVersion()
+	s.loadAuthState()
 	s.initSideQuestions()
 	// Circuit-breaker thresholds/cooldowns are hot parameters on the failure path; push the global retry policy to the Registry once at startup,
 	// and again on every policy save (saveLLMRetryPolicy).
@@ -1112,7 +1116,7 @@ func (s *Server) Handler() http.Handler {
 		consoleHeaders(w.Header())
 		webui.ServeHTTP(w, r)
 	})
-	return s.securityHeaders(limitRequestBody(root))
+	return s.securityHeaders(s.hostGuard(limitRequestBody(root)))
 }
 
 // --- handlers ---

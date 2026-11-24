@@ -19,6 +19,8 @@ func TestMain(m *testing.M) {
 	RunExecShimIfRequested(os.Args)
 	// assembly_hook_test.go starts this binary as a stdio MCP server.
 	runFakeMCPIfRequested()
+	// httptest.NewRequest's default Host; the Host allowlist (host_allow.go) refuses other names.
+	builtinHostNames["example.com"] = true
 	// Norma keeps background-task output in os.TempDir()/norma. The tests get a temp
 	// directory of their own, so a session they start never writes the host's
 	// <temp>/norma. It is world-writable and sticky like /tmp: MkdirTemp makes it

@@ -1,6 +1,7 @@
 package server
 
 import (
+	"log"
 	"net/http"
 	"net/netip"
 	"strings"
@@ -65,14 +66,21 @@ func sessionCookieValue(r *http.Request) string {
 	return ""
 }
 
-// POST /api/auth/logout clears the session cookie (both names, whichever the
-// browser holds). Bearer clients have nothing to clear.
+// POST /api/auth/logout revokes the presented token (cookie or bearer) on the
+// server, so a copy of it stops working too (auth_revoke.go), and clears the
+// session cookie (both names, whichever the browser holds).
 func (s *Server) authLogout(w http.ResponseWriter, r *http.Request) {
+	err := s.revokeSession(extractToken(r))
 	for _, name := range []string{sessionCookieSecure, sessionCookiePlain} {
 		http.SetCookie(w, &http.Cookie{
 			Name: name, Value: "", Path: "/", MaxAge: -1,
 			HttpOnly: true, Secure: name == sessionCookieSecure, SameSite: http.SameSiteStrictMode,
 		})
+	}
+	if err != nil {
+		log.Printf("[auth] logout: revocation not persisted, it holds until restart: %v", err)
+		writeErr(w, 503, "Logged out, but the revocation could not be saved: the token is refused until ARTEX restarts. Retry logout or change the password to end it for good")
+		return
 	}
 	writeJSON(w, 200, map[string]any{"ok": true})
 }
