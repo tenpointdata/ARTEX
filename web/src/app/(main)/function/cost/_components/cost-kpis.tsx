@@ -1,5 +1,6 @@
 import { t } from "@/i18n";
 import type { CostRow } from "@/lib/types";
+
 import { costMetrics, fmtDuration, fmtEur, fmtInt, fmtPct } from "./cost-metrics";
 
 export function CostKpis({ total }: { total: CostRow }) {
@@ -15,7 +16,7 @@ export function CostKpis({ total }: { total: CostRow }) {
       {items.map(([k, v]) => (
         <div key={k} className="flex items-baseline gap-2">
           <dt className="text-muted-foreground">{k}</dt>
-          <dd className="text-lg font-semibold tabular-nums">{v}</dd>
+          <dd className="font-semibold text-lg tabular-nums">{v}</dd>
         </div>
       ))}
     </dl>

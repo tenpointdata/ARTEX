@@ -90,29 +90,40 @@ func ParseCostDimension(s string) (CostDimension, error) {
 
 // CostRow is the spend and efficiency of one group of LLM calls.
 type CostRow struct {
-	Key              string    `json:"key"`
-	Label            string    `json:"label"`
-	Calls            int       `json:"calls"`
-	Tasks            int       `json:"tasks"`
-	Errors           int       `json:"errors"`
-	InputTokens      int       `json:"input_tokens"` // includes cache read and write
-	OutputTokens     int       `json:"output_tokens"`
-	CacheReadTokens  int       `json:"cache_read_tokens"`
-	CacheWriteTokens int       `json:"cache_write_tokens"`
-	LatencyMs        int64     `json:"latency_ms"` // summed call latency: time waiting on the model
-	FirstTs          time.Time `json:"first_ts"`
-	LastTs           time.Time `json:"last_ts"`
-	CostEur          *float64  `json:"cost_eur"`       // nil when nothing in the group is priced
-	UnpricedCalls    int       `json:"unpriced_calls"` // calls from profiles without a price
+	Key              string     `json:"key"`
+	Label            string     `json:"label"`
+	Calls            int        `json:"calls"`
+	Tasks            int        `json:"tasks"`
+	Errors           int        `json:"errors"`
+	InputTokens      int        `json:"input_tokens"` // includes cache read and write
+	OutputTokens     int        `json:"output_tokens"`
+	CacheReadTokens  int        `json:"cache_read_tokens"`
+	CacheWriteTokens int        `json:"cache_write_tokens"`
+	LatencyMs        int64      `json:"latency_ms"` // summed call latency: time waiting on the model
+	FirstTs          *time.Time `json:"first_ts"`   // nil when only legacy archive totals (no times) are in the group
+	LastTs           *time.Time `json:"last_ts"`
+	CostEur          *float64   `json:"cost_eur"`       // nil when nothing in the group is priced
+	UnpricedCalls    int        `json:"unpriced_calls"` // calls from profiles without a price
 }
 
-// CostBreakdown groups the live llm_usage ledger by one dimension over the past
-// days (days <= 0: all time) and prices each group from the profile price
-// lists. Rows are grouped by (dimension, profile) in SQL so each partial is
-// priced with its own profile, then folded; distinct tasks are counted per
-// group in a second query. Archived tasks' usage is no longer in llm_usage and
-// is not included.
-func (d *DB) CostBreakdown(dim CostDimension, days int) ([]CostRow, error) {
+// CostReport is the cost view: one row per group, and how much archived usage
+// the rows include.
+type CostReport struct {
+	Rows []CostRow `json:"rows"`
+	// Tasks is the distinct tasks across all rows (live in the window plus
+	// archived ones included). Summing the rows' Tasks double-counts a task that
+	// spans several profiles, workers or models.
+	Tasks int `json:"tasks"`
+	CostArchiveCoverage
+}
+
+// CostBreakdown groups the live llm_usage ledger plus archived tasks' usage by
+// one dimension over the past days (days <= 0: all time) and prices each group
+// from the profile price lists. Live rows are grouped by (dimension, profile)
+// in SQL so each partial is priced with its own profile, then folded; distinct
+// live tasks are counted per group in a second query. Archived usage comes from
+// the archive aggregates (foldArchivedCost), whose coverage the report states.
+func (d *DB) CostBreakdown(dim CostDimension, days int) (*CostReport, error) {
 	col, ok := costColumns[dim]
 	if !ok {
 		return nil, fmt.Errorf("unknown cost dimension %q", dim)
@@ -142,17 +153,20 @@ GROUP BY 1, 2`, days)
 			&p.CacheReadTokens, &p.CacheWriteTokens, &p.LatencyMs, &p.FirstTs, &p.LastTs); err != nil {
 			return nil, err
 		}
-		row := byKey[k]
-		if row == nil {
-			row = &CostRow{Key: k, Label: k, FirstTs: p.FirstTs, LastTs: p.LastTs}
-			byKey[k] = row
-		}
-		foldCost(row, p, prices[prof])
+		foldCost(costRowFor(byKey, k), p, prices[prof])
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
 	if err := d.countCostTasks(col, days, byKey); err != nil {
+		return nil, err
+	}
+	all := map[string]*CostRow{"": {}}
+	if err := d.countCostTasks("''", days, all); err != nil {
+		return nil, err
+	}
+	cov, err := d.foldArchivedCost(dim, days, byKey, prices)
+	if err != nil {
 		return nil, err
 	}
 	out := make([]CostRow, 0, len(byKey))
@@ -165,7 +179,7 @@ GROUP BY 1, 2`, days)
 		}
 	}
 	sortCostRows(out)
-	return out, nil
+	return &CostReport{Rows: out, Tasks: all[""].Tasks + cov.Included, CostArchiveCoverage: cov}, nil
 }
 
 // countCostTasks sets the number of distinct non-empty task ids per group.
@@ -201,10 +215,10 @@ func foldCost(row *CostRow, p CostRow, pr TokenPrices) {
 	row.CacheReadTokens += p.CacheReadTokens
 	row.CacheWriteTokens += p.CacheWriteTokens
 	row.LatencyMs += p.LatencyMs
-	if p.FirstTs.Before(row.FirstTs) {
+	if p.FirstTs != nil && (row.FirstTs == nil || p.FirstTs.Before(*row.FirstTs)) {
 		row.FirstTs = p.FirstTs
 	}
-	if p.LastTs.After(row.LastTs) {
+	if p.LastTs != nil && (row.LastTs == nil || p.LastTs.After(*row.LastTs)) {
 		row.LastTs = p.LastTs
 	}
 	if !pr.Priced() {

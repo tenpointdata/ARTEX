@@ -2856,5 +2856,6 @@
   "Total cost": "Toplam maliyet",
   "Total tokens": "Toplam token",
   "{n} calls have no price set; cost covers priced calls only": "{n} çağrının fiyatı yok; maliyet yalnızca fiyatlı çağrıları kapsar",
-  "* Some calls come from profiles with no price set; cost covers priced calls only.": "* Bazı çağrıların profilinde fiyat yok; maliyet yalnızca fiyatlı çağrıları kapsar."
+  "* Some calls come from profiles with no price set; cost covers priced calls only.": "* Bazı çağrıların profilinde fiyat yok; maliyet yalnızca fiyatlı çağrıları kapsar.",
+  "{n} archived tasks are left out: they were archived before cost was kept per worker, model and day, so they appear only in the All range, grouped by Task or Provider.": "{n} arşivlenmiş görev dahil değil: maliyet çalışan, model ve gün bazında tutulmadan önce arşivlendiler, bu yüzden yalnızca Tümü aralığında, Görev veya Sağlayıcıya göre gruplandığında görünürler."
 }

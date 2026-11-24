@@ -34,13 +34,13 @@ func TestCostBreakdownGroupsAndPrices(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	row := findCostRow(t, byTask, task)
+	row := findCostRow(t, byTask.Rows, task)
 	if row.Calls != 3 || row.Tasks != 1 || row.Errors != 1 || row.UnpricedCalls != 1 ||
 		row.InputTokens != 1_001_000 || row.CacheReadTokens != 200_000 || row.LatencyMs != 2250 {
 		t.Fatalf("task row %+v", row)
 	}
 	assertCost(t, row.CostEur, 2.19)
-	if row.LastTs.Before(row.FirstTs) || row.Label != task {
+	if row.FirstTs == nil || row.LastTs == nil || row.LastTs.Before(*row.FirstTs) || row.Label != task {
 		t.Fatalf("times/label %+v", row)
 	}
 
@@ -48,7 +48,7 @@ func TestCostBreakdownGroupsAndPrices(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, r := range byWorker {
+	for _, r := range byWorker.Rows {
 		if r.Key == "planner" && (r.CostEur == nil || *r.CostEur < 1.0-1e-9) {
 			t.Fatalf("planner row %+v", r)
 		}

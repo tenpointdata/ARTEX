@@ -1619,6 +1619,9 @@ function route(m: string, path: string, seg: string[], q: URLSearchParams, b: Re
         cost_eur: i === 0 ? 6.42 : null,
         unpriced_calls: i === 0 ? 0 : 50,
       })),
+      tasks: 2,
+      archived_included: 1,
+      archived_omitted: 0,
     };
   }
 

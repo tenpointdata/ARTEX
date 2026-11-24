@@ -1,14 +1,17 @@
 "use client";
 
 import * as React from "react";
+
 import Link from "next/link";
 
 import { SortableHead } from "@/components/ui/sortable-head";
-import { Table, TableBody, TableCell, TableFooter, TableHeader, TableRow, TableHead } from "@/components/ui/table";
+import { Table, TableBody, TableCell, TableFooter, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { t } from "@/i18n";
 import type { SortDirection } from "@/lib/sort-preference";
 import type { CostGroupBy, CostRow } from "@/lib/types";
+
 import {
+  type CostSortField,
   costMetrics,
   fmtDuration,
   fmtEur,
@@ -16,7 +19,6 @@ import {
   fmtPct,
   sortCostRows,
   totalRow,
-  type CostSortField,
 } from "./cost-metrics";
 
 const num = "text-right tabular-nums";
@@ -25,7 +27,11 @@ function CostCell({ row }: { row: CostRow }) {
   return (
     <TableCell
       className={num}
-      title={row.unpriced_calls > 0 ? t("{n} calls have no price set; cost covers priced calls only", { n: row.unpriced_calls }) : undefined}
+      title={
+        row.unpriced_calls > 0
+          ? t("{n} calls have no price set; cost covers priced calls only", { n: row.unpriced_calls })
+          : undefined
+      }
     >
       {fmtEur(row.cost_eur)}
       {row.unpriced_calls > 0 && <span className="text-muted-foreground"> *</span>}
@@ -47,20 +53,34 @@ function DataCells({ row }: { row: CostRow }) {
       <TableCell className={num}>{fmtDuration(row.latency_ms)}</TableCell>
       <TableCell className={num}>{fmtDuration(m.wallMs)}</TableCell>
       <TableCell className={num}>{fmtDuration(m.avgLatencyMs)}</TableCell>
-      <TableCell className={num}>{row.errors > 0 ? <span className="text-destructive">{row.errors}</span> : 0}</TableCell>
+      <TableCell className={num}>
+        {row.errors > 0 ? <span className="text-destructive">{row.errors}</span> : 0}
+      </TableCell>
     </>
   );
 }
 
-export function CostTable({ rows, by }: { rows: CostRow[]; by: CostGroupBy }) {
+// A new column sorts descending (names ascending); clicking the active one flips it.
+function nextSort(s: { field: CostSortField; dir: SortDirection }, field: CostSortField) {
+  if (s.field === field) return { field, dir: s.dir === "desc" ? ("asc" as const) : ("desc" as const) };
+  return { field, dir: field === "name" ? ("asc" as const) : ("desc" as const) };
+}
+
+export function CostTable({ rows, by, tasks }: { rows: CostRow[]; by: CostGroupBy; tasks: number }) {
   const [sort, setSort] = React.useState<{ field: CostSortField; dir: SortDirection }>({ field: "cost", dir: "desc" });
   const sorted = React.useMemo(() => sortCostRows(rows, sort.field, sort.dir), [rows, sort]);
-  const total = React.useMemo(() => totalRow(rows), [rows]);
+  const total = React.useMemo(() => totalRow(rows, tasks), [rows, tasks]);
 
-  const onSort = (field: CostSortField) =>
-    setSort((s) => ({ field, dir: s.field === field ? (s.dir === "desc" ? "asc" : "desc") : field === "name" ? "asc" : "desc" }));
+  const onSort = (field: CostSortField) => setSort((s) => nextSort(s, field));
   const head = (field: CostSortField, label: string, align: "left" | "right" = "right") => (
-    <SortableHead field={field} label={label} activeField={sort.field} direction={sort.dir} align={align} onSort={onSort} />
+    <SortableHead
+      field={field}
+      label={label}
+      activeField={sort.field}
+      direction={sort.dir}
+      align={align}
+      onSort={onSort}
+    />
   );
 
   return (

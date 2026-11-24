@@ -2856,5 +2856,6 @@
   "Total cost": "总成本",
   "Total tokens": "总令牌",
   "{n} calls have no price set; cost covers priced calls only": "{n} 次调用未设置价格；成本仅包含已定价调用",
-  "* Some calls come from profiles with no price set; cost covers priced calls only.": "* 部分调用来自未设置价格的配置；成本仅包含已定价调用。"
+  "* Some calls come from profiles with no price set; cost covers priced calls only.": "* 部分调用来自未设置价格的配置；成本仅包含已定价调用。",
+  "{n} archived tasks are left out: they were archived before cost was kept per worker, model and day, so they appear only in the All range, grouped by Task or Provider.": "{n} 个已归档任务未包含在内：它们在按角色、模型和日期记录成本之前归档，因此只在“全部”范围内按任务或提供商分组时显示。"
 }
