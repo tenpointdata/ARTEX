@@ -72,8 +72,8 @@ Verified 2026-11-23 (card `c-dadc14`, done):
   runtime base, `[artex] egress: installed` is logged, `-m owner`/`-m addrtype` load on bookworm's
   nf_tables iptables 1.8.9, and the executor is refused for 169.254.169.254, 100.100.100.200, the
   gateway, host.docker.internal (root reaches the host service) and :8787 on every local address,
-  while a LAN router, another container and the internet stay reachable. The full image did not
-  finish building on a slow link (`c-a6891b`).
+  while a LAN router, another container and the internet stay reachable. The full image gives the
+  same results (2026-11-24, `c-a6891b`, below).
 - Web: `npm ci` and `npx tsc --noEmit` clean. `npm run lint` fails with 84 errors, all already on main
   and none in the changed files (`c-834a5a`). Headless Chromium: setup, login, Sign out over the
   HttpOnly SameSite=Strict cookie work and `document.cookie` is empty, **but a token copied before
@@ -149,8 +149,6 @@ the newer main (`-exec-uid-range`, #18).
    read a methodology and the coverage graph shows checklist completion.
 
 **Human lane**
-- **Full-image Docker check** (card `c-a6891b`): needs a fast link for the recon-toolbox build; repeat
-  the egress probes and the login script there (the slim-image run passed).
 - Revisit tracking: E1–E10 are on the private Composite board (decided 2026-11-23, repo is public).
   File GitHub issues only if the repo goes private or you want them public.
 - Decide engagement-governance direction (E5): how formal the rules-of-engagement/authorization
@@ -195,7 +193,6 @@ Card ids in brackets:
 - **SEC** [`c-5a6f96`] Capture-proxy upstream gate residuals (task-scoped rules, go-mitmproxy host pinning, egress-proxy bypass).
 - **SEC** [`c-a0af33`] Logout does not revoke the session token (valid until the 7-day JWT TTL).
 - **SEC** [`c-775dc2`] Docker Desktop bind mounts defeat executor isolation; stock compose will not start on a Mac.
-- [`c-a6891b`] Repeat the egress/login check on the full image once it builds.
 - [`c-834a5a`] web: 84 pre-existing biome lint errors; `npm run lint` cannot gate CI yet.
 - **SEC** [`c-8d54d5`] Capture proxy: insecure upstream only for in-scope targets.
 - **SEC** [`c-c10f2c`] gorilla/websocket bump (GO-2026-6278).
