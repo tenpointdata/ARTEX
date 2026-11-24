@@ -188,7 +188,11 @@ the newer main (`-exec-uid-range`, #18).
   seeded Playwright MCP. Done = the browser's dials show the task scope and an out-of-scope host is refused.
 
 **Blocked**
-- Nothing blocked.
+- **E6 follow-up: global LLM spend vs client_read** (S), card `c-9ca57a`: built and verified on branch
+  `ej/c-9ca57a-llm-cost-rbac` (pushed, no PR), stacked on the client_read branch
+  `ej/20261124-110647-182fa9` (carries E5 / PR #16) and E6 (PR #28). Blocked until those land; then
+  merge main into it (only HANDOFF.md conflicts) and open its PR. Done = `TestSpendRoutesRefuseClientRead`
+  passes on main and the Cost entry is hidden for client_read.
 
 ## Set up / run / test / deploy
 
@@ -224,6 +228,7 @@ Card ids in brackets:
 - **E4** [`c-c0bb07`] Methodology-driven coverage (OWASP WSTG / API Top 10 as structured checklists).
 - **E5** [`c-669406`] Engagement lifecycle & governance: RBAC, per-engagement authorization artifact, scope expiry, tamper-evident (hash-chained) audit log.
 - **E6** [`c-cb0093`] Cost/observability dashboard + OpenTelemetry export, building on existing context telemetry.
+- **E6/E5** [`c-9ca57a`] Refuse client_read on `/api/llm/cost` and `/api/tokens/*`, hide the Cost sidebar entry; done on `ej/c-9ca57a-llm-cost-rbac`, waits on PR #16, c-5b5421, PR #28.
 - **E7** [`c-d60149`] Distributed/remote workers (queue-backed intents) for larger engagements; Helm chart.
 - **E8** [`c-5487e8`] Planner/worker evaluation suite (regression targets, prompt-version A/B via the benchmark gate).
 - **E9** [`c-73af97`] Frontend/UX pass (tables over cards, fewer-clicks triage workflow, live engagement dashboard).
@@ -277,6 +282,14 @@ Card ids in brackets:
   `ARTEX_SECRET_KEY`) loses stored secrets.
 
 ## Decisions
+
+- **2026-11-24** — c-9ca57a: the global spend routes (`/api/llm/cost`, `/api/tokens/*`) refuse client_read
+  (403) rather than filtering by company, and stay at `read` rather than admin-only. The `llm_usage` rows
+  are not company-scoped, and operators and reviewers are already global by design, so a client
+  filter would be a new scoping model, and admin-only would hide spend from the operators running
+  engagements. The web sidebar hides gated entries until `/api/auth/session` answers (fail closed).
+  The work sits on its own branch because merging the unmerged E5/client_read/E6 branches here would
+  land them in main without their review.
 
 - **2026-11-24** — c-75c593: the bench subject instance builds from the production `Dockerfile` instead
   of a separate `Dockerfile.bench`, so the benchmark measures the shipped image and there is one image
