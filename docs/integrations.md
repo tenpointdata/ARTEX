@@ -42,8 +42,9 @@ import key for an imported finding.
 ## Scanner data in: imports
 
 `POST /api/integrations/imports?format=<f>[&task_id=N][&file_name=x]` with the raw file as the
-body (32 MiB cap). Formats: `nmap-xml`, `nuclei-jsonl`, `zap-json`, `burp-xml`, `sarif`
-(Semgrep and other SARIF 2.1.0 tools). `GET /api/integrations/imports` lists past imports.
+body (32 MiB cap). Formats: `nmap-xml`, `nuclei-jsonl`, `httpx-jsonl`, `ffuf-json` (assets only),
+`zap-json`, `burp-xml`, `sarif` (Semgrep and other SARIF 2.1.0 tools). URLs are canonical (no
+userinfo, fragment or default port), so one service reported by two scanners is one asset. `GET /api/integrations/imports` lists past imports.
 
 - Assets go through the same `AssetStore` upserts as `POST /api/assets`, and each one is linked to
   the import (`scan_import_assets`). Owning an asset does not authorize testing it: the scope gate
@@ -53,11 +54,14 @@ body (32 MiB cap). Formats: `nmap-xml`, `nuclei-jsonl`, `zap-json`, `burp-xml`, 
   `finding_import_sources` (import id, tool, rule, record pointer, dedup key). Informational
   results are counted, not stored.
 - **Imports never promote.** A re-import of a result with a known dedup key leaves the existing
-  finding exactly as it is: severity, status and verification included.
+  finding exactly as it is: severity, status and verification included. It only adds a
+  `finding_import_links` row, so every import that reported a finding is listed (`imports` on the
+  provenance). A ZAP instance's parameter is part of the key.
 - Summary and name are built from typed, sanitized fields (tool, rule token, severity, host). The
   scanner's free text (titles, descriptions, matched values) is target-shaped, so it is kept only as
   quoted strings in the evidence under an untrusted-data header. Credentials in URLs are stripped and
   Burp request/response bodies are not imported.
 
-The in-run agent tool `ingest_scan_output` (`agent/scan_ingest.go`) is separate: it writes facts
-for the planner during an exploration and creates no findings.
+The in-run agent tool `ingest_scan_output` (`agent/scan_ingest.go`) uses the same `scanimport`
+parsers (with informational results kept) but writes assets and facts for the planner during an
+exploration and creates no findings.

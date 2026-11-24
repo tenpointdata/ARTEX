@@ -59,6 +59,26 @@ See `docs/ARCHITECTURE.md` for the code-level map. Summary:
 
 ## Current state
 
+**2026-11-24 (c-ea60a0, E2 follow-up, in review)** — One parser per scanner format. This branch merges the
+unmerged E2 backend branch (`ej/20261124-055326-6bcfa9`), so merging it lands E2 on main as well.
+- The agent's `ingest_scan_output` (`agent/scan_ingest.go`) is now an adapter over `scanimport.Result`.
+  Its own nmap, nuclei, httpx and ffuf parsers are gone. It also reads `zap-json`, `burp-xml` and
+  `sarif`. It still creates no findings, and target text stays inside the quoted fact detail.
+  Informational results are kept as facts through `scanimport.Options{KeepInformational: true}`.
+- `scanimport` gains `httpx-jsonl` and `ffuf-json`. Assets carry typed `Status`/`Length` and
+  untrusted `Title`/`Tech`/`Detail`. Operator imports of httpx and ffuf files write status, title
+  and tech.
+- `scanimport.URL`/`Origin` drop the default port and a bare `/` path, so nmap's `http://ip:80`
+  and nuclei's `http://ip` are one asset.
+- A ZAP `param` is part of the finding key (only when set).
+- Migration **0023** `finding_import_links` records every import that reported a finding, including
+  re-reports into another task, without touching the finding. `FindingImportSource.imports`
+  lists them.
+- **Security fix from the merge:** E5's `client_read` findings prefix reached E2's
+  `GET /api/exploration/findings/{id}/integrations` without a binder. It now needs `read`.
+- Verified against Postgres 16 (docker): `go test -p 1 ./scanimport ./agent ./db ./server`. Only
+  the known macOS SOCKS5 `127.0.0.2` test fails. The web UI does not show `imports` yet (`c-2d91eb`).
+
 **2026-11-24 (c-ca2bd0, E4 follow-up)** — An operator can choose a task's methodologies. Migration
 **0022** adds `tasks.methodologies TEXT[]` (empty `{}` = automatic, as before). The create request
 (`methodologies`, ids matched loosely, stored canonical, unknown id = 400) and the create form
@@ -352,8 +372,8 @@ Card ids in brackets:
 
 - **E1** [`c-8f9cca`] Client-grade reporting & deliverables (scoring, remediation, framework mappings, branded export).
 - **E2** [`c-6def05`] Backend done 2026-11-24 (see Current state). Follow-ups: [`c-597eb6`] UI;
-  [`c-da9198`] scheduled sync plus a per-tracker lock; [`c-ea60a0`] move agent `scan_ingest` onto
-  `scanimport`, normalize default ports, and settle two dedup edge cases.
+  [`c-da9198`] scheduled sync plus a per-tracker lock; [`c-ea60a0`] agent `scan_ingest` on
+  `scanimport`, canonical URLs, ZAP param key, per-import links (landed, in review).
 - **E3** [`c-d25ff9`] — gate built (in review). Follow-ups: hardening `c-0d277f`, UI `c-936308`, first live run `c-772190`, proposer/critic `c-c89f5b`.
 - **E4** [`c-c0bb07`] Methodology-driven coverage: landed 2026-11-24 (see Current state). Follow-ups:
   [`c-ca2bd0`] an operator-chosen methodology per task (landed, in review; gaps `c-aed5fd`); [`c-ed937d`] checklist completion in the report export (after E1).
@@ -436,6 +456,17 @@ Card ids in brackets:
 
 ## Decisions
 
+- **2026-11-24** — c-ea60a0:
+  - **ZAP `param` is in the key.** The same rule on one URL through two parameters is two places to
+    fix. It is hashed in only when set, so header and page-level alerts and every other scanner
+    keep their keys.
+  - **Re-imports get a link row** (`finding_import_links`, migration 0023, not an edit of 0015,
+    which is on several branches). The import → findings relation is then complete for the
+    `c-2d91eb` filter. The finding and `finding_import_sources` (first import) are never touched.
+  - **The agent keeps informational results** through a parse option rather than a second parser.
+    `over_cap` now counts dropped items, and `events` counts the records read.
+  - **The integrations route needs `read`, not a client binder.** Tracker URLs and uploaded file
+    names are operator-internal.
 - **2026-11-24** — c-ca2bd0: the operator's methodology choice is a list column on `tasks`, with an empty
   list meaning automatic, so existing tasks and every other create path (spawn, templates) keep the
   goal-word selection. A non-empty list replaces the automatic set rather than adding to it, which also
