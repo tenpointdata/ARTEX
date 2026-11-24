@@ -69,14 +69,17 @@ func TestControlAPIURL(t *testing.T) {
 		{"https://ctl.example:9443/", "http://artex-control:8788", "https://ctl.example:9443"},
 		{"", "http://[fd00::1]:8788", "http://[fd00::1]:8787"},
 	} {
-		if got, err := controlAPIURL(c.explicit, c.proxy); err != nil || got != c.want {
+		if got, err := controlAPIURL(c.explicit, c.proxy, false); err != nil || got != c.want {
 			t.Errorf("controlAPIURL(%q,%q) = %q %v, want %q", c.explicit, c.proxy, got, err, c.want)
 		}
 	}
 	for _, bad := range []string{"ftp://x:1", "http://u:p@x:1", "http://x:1/api", "http://x:1?a=b"} {
-		if _, err := controlAPIURL(bad, "http://c:8788"); err == nil {
+		if _, err := controlAPIURL(bad, "http://c:8788", false); err == nil {
 			t.Errorf("controlAPIURL(%q) accepted", bad)
 		}
+	}
+	if got, _ := controlAPIURL("", "http://artex-control:8788", true); got != "https://artex-control:8787" {
+		t.Errorf("derived control API with a pinned CA = %q, want https://artex-control:8787", got)
 	}
 }
 
@@ -312,7 +315,7 @@ func TestWorkerNodeFindingBindsControlCapture(t *testing.T) {
 		t.Fatalf("unsigned node RPC = %d, want 401", r.StatusCode)
 	}
 	_ = r.Body.Close()
-	forged := newControlRPC(api.URL, "node-ev", func() []byte { return []byte("not the deployment key, 32 bytes") })
+	forged := newControlRPC(api.URL, "node-ev", func() []byte { return []byte("not the deployment key, 32 bytes") }, nil)
 	var out nodeExistsReply
 	if err := forged.call(ctx, "exists", nodeExistsReq{TrafficID: trafficID}, &out); err == nil {
 		t.Fatal("a node RPC signed with another key was served")
@@ -334,7 +337,7 @@ func TestWorkerRefusesUnsignedReply(t *testing.T) {
 	}))
 	defer fake.Close()
 	key := []byte("0123456789abcdef0123456789abcdef")
-	s := &Server{m: &Manager{controlRPC: newControlRPC(fake.URL, "node-x", func() []byte { return key })}}
+	s := &Server{m: &Manager{controlRPC: newControlRPC(fake.URL, "node-x", func() []byte { return key }, nil)}}
 	if st, note := s.assessFindingVerification(context.Background(), 1, 3, []string{"some quote long enough"}); st != db.VerificationNotAssessed {
 		t.Fatalf("forged reply gave %s (%s), want not_assessed", st, note)
 	}

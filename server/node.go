@@ -63,6 +63,10 @@ type NodeConfig struct {
 	// the capture and evidence stores (node_rpc.go). Empty: the ControlProxy
 	// host on port 8787. Worker nodes only.
 	ControlAPI string
+	// ControlCA is a PEM file holding the CA that signed the control API's
+	// certificate (ARTEX_CONTROL_CA). Set, the worker reaches the control API
+	// only over https:// and trusts only this CA (node_tls.go). Worker nodes only.
+	ControlCA string
 }
 
 // Distributed reports whether other processes may run this database's intents.
@@ -82,7 +86,7 @@ func remoteOwner(owner string) bool { return strings.Contains(owner, "/work#") }
 
 // NodeConfigFromEnv reads ARTEX_NODE_ID (default: host name), ARTEX_LOCAL_WORKERS
 // (control) or ARTEX_NODE_WORKERS (worker), ARTEX_CONTROL_PROXY and
-// ARTEX_CONTROL_API.
+// ARTEX_CONTROL_API and ARTEX_CONTROL_CA.
 func NodeConfigFromEnv(role NodeRole) (NodeConfig, error) {
 	host, _ := os.Hostname()
 	c := NodeConfig{Role: role, Host: host, Workers: -1, NodeID: strings.TrimSpace(os.Getenv("ARTEX_NODE_ID"))}
@@ -109,6 +113,7 @@ func NodeConfigFromEnv(role NodeRole) (NodeConfig, error) {
 		}
 		c.ControlProxy = strings.TrimSpace(os.Getenv("ARTEX_CONTROL_PROXY"))
 		c.ControlAPI = strings.TrimSpace(os.Getenv("ARTEX_CONTROL_API"))
+		c.ControlCA = strings.TrimSpace(os.Getenv("ARTEX_CONTROL_CA"))
 	}
 	return c, nil
 }

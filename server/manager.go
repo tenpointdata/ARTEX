@@ -2277,12 +2277,16 @@ func (m *Manager) configureNodeProxy() error {
 		if err != nil {
 			return fmt.Errorf("control node CA certificate (start the control node first): %w", err)
 		}
-		api, err := controlAPIURL(m.node.ControlAPI, m.node.ControlProxy)
+		api, err := controlAPIURL(m.node.ControlAPI, m.node.ControlProxy, m.node.ControlCA != "")
+		if err != nil {
+			return err
+		}
+		hc, err := controlHTTPClient(api, m.node.ControlCA)
 		if err != nil {
 			return err
 		}
 		m.remoteProxy, m.remoteCACert = rp, ca
-		m.controlRPC = newControlRPC(api, m.node.NodeID, pgdb.NodeRPCKey)
+		m.controlRPC = newControlRPC(api, m.node.NodeID, pgdb.NodeRPCKey, hc)
 	}
 	return nil
 }

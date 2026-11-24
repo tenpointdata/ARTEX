@@ -35,15 +35,19 @@ type controlRPC struct {
 const defaultControlAPIPort = "8787"
 
 // controlAPIURL is ARTEX_CONTROL_API, or, when it is empty, the control proxy's
-// host on the API port.
-func controlAPIURL(explicit, controlProxy string) (string, error) {
+// host on the API port: https:// when a control CA is pinned, else http://.
+func controlAPIURL(explicit, controlProxy string, pinnedCA bool) (string, error) {
 	raw := strings.TrimSpace(explicit)
 	if raw == "" {
 		u, err := url.Parse(controlProxy)
 		if err != nil || u.Hostname() == "" {
 			return "", fmt.Errorf("cannot derive the control API from ARTEX_CONTROL_PROXY; set ARTEX_CONTROL_API")
 		}
-		raw = "http://" + net.JoinHostPort(u.Hostname(), defaultControlAPIPort)
+		scheme := "http"
+		if pinnedCA {
+			scheme = "https"
+		}
+		raw = scheme + "://" + net.JoinHostPort(u.Hostname(), defaultControlAPIPort)
 	}
 	u, err := url.Parse(raw)
 	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" || u.User != nil || (u.Path != "" && u.Path != "/") || u.RawQuery != "" {
@@ -52,8 +56,13 @@ func controlAPIURL(explicit, controlProxy string) (string, error) {
 	return u.Scheme + "://" + u.Host, nil
 }
 
-func newControlRPC(base, nodeID string, key func() []byte) *controlRPC {
-	return &controlRPC{base: base, nodeID: nodeID, key: key, hc: &http.Client{Timeout: 2 * time.Minute}}
+// newControlRPC calls the control API at base with hc (controlHTTPClient); nil
+// is a plain client.
+func newControlRPC(base, nodeID string, key func() []byte, hc *http.Client) *controlRPC {
+	if hc == nil {
+		hc = &http.Client{Timeout: controlRPCTimeout}
+	}
+	return &controlRPC{base: base, nodeID: nodeID, key: key, hc: hc}
 }
 
 // call posts in to op and decodes the reply into out.

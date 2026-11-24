@@ -270,14 +270,20 @@ func run() int {
 		IdleTimeout:       2 * time.Minute,
 	}
 	if useTLS {
+		reloader, err := newCertReloader(*tlsCert, *tlsKey, 30*time.Second)
+		if err != nil {
+			log.Printf("[tls] %v", err)
+			return 1
+		}
 		httpSrv.TLSConfig = serverTLSConfig()
+		httpSrv.TLSConfig.GetCertificate = reloader.GetCertificate
 	}
 
 	go func() {
 		log.Printf("ARTEX %s %s node %s listening on %s (data=%s)", version, role, node.NodeID, listenAddr, *dataDir)
 		var err error
 		if useTLS {
-			err = httpSrv.ListenAndServeTLS(*tlsCert, *tlsKey)
+			err = httpSrv.ListenAndServeTLS("", "") // certificates from TLSConfig.GetCertificate
 		} else {
 			err = httpSrv.ListenAndServe()
 		}
