@@ -93,3 +93,15 @@ func importFactPayload(im *db.ScanImport, res *scanimport.Result) map[string]any
 		"truncated": res.Truncated,
 	}
 }
+
+// importDedupKey scopes a result's dedup key to the task it is imported into.
+// A task is one engagement: the same rule at the same path (a shared library,
+// or the same SARIF imported for a second engagement) must still appear in
+// that task's graph and report, so the key is per task. Imports without a
+// task keep the bare key, as in E2.
+func importDedupKey(key string, task *int64) string {
+	if task == nil || *task <= 0 {
+		return key
+	}
+	return key + "@task:" + strconv.FormatInt(*task, 10)
+}

@@ -96,20 +96,26 @@ func (s Source) bullet() string {
 	return b.String()
 }
 
-// laneSummary is the summary's per-lane breakdown, printed only when more
-// than the runtime lane is present or any finding was imported.
-func laneSummary(nodes []*db.Node) string {
-	counts := map[string]int{}
-	imported := 0
-	for _, n := range nodes {
-		s := sourceFromPayload(n.Payload)
-		counts[s.LaneKey()]++
-		if s.Imported {
-			imported++
+// importedCount counts the findings a scanner import wrote.
+func importedCount(nodes []*db.Node) int {
+	n := 0
+	for _, node := range nodes {
+		if sourceFromPayload(node.Payload).Imported {
+			n++
 		}
 	}
+	return n
+}
+
+// laneSummary is the summary's imported-findings line with its per-lane
+// breakdown; "" when nothing was imported.
+func laneSummary(nodes []*db.Node, imported int) string {
 	if imported == 0 {
 		return ""
+	}
+	counts := map[string]int{}
+	for _, n := range nodes {
+		counts[sourceFromPayload(n.Payload).LaneKey()]++
 	}
 	parts := make([]string, 0, len(laneNames))
 	for _, l := range laneNames {
@@ -117,5 +123,5 @@ func laneSummary(nodes []*db.Node) string {
 			parts = append(parts, fmt.Sprintf("%s %d", l.name, counts[l.key]))
 		}
 	}
-	return fmt.Sprintf("- By lane: %s (%d imported from scanners, unverified until reproduced)\n", strings.Join(parts, ", "), imported)
+	return fmt.Sprintf("- Imported scanner findings, unverified until reproduced: **%d**\n- By lane: %s\n", imported, strings.Join(parts, ", "))
 }

@@ -26,8 +26,9 @@ func TestReportMixesRuntimeAndCodeFindings(t *testing.T) {
 		importedNode(3, "medium", "sca", "web/package-lock`.json", 0),
 	}})
 	for _, want := range []string{
-		"- Confirmed findings: **3**",
-		"- By lane: runtime testing 1, code scan (SAST) 1, dependency scan (SCA) 1 (2 imported from scanners, unverified until reproduced)",
+		"- Confirmed findings: **1**",
+		"- Imported scanner findings, unverified until reproduced: **2**",
+		"- By lane: runtime testing 1, code scan (SAST) 1, dependency scan (SCA) 1\n",
 		"Runtime SQLi",
 		"- **Source**: code scan (SAST), imported from semgrep rule `py.sqli` at `app/views/orders.py:42` (import #7); a scanner claim until reproduced",
 		"- **Source**: dependency scan (SCA), imported from semgrep rule `py.sqli` at `web/package-lock'.json` (import #7)",

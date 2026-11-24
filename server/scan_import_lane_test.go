@@ -95,7 +95,8 @@ func TestCodeScanJoinsTaskGraphAndReport(t *testing.T) {
 	md := w.Body.String()
 	for _, want := range []string{
 		"Evidence API", // the runtime finding
-		"- Confirmed findings: **7**",
+		"- Confirmed findings: **1**",
+		"- Imported scanner findings, unverified until reproduced: **6**",
 		"runtime testing 1, code scan (SAST) 4, dependency scan (SCA) 2",
 		"at `app/views/orders.py:42` (import #",
 		"dependency scan (SCA), imported from trivy rule `CVE-2022-24999` at `web/package-lock.json:1`",
@@ -108,6 +109,32 @@ func TestCodeScanJoinsTaskGraphAndReport(t *testing.T) {
 		t.Error("untrusted scanner text must appear only quoted in evidence")
 	}
 
+	// The import fact anchors nothing: an import tests no runtime asset, so it
+	// must not raise the task's coverage.
+	var factAnchors int
+	_ = pg.QueryRow(`SELECT count(*) FROM exploration_anchors WHERE node_id=$1`, *sast.Import.FactNodeID).Scan(&factAnchors)
+	if factAnchors != 0 {
+		t.Fatalf("import fact has %d anchors", factAnchors)
+	}
+	var before int
+	_ = pg.QueryRow(`SELECT count(*) FROM scan_imports`).Scan(&before)
+
+	// An anchor must belong to the task: an asset of no task is refused, and a
+	// refused import writes no import row.
+	foreign, err := pg.Assets().UpsertHTTPService(db.UpsertHTTPServiceReq{URL: "https://other-client.e10.test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _, _ = pg.Exec(`DELETE FROM assets WHERE id=$1`, foreign) })
+	if w := request("POST", fmt.Sprintf("/api/integrations/imports?format=sarif&task_id=%d&asset_ids=%d", taskID, foreign), string(mustRead(t, "semgrep.sarif"))); w.Code != 400 {
+		t.Fatalf("foreign anchor: %d %s", w.Code, w.Body.String())
+	}
+	var after int
+	_ = pg.QueryRow(`SELECT count(*) FROM scan_imports`).Scan(&after)
+	if after != before {
+		t.Fatalf("a refused import left %d import rows", after-before)
+	}
+
 	// Anchors need a task, and must exist.
 	if w := request("POST", fmt.Sprintf("/api/integrations/imports?format=sarif&asset_ids=%d", asset), "{}"); w.Code != 400 {
 		t.Fatalf("anchors without a task: %d", w.Code)
@@ -116,4 +143,13 @@ func TestCodeScanJoinsTaskGraphAndReport(t *testing.T) {
 	if w := request("POST", fmt.Sprintf("/api/integrations/imports?format=sarif&task_id=%d&asset_ids=987654321", taskID), string(data)); w.Code != 400 {
 		t.Fatalf("unknown anchor: %d %s", w.Code, w.Body.String())
 	}
+}
+
+func mustRead(t *testing.T, file string) []byte {
+	t.Helper()
+	b, err := os.ReadFile("../scanimport/testdata/" + file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return b
 }

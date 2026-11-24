@@ -622,11 +622,10 @@ func (t *ToolSet) graphOverviewData() map[string]any {
 		if st, ok := fp["status"].(string); ok && strings.TrimSpace(st) != "" {
 			m["status"] = st
 		}
-		if from := factFrom[n.ID]; from > 0 {
-			m["from_intent"] = from // which intent produced this finding
-		}
 		if lane, ok := fp["lane"].(string); ok && fp["source"] == db.ImportSourceOrigin {
 			m["imported"] = lane // an unverified scanner claim (runtime|sast|sca): a lead to test, not a result
+		} else if from := factFrom[n.ID]; from > 0 {
+			m["from_intent"] = from // which intent produced this finding (an import's parent is its fact, not an intent)
 		}
 		findingList = append(findingList, m)
 	}

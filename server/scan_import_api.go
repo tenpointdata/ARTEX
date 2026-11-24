@@ -70,6 +70,15 @@ func runScanImport(ctx context.Context, pg *db.DB, req scanImportRequest) (*scan
 		// The parser error may quote the file; keep it out of the response.
 		return nil, fmt.Errorf("%w: the file could not be read as %s output", errUnknownImportFormat, req.Format)
 	}
+	// Check the task and anchors before any row is written, so a refused
+	// import leaves nothing behind (E10).
+	if req.TaskID != nil {
+		if err := pg.CheckImportAnchors(ctx, *req.TaskID, req.AnchorAssetIDs); err != nil {
+			return nil, err
+		}
+	} else if len(req.AnchorAssetIDs) > 0 {
+		return nil, errAnchorsNeedTask
+	}
 	sum := sha256.Sum256(req.Data)
 	im := &db.ScanImport{Format: string(req.Format), ToolName: res.Tool.Name, ToolVersion: scanimport.Token(res.Tool.Version),
 		FileName: importFileName(req.FileName), FileSHA256: hex.EncodeToString(sum[:]), TaskID: req.TaskID, ImportedBy: "operator"}
@@ -216,7 +225,7 @@ func importedFinding(im *db.ScanImport, f scanimport.Finding, assetIDs []int64) 
 		ImportID: im.ID, TaskID: im.TaskID, VulnClass: f.RuleID, Name: f.RuleID, Severity: f.Severity,
 		Summary:  fmt.Sprintf("%s: %s (severity %s, %s) reported on %s; imported scanner result, not verified", f.Tool, f.RuleID, f.Severity, laneLabel(f.Lane), where),
 		Evidence: ev.String(), Worker: "import:" + f.Tool, AssetIDs: assetIDs,
-		Tool: f.Tool, RuleID: f.RuleID, DedupKey: f.Key, Record: f.Record, Note: importedFindingNote,
+		Tool: f.Tool, RuleID: f.RuleID, DedupKey: importDedupKey(f.Key, im.TaskID), Record: f.Record, Note: importedFindingNote,
 		Lane: string(f.Lane), Location: f.Location, Line: f.Line, FactNodeID: factNode(im),
 	}
 }

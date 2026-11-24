@@ -28,8 +28,8 @@ var ErrImportAnchor = errors.New("scanner import anchor")
 const ImportSourceOrigin = "import"
 
 // AddScanImportFact writes the import's exploration fact into the task's
-// graph, anchored to anchors (validated, key-share locked), and records it
-// and the anchors on the import row. payload must hold typed values only: it
+// graph and records it and the anchors (checked by CheckImportAnchors) on the
+// import row. payload must hold typed values only: it
 // is shown to the planner.
 func (d *DB) AddScanImportFact(ctx context.Context, im *ScanImport, payload map[string]any, anchors []int64) (int64, error) {
 	if im == nil || im.TaskID == nil || *im.TaskID <= 0 {
@@ -49,20 +49,13 @@ func (d *DB) AddScanImportFact(ctx context.Context, im *ScanImport, payload map[
 		if err := tx.QueryRowContext(ctx, `SELECT exploration_id FROM tasks WHERE id=$1`, *im.TaskID).Scan(&expID); err != nil {
 			return err
 		}
-		if len(anchors) > 0 {
-			if err := checkFactAnchorAssets(tx, anchors); err != nil {
-				return fmt.Errorf("%w: %v", ErrImportAnchor, err)
-			}
-		}
 		raw, _ := json.Marshal(payload)
+		// The fact carries no anchors: coverage counts an asset as tested when a
+		// fact anchors it, and a scanner import tests no runtime asset. The
+		// finding nodes carry the anchors instead.
 		if err := tx.QueryRowContext(ctx, `INSERT INTO exploration_nodes(exploration_id, kind, payload, priority, state, origin)
 VALUES ($1,$2,$3,5,'confirmed',$4) RETURNING id`, expID, KindFact, string(raw), ImportSourceOrigin+":"+im.ToolName).Scan(&nodeID); err != nil {
 			return err
-		}
-		for _, a := range anchors {
-			if _, err := tx.ExecContext(ctx, `INSERT INTO exploration_anchors(node_id, asset_id) VALUES ($1,$2) ON CONFLICT DO NOTHING`, nodeID, a); err != nil {
-				return err
-			}
 		}
 		aj, _ := json.Marshal(anchors)
 		_, err := tx.ExecContext(ctx, `UPDATE scan_imports SET fact_node_id=$2, anchor_asset_ids=$3::jsonb WHERE id=$1`, im.ID, nodeID, string(aj))
@@ -73,6 +66,59 @@ VALUES ($1,$2,$3,5,'confirmed',$4) RETURNING id`, expID, KindFact, string(raw), 
 	}
 	im.FactNodeID, im.AnchorAssetIDs = &nodeID, anchors
 	return nodeID, nil
+}
+
+// CheckImportAnchors validates an import's target task and anchor assets
+// before anything is written: the task must exist and accept evidence (not
+// archived), and every anchor must already belong to the task, either in its
+// declared scope (the coverage target set) or carrying the task in task_ids.
+// An anchor decides which client companies see the finding and which assets
+// a task deletion treats as the task's own, so an arbitrary asset id is
+// refused (ErrImportAnchor).
+func (d *DB) CheckImportAnchors(ctx context.Context, taskID int64, anchors []int64) error {
+	return d.withTx(ctx, func(tx *sql.Tx) error {
+		if err := LockTaskEvidenceTx(tx, taskID); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return fmt.Errorf("%w: task %d not found", ErrImportGraph, taskID)
+			}
+			return fmt.Errorf("%w: %v", ErrImportGraph, err)
+		}
+		if len(anchors) == 0 {
+			return nil
+		}
+		var expID int64
+		if err := tx.QueryRowContext(ctx, `SELECT exploration_id FROM tasks WHERE id=$1`, taskID).Scan(&expID); err != nil {
+			return err
+		}
+		rows, err := tx.QueryContext(ctx, `WITH `+covTargetCTE+`
+SELECT a.id FROM assets a
+WHERE a.id = ANY($3::bigint[]) AND (a.id IN (SELECT id FROM target) OR $1 = ANY(a.task_ids))`, taskID, expID, anchors)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		ok := map[int64]bool{}
+		for rows.Next() {
+			var id int64
+			if err := rows.Scan(&id); err != nil {
+				return err
+			}
+			ok[id] = true
+		}
+		if err := rows.Err(); err != nil {
+			return err
+		}
+		var bad []int64
+		for _, id := range anchors {
+			if !ok[id] {
+				bad = append(bad, id)
+			}
+		}
+		if len(bad) > 0 {
+			return fmt.Errorf("%w: assets %v are not in task %d's scope or asset set", ErrImportAnchor, bad, taskID)
+		}
+		return nil
+	})
 }
 
 // importedFindingNodeTx writes a new imported finding as a finding node of the

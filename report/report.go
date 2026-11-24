@@ -74,8 +74,11 @@ func Markdown(in Input) string {
 
 	// summary
 	fmt.Fprintf(&b, "## Summary\n\n")
-	fmt.Fprintf(&b, "- Confirmed findings: **%d**\n", len(in.Findings))
-	b.WriteString(laneSummary(in.Findings))
+	// Imported scanner claims are listed with the findings but not counted as
+	// confirmed: the headline must not overstate what was tested (E10).
+	imported := importedCount(in.Findings)
+	fmt.Fprintf(&b, "- Confirmed findings: **%d**\n", len(in.Findings)-imported)
+	b.WriteString(laneSummary(in.Findings, imported))
 	fmt.Fprintf(&b, "- Assets: ")
 	var types []string
 	for t := range in.AssetCounts {
