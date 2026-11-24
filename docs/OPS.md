@@ -91,3 +91,28 @@ When Postgres is not configured, database-dependent tests skip themselves; that 
 expected. Set `ARTEX_PG_DSN` to run them. CI uses `go test -p 1 ./...` because test
 packages share a Postgres service and use suffixed per-package databases
 (`SuffixTestDatabase`).
+
+## 6. Capture-proxy upstream checks
+
+The recording proxy (go-mitmproxy) has no dial hook, so its upstream is a loopback gate
+(`traffic/upstream_gate.go`) that dials with `Interceptor.DialSOCKS5`.
+
+- **Global rules** (asset block rules, the metadata/link-local deny) apply to every upstream dial.
+- **Task rules.** Task agents get a proxy URL with a task scope token in its userinfo
+  (`http://artex-scope:scope-…@127.0.0.1:8788`; Bash gets `artex-pace:scope-…`). The proxy binds each
+  client connection that presents a token to its task. Upstream dials then also apply that task's
+  block rules and, when the task's target gate is on, its pins and approvals. Dials never wait: an
+  unpinned host opens an approval request and is refused until someone approves it. A token whose
+  task was deleted or archived is refused. A client without a token (an operator's browser or
+  `curl`) gets the global rules only. The SOCKS5 listener takes the same token as its RFC 1929
+  password. The token only adds rules; it is not a credential to protect. Code:
+  `traffic/scope.go`, `egress/proxycred.go`, `Manager.TaskProxyAddr`.
+- **Not scoped yet:** the transparent TCP listener (it has no credential to carry), the chat and
+  conversation agents, and custom HTTP tools that use the recording proxy. These get the global
+  rules only.
+- **Global egress proxy.** When one is set, go-mitmproxy forwards through it and the gate is not on
+  the path. Neither global nor task rules then apply to the proxy's dials: the operator's proxy
+  reaches the target. That is the intended behaviour for a remote egress proxy. **Do not run that
+  proxy on the ARTEX host** (or anywhere that can reach cloud metadata) unless it has its own deny
+  for 169.254.0.0/16, `fd00:ec2::254` and the metadata names. Otherwise a redirect to metadata
+  goes through it.

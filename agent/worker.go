@@ -413,7 +413,10 @@ func cachePrefixEnabled() bool {
 //
 // Custom DB prompts that reference {{.Now}} remain volatile inside staticPart.
 func workerSystemParts(proxyAddr, caCert, dataDir, runDir string) (staticPart, dynamicHead string) {
-	body := renderSystem("worker", workerDefaultTmpl, WorkerVars{ProxyAddr: proxyAddr, DataDir: dataDir, Now: nowStr()})
+	// The prompt names the proxy without its credential (a run's scope token,
+	// egress/proxycred.go): the token is not for the model, and the text stays
+	// the same across runs.
+	body := renderSystem("worker", workerDefaultTmpl, WorkerVars{ProxyAddr: egress.WithoutProxyCredential(proxyAddr), DataDir: dataDir, Now: nowStr()})
 	// caCert is present only when the recording MITM is on, which is exactly when
 	// the traffic_* tools are registered — so it gates the traffic-tool note.
 	// Optional finding guidance is added for every role after tool resolution.

@@ -793,6 +793,7 @@ func (s *Server) agentsForTask(t *Task) *taskAgentBundle {
 	if bundle := s.taskAgents[t.ID]; bundle != nil {
 		return bundle
 	}
+	proxy := s.m.TaskProxyAddr(t) // this task's scope rides on its proxy credential
 	goalRuntime := &taskLLMRuntime{s: s, taskID: t.ID, agentKey: "goals"}
 	plannerRuntime := &taskLLMRuntime{s: s, taskID: t.ID, agentKey: "planner"}
 	workerRuntime := &taskLLMRuntime{s: s, taskID: t.ID, agentKey: "worker"}
@@ -806,7 +807,7 @@ func (s *Server) agentsForTask(t *Task) *taskAgentBundle {
 	wk.SetMaxTokens(workerRuntime.maxTokens)       // as above, the output cap also follows the currently active profile
 	wk.SetNoaEnabled(s.m.NoaCompactionEnabled)     // experimental: noa context compaction (platform-level switch, read every run)
 	wk.SetRunTimeout(time.Duration(s.agentRunSeconds("worker")) * time.Second)
-	wk.SetProxy(s.m.ProxyAddr(), s.m.ProxyCACert())
+	wk.SetProxy(proxy, s.m.ProxyCACert())
 	wk.SetFactTraffic(s.m.traffic) // fact provenance: relabel bytes captured from the target (#124 row 1)
 	wk.SetWebSearch(s.webSearchFor("worker"))
 	wk.SetConstraintInject(s.constraintInjectWorker) // operation-constraint injection into the worker (configurable, on by default)
@@ -818,7 +819,7 @@ func (s *Server) agentsForTask(t *Task) *taskAgentBundle {
 	pl.SetNoaEnabled(s.m.NoaCompactionEnabled) // experimental: noa context compaction (platform-level switch, read every run)
 	pl.SetKillWork(s.engine.KillWork)
 	pl.SetSteerWork(s.engine.SteerWork)
-	pl.SetProxy(s.m.ProxyAddr(), s.m.ProxyCACert())
+	pl.SetProxy(proxy, s.m.ProxyCACert())
 	pl.SetFactTraffic(s.m.traffic)
 	pl.SetWebSearch(s.webSearchFor("planner"))
 	pl.SetConstraintInject(s.constraintInjectPlanner) // operation-constraint injection into the planner (configurable, on by default)
@@ -835,7 +836,7 @@ func (s *Server) agentsForTask(t *Task) *taskAgentBundle {
 	main.SetNonStreaming(mainRuntime.nonStreaming)
 	main.SetMaxTokens(mainRuntime.maxTokens)
 	main.SetNoaEnabled(s.m.NoaCompactionEnabled) // experimental: noa context compaction (platform-level switch, read every run)
-	main.SetProxy(s.m.ProxyAddr(), s.m.ProxyCACert())
+	main.SetProxy(proxy, s.m.ProxyCACert())
 	main.SetFactTraffic(s.m.traffic)
 	main.SetWebSearch(s.webSearchFor("mainagent"))
 	main.SetSteerWork(s.engine.SteerWork) // steer_work: real-time course correction on running work by a human
