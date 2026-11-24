@@ -143,6 +143,24 @@ func TrafficTraceKey() []byte {
 	return nil
 }
 
+// nodeRPCDomain derives the key that signs calls between the nodes of one
+// deployment (E7 worker node → control node, server/node_rpc.go).
+const nodeRPCDomain = "artex-node-rpc"
+
+var nodeRPCKey atomic.Pointer[[]byte]
+
+// NodeRPCKey returns the instance sub-key that authenticates node-to-node
+// calls: HMAC-SHA256 of the domain under the secret key, which every node of a
+// deployment shares (InitSecrets refuses a key that does not open the shared
+// data) and which agent processes never see (server/env_scrub.go). Nil until
+// InitSecrets ran. Memory only, never stored.
+func NodeRPCKey() []byte {
+	if k := nodeRPCKey.Load(); k != nil {
+		return *k
+	}
+	return nil
+}
+
 func deriveSubKey(key []byte, domain string) []byte {
 	m := hmac.New(sha256.New, key)
 	m.Write([]byte(domain))
@@ -310,6 +328,8 @@ func (d *DB) InitSecrets(keyDir string) error {
 		activeSecretBox.Store(box)
 		sub := deriveSubKey(key, trafficTraceDomain)
 		trafficTraceKey.Store(&sub)
+		rpc := deriveSubKey(key, nodeRPCDomain)
+		nodeRPCKey.Store(&rpc)
 		return nil
 	})
 }

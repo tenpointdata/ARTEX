@@ -8,7 +8,7 @@ all the same binary:
 |---|---|---|---|
 | `all` (default) | `-role all` | API, planners, schedulers, intent workers | UI/API on `-addr` |
 | `control` | `-role control`, `ARTEX_LOCAL_WORKERS=N` (default: the `workers` setting; `0` = none) | API, planners, deadline coordinators, schedulers, notifier, capture proxy, and N local workers per task | UI/API on `-addr`, capture proxy on `-proxy` |
-| `worker` | `-role worker`, `ARTEX_NODE_WORKERS=N` (default 3), `ARTEX_NODE_ID` (default: host name), `ARTEX_CONTROL_PROXY` | intent worker loops only | `GET /healthz` on `-health-addr` (default `:8790`) |
+| `worker` | `-role worker`, `ARTEX_NODE_WORKERS=N` (default 3), `ARTEX_NODE_ID` (default: host name), `ARTEX_CONTROL_PROXY`, `ARTEX_CONTROL_API` (default: the control proxy's host on port 8787) | intent worker loops only | `GET /healthz` on `-health-addr` (default `:8790`) |
 
 Run exactly one control node, plus any number of worker nodes. A worker node
 will not claim while a live `role=all` node shares the database. A single
@@ -84,6 +84,44 @@ the task's TargetScope, and paces the traffic.
 - **CA certificate.** The control node publishes its CA certificate (the public
   cert only) for worker nodes to install for their agent processes.
 
+## Evidence on worker nodes
+
+The capture store (the control node's local index of recorded exchanges) and
+the evidence blob directory live on the control node. A worker node's agents
+reach them through a **node RPC** on the control API,
+`POST /api/node/rpc/{op}` (`server/node_rpc.go`):
+
+| Op | Worker-node caller | Runs on the control node |
+|---|---|---|
+| `tool` | `traffic_search`, `traffic_get`, `traffic_blob`, `traffic_messages` | the capture store's own tool (only those names) |
+| `fact` | fact provenance (a fact quoting a captured response is labelled `target_response`) | `ResponseContaining` |
+| `record` | `report_finding` with `traffic_refs` | `evidence.Store.Record`: the snapshot bodies are written to the control node's evidence directory |
+| `bind` | `bind_finding_traffic` | `evidence.Store.Bind` |
+| `exists` | `prove_goal`'s check that a bound exchange is still captured | `TrafficExists` |
+| `preview` | `get_finding_traffic` reading a bound body | the same read as on a single process |
+| `assess` | `update_finding_report`'s S1 quote check | the same assessment, against the bodies on the control node |
+
+- **Same checks, same place.** The worker node runs every agent-side check
+  before the call, as a single process does: the agent traffic-binding
+  setting, finding access and provenance, ref normalisation. The control node
+  runs the evidence code unchanged. A finding without `traffic_refs` is
+  recorded on the worker node directly.
+- **Authentication.** Each request carries an HMAC-SHA256 under a sub-key of
+  `ARTEX_SECRET_KEY` (`db.NodeRPCKey`), over the method, path, node id,
+  timestamp, nonce and body hash. Every node holds that key (start-up refuses a
+  key that does not open the shared data), and agent processes never see it.
+  The per-task scope token is not used here, because it rides in the agents'
+  proxy URL. The control node refuses a wrong signature, a timestamp more than
+  60 s off, and a replayed nonce. The route exists only on `role=control`; it
+  is outside the user-session check and is its own authentication.
+- **Failures fail closed.** An unreachable control node makes the tool call or
+  the `record`/`bind` fail with an error the agent sees (the finding is not
+  recorded without its proof), and makes `assess` return `not_assessed`, never
+  a verdict.
+- **Transport.** Plain HTTP inside the cluster by default. Set
+  `ARTEX_CONTROL_API=https://…` when the path between nodes is untrusted: the
+  signature authenticates requests, but replies are not signed.
+
 ## Deploying
 
 - **Helm.** The chart is in `deploy/helm/artex` (see its README). It runs one
@@ -98,7 +136,10 @@ the task's TargetScope, and paces the traffic.
 - **Separate hosts by hand.** Run the control node with
   `-role control -proxy :8788`. On each other host, run
   `-role worker -health-addr :8790` with the same database environment,
-  `ARTEX_SECRET_KEY`, LLM configuration and `ARTEX_CONTROL_PROXY=http://<control>:8788`.
+  `ARTEX_SECRET_KEY`, LLM configuration, `ARTEX_CONTROL_PROXY=http://<control>:8788`
+  and, when the API is not on port 8787 of the same host,
+  `ARTEX_CONTROL_API=http://<control>:<api port>`. Worker nodes must reach the
+  control API as well as the proxy.
 
 ## Limits
 
@@ -117,6 +158,9 @@ These are known and carded on the ARTEX board:
   can reach the network like any target, including the control API and
   Postgres, just as the bundled compose Postgres is reachable today. Deny those
   addresses with `ARTEX_EGRESS_DENY` or a NetworkPolicy.
-- **Tools that read the capture store run only on the control node** (traffic
-  facts, evidence lookups). See the proxy section of `HANDOFF.md` for how they
-  behave on a worker node.
+- **The capture-store tools need the control node.** On a worker node they
+  are calls to the control node (see "Evidence on worker nodes"). While it is
+  down they fail, and so does a finding that carries traffic refs.
+- **The capture switch is read at start-up on a worker node.** A worker node
+  reads `traffic_capture` when it starts, so after the switch is flipped on the
+  control node, restart the worker nodes.

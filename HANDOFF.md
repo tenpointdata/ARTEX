@@ -59,6 +59,23 @@ See `docs/ARCHITECTURE.md` for the code-level map. Summary:
 
 ## Current state
 
+**2026-11-24 — Worker-node findings carry their captured proof (`c-3b781a`, E7 follow-up; in review).**
+A finding recorded by an intent on a `-role worker` node now binds the request/response the control
+node's recording proxy captured. The worker calls a **signed node RPC** on the control API
+(`POST /api/node/rpc/{op}`, `server/node_rpc.go` + `node_rpc_client.go`). It covers the traffic tools,
+fact provenance, `record`/`bind`, the `prove_goal` exists check, `get_finding_traffic`'s body preview,
+and the S1 quote assessment, so the bodies stay in the control node's evidence directory. Requests are
+HMAC'd under `db.NodeRPCKey`, a sub-key of `ARTEX_SECRET_KEY`, with ±60 s skew and a nonce cache. The
+per-task scope token is not used, because agent processes hold it. A new worker env var,
+`ARTEX_CONTROL_API`, defaults to the control proxy host on :8787 and is set in Helm and compose.
+**This branch merges the unmerged E7 branch (`ej/20261124-150525-1a95b3`), so landing it lands E7.**
+Verified against Postgres 16: `TestWorkerNodeFindingBindsControlCapture` (two managers; a worker-node
+intent's `report_finding` binds the control capture; a mutation with the local store fails it),
+`TestNodeRPCVerifier`, `TestControlAPIURL`, `TestWorkerNodeUsesControlRecordingProxy`, and
+`scripts/verify.sh` (see Deltas for the result). The Helm template was rendered (`alpine/helm`). Not
+checked: a real multi-host run. Gap carded: `c-7ad4da` (workers read the capture switch only at
+start-up).
+
 **2026-11-24 — SSE 401 after console login (`c-13e86c`, fixed; pre-E5).** Streams are same-origin only
 (`web/src/lib/sse.ts`), dev gzip off, `openSSE` writes `: open`. Test `server/activity_stream_auth_pg_test.go`;
 browser-checked on the E5 stack.
@@ -363,6 +380,14 @@ Card ids in brackets:
   `ARTEX_SECRET_KEY`) loses stored secrets.
 
 ## Decisions
+
+- **2026-11-24** — c-3b781a: worker nodes reach the capture and evidence stores through a control-node
+  RPC (option a), not a Postgres capture index (c) or after-the-fact matching (b). (c) is a large
+  migration of the sqlite capture and its blob store. (b) binds by guesswork, which the evidence model
+  forbids. The RPC authenticates with a sub-key of `ARTEX_SECRET_KEY`, not the scope token: the token
+  rides in agent processes' proxy URL, so an agent's shell could have recorded or bound evidence past
+  the tool-layer checks. Record/bind/assess run the unchanged control-side code; every agent-side check
+  still runs on the worker first.
 
 - **2026-11-24** — c-13e86c: SSE streams are same-origin only, with no cross-origin override. The cookie is
   the only credential a script-free EventSource can present, and the backend's CORS answers `*`, which a

@@ -58,6 +58,11 @@ type NodeConfig struct {
 	// ControlProxy is the control node's recording proxy as worker nodes reach
 	// it (for example http://artex-control:8788). Worker nodes only.
 	ControlProxy string
+	// ControlAPI is the control node's API as worker nodes reach it (for
+	// example http://artex-control:8787); worker nodes call its node RPC for
+	// the capture and evidence stores (node_rpc.go). Empty: the ControlProxy
+	// host on port 8787. Worker nodes only.
+	ControlAPI string
 }
 
 // Distributed reports whether other processes may run this database's intents.
@@ -76,7 +81,8 @@ func (c NodeConfig) workerName(i int) string {
 func remoteOwner(owner string) bool { return strings.Contains(owner, "/work#") }
 
 // NodeConfigFromEnv reads ARTEX_NODE_ID (default: host name), ARTEX_LOCAL_WORKERS
-// (control) or ARTEX_NODE_WORKERS (worker) and ARTEX_CONTROL_PROXY.
+// (control) or ARTEX_NODE_WORKERS (worker), ARTEX_CONTROL_PROXY and
+// ARTEX_CONTROL_API.
 func NodeConfigFromEnv(role NodeRole) (NodeConfig, error) {
 	host, _ := os.Hostname()
 	c := NodeConfig{Role: role, Host: host, Workers: -1, NodeID: strings.TrimSpace(os.Getenv("ARTEX_NODE_ID"))}
@@ -102,6 +108,7 @@ func NodeConfigFromEnv(role NodeRole) (NodeConfig, error) {
 			return c, fmt.Errorf("ARTEX_NODE_WORKERS=0: a worker node needs at least one worker")
 		}
 		c.ControlProxy = strings.TrimSpace(os.Getenv("ARTEX_CONTROL_PROXY"))
+		c.ControlAPI = strings.TrimSpace(os.Getenv("ARTEX_CONTROL_API"))
 	}
 	return c, nil
 }

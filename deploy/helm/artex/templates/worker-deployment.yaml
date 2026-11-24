@@ -48,7 +48,9 @@ spec:
           image: {{ include "artex.image" . | quote }}
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           # No local capture proxy: tool traffic goes through the control node's
-          # recording proxy (ARTEX_CONTROL_PROXY) with a per-task scope token.
+          # recording proxy (ARTEX_CONTROL_PROXY) with a per-task scope token;
+          # captured-traffic reads and evidence binding go to the control API's
+          # signed node RPC (ARTEX_CONTROL_API, docs/DISTRIBUTED.md).
           args: ["-role", "worker", "-proxy", "", "-health-addr", ":{{ $w.healthPort }}"]
           envFrom:
             {{- include "artex.envFrom" . | nindent 12 }}
@@ -56,7 +58,7 @@ spec:
             - name: ARTEX_NODE_ID
               valueFrom:
                 fieldRef: {fieldPath: metadata.name}
-            {{- include "artex.sharedEnv" (dict "ctx" . "extra" (merge (dict "ARTEX_ROLE" "worker" "ARTEX_NODE_WORKERS" (toString $w.concurrency) "ARTEX_HEALTH_ADDR" (printf ":%v" $w.healthPort) "ARTEX_CONTROL_PROXY" (printf "http://%s-control-proxy:8788" (include "artex.fullname" .))) $w.extraEnv)) | nindent 12 }}
+            {{- include "artex.sharedEnv" (dict "ctx" . "extra" (merge (dict "ARTEX_ROLE" "worker" "ARTEX_NODE_WORKERS" (toString $w.concurrency) "ARTEX_HEALTH_ADDR" (printf ":%v" $w.healthPort) "ARTEX_CONTROL_PROXY" (printf "http://%s-control-proxy:8788" (include "artex.fullname" .)) "ARTEX_CONTROL_API" (printf "http://%s-control:%v" (include "artex.fullname" .) .Values.control.service.port)) $w.extraEnv)) | nindent 12 }}
           ports:
             - {name: health, containerPort: {{ $w.healthPort }}}
           startupProbe:

@@ -36,6 +36,7 @@ services:
       ARTEX_NODE_ID: worker-1
       ARTEX_NODE_WORKERS: "3"
       ARTEX_CONTROL_PROXY: http://artex:8788
+      ARTEX_CONTROL_API: http://artex:8787
       ARTEX_PG_HOST: postgres
       ARTEX_PG_PORT: "5432"
       ARTEX_PG_USER: ${POSTGRES_USER:-artex}

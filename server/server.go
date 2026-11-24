@@ -51,6 +51,8 @@ type Server struct {
 	engine *Engine
 	ctx    context.Context
 	node   NodeConfig // process role (node.go); zero value = RoleAll
+	// nodeRPC authenticates worker nodes' calls (node_rpc.go); control only.
+	nodeRPC *nodeRPCVerifier
 
 	skillDir string // root directory for skill subdirectories
 	jwtKey   []byte // HS256 signing key loaded from / generated into keyDir/jwt.key
@@ -213,6 +215,9 @@ func New(ctx context.Context, m *Manager, skillDir string, dataDir string, keyDi
 	}
 	s.engine.node = s.node
 	worker := s.node.Role == RoleWorker
+	if s.node.Role == RoleControl {
+		s.nodeRPC = newNodeRPCVerifier(db.NodeRPCKey)
+	}
 	s.initSetupToken()
 	s.loadPasswordVersion()
 	s.initSideQuestions()
@@ -800,6 +805,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/auth/change-password", s.authChangePassword)
 
 	mux.HandleFunc("GET /api/health", s.health)
+	if s.nodeRPC != nil {
+		mux.HandleFunc("POST "+nodeRPCPrefix+"{op}", s.handleNodeRPC)
+	}
 	mux.HandleFunc("GET /api/ready", s.ready)
 	mux.HandleFunc("GET /api/stats", s.stats)
 	mux.HandleFunc("GET /api/logs", s.getLogs)
