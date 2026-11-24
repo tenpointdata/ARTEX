@@ -1,6 +1,6 @@
 # HANDOFF.md — ARTEX
 
-**Last updated:** 2026-11-24 12:45 MST, by claude-code: c-5d033e done: ForgetScope closes the scope's proxy client connections (credential and relay), so a pinned keep-alive upstream cannot outlive the scope. Earlier hand-offs are under Deltas and in `ej handoff log`.
+**Last updated:** 2026-11-24 11:23 MST, by claude-code: c-5b5421 (now in review): client_read users are bound to companies. Earlier hand-offs are under Deltas and in `ej handoff log`.
 
 > Single entry point for whoever picks this up next (any agent or human), with no access to the
 > originating conversation. Read this first, then the sections of the code it points at.
@@ -59,11 +59,48 @@ See `docs/ARCHITECTURE.md` for the code-level map. Summary:
 
 ## Current state
 
-**2026-11-24 (c-75c593)** — The benchmark subject instance (`docker-compose.bench.yml`) now builds from a
-clean clone: production `Dockerfile`, a sibling Postgres, named volumes, committed `bench/.env.example`
-with `ARTEX_RSI_LESSONS=off`. Verified on Docker Desktop arm64: `up --build` brings both containers up,
-isolation self-test passes, egress filter installed, UI 200, `ARTEX_RSI_LESSONS=off` in the container.
-No benchmark run was made against it.
+**2026-11-24 — E5 engagement governance (card `c-669406`)** is on branch `ej/20261124-055929-bd2253`. It
+is tested against Postgres 17 on macOS; see `docs/GOVERNANCE.md`.
+- **Roles.** `admin`, `operator`, `reviewer` and `client_read` work over the existing JWT. The users
+  are in `artex_users` and managed at `/api/users`. The policy table is `server/rbac_policy.go`,
+  enforced in `requireAuth`. `ARTEX` stays the break-glass admin.
+- **Authorization artifact.** Each task can have a versioned, immutable artifact covering scope, time
+  window and technique classes (`/api/tasks/{id}/authorization`). It is enforced only inside the
+  existing target gate (`intercept/authorization.go`, called from `CheckTargets`/`run`,
+  `CheckUngated`/`ungated`, and the dial and redirect paths). A spawned child task inherits it.
+- **Audit chain.** `audit_chain` is hash-chained and written by row triggers on `intercept_pending`,
+  `artex_users` and `engagement_authorizations`. Logins and refusals by role are appended too.
+  `GET /api/intercept/history/chain` lists it and `/chain/verify` checks it.
+- **Migration numbering.** Migration **0016** holds the schema, because 0015 is taken by the E2
+  integrations branch. If E2 has not merged when this branch lands, renumber whichever merges second.
+  The loader fails closed on a pending version older than one already applied.
+- **Tests.** With `ARTEX_PG_DSN`, all of `go test ./...` passes except three tests:
+  - `TestGateOffTaskIsUnchanged`, which also fails on base `1abe24f` (card `c-3157b4`);
+  - `TestConnectWithoutPasswordRealPG`, because the local Postgres uses trust auth;
+  - the SOCKS5 UDP test, because macOS cannot bind 127.0.0.2.
+- **Head-lock contention fixed (card `c-ba9f64`).** Migration **0018** recreates the three audit row
+  triggers as `DEFERRABLE INITIALLY DEFERRED` constraint triggers, so `audit_chain_head` is locked
+  only at commit. A task archive no longer stalls gate decisions or logins, and the
+  write-then-lock deadlock is gone. 0018 rather than 0017 because the E1 branch
+  (`ej/20261124-083744-02fa3c`) takes 0017. Tests: `db/audit_chain_concurrency_test.go` (both
+  concurrency tests fail without 0018). This branch merged the E5 branch in, so it carries E5 too.
+- **Not done.** There is no web UI for E5 yet (card `c-869050`). The login page still assumes `ARTEX`.
+
+**2026-11-24 — client_read bound to companies (card `c-5b5421`, in review)** is on branch
+`ej/20261124-110647-182fa9`. That branch merged the E5 branch (PR #16) in, so it carries E5 too.
+- A `client_read` user sees only the companies in `artex_user_companies` (migration **0019**, audited at
+  commit). Admins set them with `GET/PUT /api/users/{id}/companies`. An unbound client gets 403.
+- `server/client_scope.go`: every route open to `client_read` has a binder that runs after the role
+  check. Findings routes go through the #425 company filter with `StrictCompany`, which ignores
+  agent-added `task_scope` rows. Tasks and ids outside the binding answer 404. A route without a binder
+  is refused, and `TestClientBindersCoverClientRoutes` enforces that. The test found
+  `findings/{id}/traffic` and its body route open to clients without a binder, so both are now bound.
+- A client's report counts only its own companies' assets, and its `/api/stats` drops the global
+  traffic and asset totals. `findings/retests/active` now needs `read`.
+- Tests: `server/client_scope_pg_test.go`, checked by mutation. `go test ./db ./server` with PG passes
+  except `TestConnectWithoutPasswordRealPG` (trust auth) and the SOCKS5 UDP test (macOS). verify.sh passes.
+- **Migration order:** 0016 (E5), 0018, 0019 (this branch), with E1 holding 0017. The loader refuses a
+  pending version older than an applied one, so renumber E1 above 0019 if it lands later.
 
 **2026-11-23** — Fixes for the High and Medium findings from the 2026-11-23 security audit are on
 `main` (PR #1, branch `ej/20261123-145205-6a3af6`); the Linux/Docker verification fixes come from
@@ -78,8 +115,8 @@ Verified 2026-11-23 (card `c-dadc14`, done):
   runtime base, `[artex] egress: installed` is logged, `-m owner`/`-m addrtype` load on bookworm's
   nf_tables iptables 1.8.9, and the executor is refused for 169.254.169.254, 100.100.100.200, the
   gateway, host.docker.internal (root reaches the host service) and :8787 on every local address,
-  while a LAN router, another container and the internet stay reachable. The full image gives the
-  same results (2026-11-24, `c-a6891b`, below).
+  while a LAN router, another container and the internet stay reachable. The full image did not
+  finish building on a slow link (`c-a6891b`).
 - Web: `npm ci` and `npx tsc --noEmit` clean. `npm run lint` fails with 84 errors, all already on main
   and none in the changed files (`c-834a5a`). Headless Chromium: setup, login, Sign out over the
   HttpOnly SameSite=Strict cookie work and `document.cookie` is empty, **but a token copied before
@@ -101,27 +138,7 @@ Operator-facing changes:
 - Cloud-metadata and link-local addresses are always denied for platform dials, redirects and WebFetch.
   Since 2026-11-23 (branch `ej/20261123-152404-f61d73`, card `c-485de0`) this includes the capture
   proxy's own upstream dials: go-mitmproxy's upstream is a loopback gate (`traffic/upstream_gate.go`)
-  that dials with `Interceptor.DialSOCKS5`.
-- **2026-11-24** (card `c-5a6f96`, commit `75184c3`): task agents' proxy URLs now carry a task scope token,
-  so capture-proxy upstream dials (and SOCKS5 with the token as password) also apply that task's
-  block rules and, with its gate on, its pins/approvals; an ended task's token is refused.
-  **2026-11-24** (card `c-eb32cc`, commit `ac7c35e`, branch `ej/20261124-075745-5a4987`, which also
-  carries the not-yet-merged `c-5a6f96` branch): chat/conversation agents and `use_recording_proxy`
-  HTTP tools now get their run's scoped URL (`Manager.ScopedProxyAddr`, `server/proxy_scope.go`);
-  conversations have their own token, forgotten on delete; an unloaded task's call gets a refused
-  URL. The transparent listener is global-only by decision. **2026-11-24** (card `c-15b39d`, branch
-  `ej/20261124-110649-dbd854`, stacked on PR #13's branch): stdio MCP servers, the Playwright browser
-  included, are spawned per run with their capture-proxy `--proxy-server`/proxy env rewritten to a
-  per-run loopback **scope relay** (`traffic/scope_relay.go`, `Manager.scopeMCPProxy`), so browser
-  dials carry the run's scope; listing tools from the UI (no run) still uses the global rules. **2026-11-24**
-  (card `c-a1c0fc`, branch `ej/20261124-114610-cae888`, which carries c-15b39d): a relay serves at most 256
-  connections at once; a prepareMCP closer is released at once when its MCP fails to start; tests cover
-  the hook (PG), two concurrent scopes, the keep-alive host change, wss, an in-flight request across the
-  relay's close (tombstone), the cap, and a real headless Chrome (opt-in `ARTEX_TEST_CHROME`). This is on
-  main (landed with #22). Re-verified 2026-11-24 12:30: the PG hook test ran against a throwaway Postgres
-  (not skipped) and passed, the Chrome test passed, relay tests pass with -race. A full live task is `c-517c2d`. Operators' own clients keep the global rules. go-mitmproxy's keep-alive host pinning is worked around
-  (`unpinHostChange`; upstream report `c-9b48b7`). The global-egress-proxy bypass is accepted and
-  documented (`docs/OPS.md` §6). `scripts/verify.sh` passes.
+  that dials with `Interceptor.DialSOCKS5`. This applies global rules only; task rules are tracked on `c-5a6f96`.
   Block rules apply even with the gate off. Fuzzy allow rules match on name and address boundaries.
 - Main-agent writes carry origin `mainagent` and are framed as agent-authored. Norma compaction
   summaries are framed as untrusted data.
@@ -137,55 +154,37 @@ Operator-facing changes:
   Verified: Linux-root tests (`server/execuid_root_linux_test.go`, where task A gets EACCES on
   `tasks/B/i1` and `.artex-home`), the full server and agent suites as root in `golang:1.26.11-bookworm`,
   and egress rules with iptables in a NET_ADMIN container.
-  Spill dirs follow the key too (card `c-dd160a`, `server/execuid_spill_unix.go`). A live key's
-  `<data>/spill/{tasks,sessions}/<id>` is `root:<uid>` 0750 with files `root:<uid>` 0640, so the
-  shared exec gid no longer reads another task's spills. It is regrouped on acquire, closed to
-  `root:root` 0700 at the start of release, and closed at start-up when the key holds no uid. Verified
-  by `TestExecUIDRangeSpillIsolationAsRoot`, where task A's shell and file tool get EACCES on B's spill,
-  plus the full server suite as root in Docker.
   Root tests in Docker: build the test binary into a 0755 dir (`go test -c -o /t/server.test`). The
   default 0700 go-build dir makes the isolation self-tests fail on `main` too.
-
-**2026-11-24: full Docker image verified (card `c-a6891b`).** The complete image (bbot, chromium,
-Playwright) built from `1abe24f` with the committed Dockerfile on Docker Desktop arm64 in 34 min. The
-bbot layer's own dry-run grep passed: trufflehog installed cleanly this time, with no ERRR. Run through
-`docker-compose.yml` with named volumes, it logs `[artex] egress: installed for uid 10001 (ipv4)…(ipv6)`
-and the isolation self-test passes. Checked with `scripts/docker-egress-probe.sh` (new): the executor
-gets REJECT on 169.254.169.254, 127.0.0.1:8787, the container IP's :8787 and host.docker.internal; root
-reaches all of them except metadata, which Docker Desktop doesn't serve (timeout). Both reach the LAN
-router and example.com. `scripts/docker-login-probe.js` (new, uses the image's Playwright) passes
-login, HttpOnly + SameSite=Strict cookie, token hidden from scripts, Sign out → /login and 401. Replaying
-the pre-logout cookie still gets 200 because revocation (`c-a0af33`) is not on main yet. Not re-run on
-the newer main (`-exec-uid-range`, #18).
 
 ## Triage (next handful)
 
 **Agents' lane**
 1. *(unclaimed)* — **SEC: per-task uid follow-ups** (S each): `c-12df03` (single-uid start-up fails on a
-   socket; MCP uid not egress-filtered), `c-e70e5c` (release ended tasks at start-up; per-key lock). The "Done when" is on each card.
-2. *(unclaimed)* — **SEC: gorilla/websocket bump, GO-2026-6278** (XS), card `c-c10f2c`; needs network.
+   socket; MCP uid not egress-filtered), `c-dd160a` (spill dirs readable across tasks), `c-e70e5c`
+   (release ended tasks at start-up; per-key lock). The "Done when" is on each card.
+2. *(unclaimed)* — **E5: web UI for users / authorization / chain / client bindings** (M), card `c-869050`.
+3. *(unclaimed)* — **SEC: gorilla/websocket bump, GO-2026-6278** (XS), card `c-c10f2c`; needs network (PR #17 open).
    Done = govulncheck clean.
-3. *(unclaimed)* — **SEC: upstream-gate residuals** (M), card `c-5a6f96`: task-scoped rules on proxy
+4. *(unclaimed)* — **SEC: upstream-gate residuals** (M), card `c-5a6f96`: task-scoped rules on proxy
    dials, go-mitmproxy keep-alive host pinning, and the global-egress-proxy bypass. Done = a test or a decision for each.
-4. *(unclaimed)* — **SEC: logout revocation** (S), card `c-a0af33`. Done = a token replayed after
-   logout or a password change gets 401, by a test.
-5. *(unclaimed)* — **SEC: Docker Desktop named volumes** (S), card `c-775dc2`. Done = `docker compose up`
-   starts on a Mac with the isolation self-test passing; Linux bind-mount path documented.
-6. *(unclaimed)* — **E1 Client-grade reporting & deliverables** (M). Turn `report/` into
+5. *(unclaimed)* — **E1 Client-grade reporting & deliverables** (M). Turn `report/` into
    CVSS/EPSS-scored, remediation-bearing, standards-mapped deliverables (OWASP ASVS/WSTG, MITRE
    ATT&CK). Done = a report export with per-finding CVSS vector + remediation + framework tags,
    covered by tests. Card `c-8f9cca`.
-7. *(unclaimed)* — **E4 Methodology-driven coverage** (M), card `c-c0bb07`. Extend the coverage ledger to score
+6. *(unclaimed)* — **E4 Methodology-driven coverage** (M), card `c-c0bb07`. Extend the coverage ledger to score
    coverage against a codified methodology checklist, not only asset touch. Done = planner can
    read a methodology and the coverage graph shows checklist completion.
 
 **Human lane**
+- **Full-image Docker check** (card `c-a6891b`): needs a fast link for the recon-toolbox build; repeat
+  the egress probes and the login script there (the slim-image run passed).
 - Revisit tracking: E1–E10 are on the private Composite board (decided 2026-11-23, repo is public).
   File GitHub issues only if the repo goes private or you want them public.
-- Decide engagement-governance direction (E5): how formal the rules-of-engagement/authorization
-  artifact should be for your use.
-- **SEC: live Playwright scope-relay check** (S), card `c-517c2d`: a real task with capture on and the
-  seeded Playwright MCP. Done = the browser's dials show the task scope and an out-of-scope host is refused.
+- E5 shipped a lightweight artifact (reference, signatory, scope, window, technique classes). Decide
+  whether tasks with an artifact must have the target gate forced on (card `c-f4115c` item 2), and
+  whether the extra admin-only routes in `server/rbac_policy.go` (tools, MCP, agents, LLM config,
+  notify) suit how operators work.
 
 **Blocked**
 - Nothing blocked.
@@ -200,17 +199,7 @@ the newer main (`-exec-uid-range`, #18).
   open http://localhost:8787, setup token via `docker compose logs artex | grep "Setup token"`.
 - **Verify (reproduces CI):** `scripts/verify.sh` (fast set, no Docker); `--full` adds `go test -race`
   + web static build; `--security` runs `govulncheck ./...`.
-- **Benchmark harness:** `scripts/benchmark` against the subject instance `docker-compose.bench.yml`
-  (`cp bench/.env.example bench/.env`, set `ARTEX_PG_PASSWORD` + an LLM key, then
-  `docker compose -f docker-compose.bench.yml up --build -d`; `ARTEX_BENCH_PORT=18787` when a production
-  instance holds 8787). Builds from the production `Dockerfile`, own Postgres and named volumes,
-  `ARTEX_RSI_LESSONS=off`. Details in `scripts/benchmark/README.md` ("Subject instance").
-- **Container egress/login check:** after `docker compose up`, run
-  `scripts/docker-egress-probe.sh <artex container> [host port] [LAN url]`, then set the admin
-  password and run `scripts/docker-login-probe.js` inside the container (usage in its header).
-  On Docker Desktop, use named volumes for data/keys/skills (card `c-775dc2`); a separate
-  `docker compose -p <name>` project with its own ports keeps a verification stack apart from a
-  running one.
+- **Benchmark harness:** `docker-compose.bench.yml` + `scripts/benchmark`.
 
 ## Open work
 
@@ -222,22 +211,23 @@ Card ids in brackets:
 - **E2** [`c-6def05`] Finding/ticketing integrations out (Jira, GitHub issues, DefectDojo) and more ingest in (Nuclei, Nmap, ZAP/Burp, Semgrep).
 - **E3** [`c-d25ff9`] Loop-B lesson library graduation + Loop-C benchmark gate per the `RSI.md` contract (owner-approval, immutable surfaces).
 - **E4** [`c-c0bb07`] Methodology-driven coverage (OWASP WSTG / API Top 10 as structured checklists).
-- **E5** [`c-669406`] Engagement lifecycle & governance: RBAC, per-engagement authorization artifact, scope expiry, tamper-evident (hash-chained) audit log.
+- **E5** [`c-669406`] Engagement governance. The backend is done on `ej/20261124-055929-bd2253`. Follow-ups:
+  `c-5b5421` (client binding), `c-869050` (UI), `c-f4115c` (lifecycle gaps).
+- **TEST** [`c-3157b4`] `TestGateOffTaskIsUnchanged` fails on main with Postgres (also fails before E5).
 - **E6** [`c-cb0093`] Cost/observability dashboard + OpenTelemetry export, building on existing context telemetry.
 - **E7** [`c-d60149`] Distributed/remote workers (queue-backed intents) for larger engagements; Helm chart.
 - **E8** [`c-5487e8`] Planner/worker evaluation suite (regression targets, prompt-version A/B via the benchmark gate).
 - **E9** [`c-73af97`] Frontend/UX pass (tables over cards, fewer-clicks triage workflow, live engagement dashboard).
-- **SEC** [`c-517c2d`] Live Playwright task check of the scope relay (human/bench: needs an LLM key and an authorized target).
-- **SEC** [`c-3b9252`] Capture-proxy upstream connection reuse across scopes (rules checked only at dial time).
-- **SEC** [`c-9b48b7`] Report go-mitmproxy keep-alive host pinning upstream; drop `unpinHostChange` once fixed.
-- **SEC** [`c-dadc14`] Verify the security branch on Linux root, in Docker and against Postgres, plus the web typecheck.
+- **SEC** [`c-5a6f96`] Capture-proxy upstream gate residuals (task-scoped rules, go-mitmproxy host pinning, egress-proxy bypass).
 - **SEC** [`c-a0af33`] Logout does not revoke the session token (valid until the 7-day JWT TTL).
 - **SEC** [`c-775dc2`] Docker Desktop bind mounts defeat executor isolation; stock compose will not start on a Mac.
+- [`c-a6891b`] Repeat the egress/login check on the full image once it builds.
 - [`c-834a5a`] web: 84 pre-existing biome lint errors; `npm run lint` cannot gate CI yet.
 - **SEC** [`c-8d54d5`] Capture proxy: insecure upstream only for in-scope targets.
 - **SEC** [`c-c10f2c`] gorilla/websocket bump (GO-2026-6278).
 - **SEC** [`c-bd9a6d`] Residual gaps from the High/Medium fixes.
 - **SEC** [`c-12df03`] Single-uid start-up fails on a socket in a run dir; MCP uid is not egress-filtered.
+- **SEC** [`c-dd160a`] Per-task uids: spill dirs readable across tasks.
 - **SEC** [`c-e70e5c`] Per-task uids: release ended tasks at start-up; per-key lock.
 - **SEC** [`c-cc25b6`] Low-severity audit items.
 - **E10** [`c-72dd9d`] Code-security testing lane (SAST/dependency ingest) feeding the same dual-graph + evidence model.
@@ -247,24 +237,15 @@ Card ids in brackets:
 - go-mitmproxy v1.9.2 has no upstream dial hook. Every capture-proxy upstream dial goes through its
   upstream-proxy URL, which is our loopback gate (random credential, `traffic/upstream_gate.go`). Do not
   set `SetUpstreamProxy` back to returning nil: nil means a bare `net.Dialer` as root, with no checks (`c-485de0`).
-- A task's proxy scope rides on the proxy URL userinfo (`egress/proxycred.go`). Code that rewrites a
-  proxy URL must keep it (`MarkProxyURL` does); prompts and logs show it stripped
-  (`egress.WithoutProxyCredential`). The client-connection binding is keyed by remote address, the only
-  key go-mitmproxy hands `upstreamFor` (`traffic/scope.go`). A client that cannot send a credential
-  (Chromium's `--proxy-server`) gets a scope relay instead (`traffic/scope_relay.go`): the binding is
-  the relay's outbound address, stored before any byte is forwarded, and it wins over a credential.
-- The scope is checked when the proxy dials upstream, not per request. So `ForgetScope` also closes
-  every proxy client connection bound to the token, by credential (`sink.scoped`) or by relay
-  (`sink.relayed`), through `sink.clients` (`traffic/scope.go` `closeScope`). That closes the
-  connection's open upstream too. A path that forgets a token without `ForgetScope` would bring back the
-  pinned-upstream reuse. Test: `traffic/scope_forget_test.go`.
-- `server` tests on macOS: `TestManagerSOCKS5UDPOptInAndAssetBlockRuleDropsDatagram` fails because
-  127.0.0.2 is not configured on the host (`bind: can't assign requested address`). That's environmental.
 
 - **Guardrails are invariants.** Scope/target gate, interception gate, budgets, noise governor,
   untrusted-output boundary, audit trail — never weaken/bypass/route around them. `RSI.md`
   "immutable surfaces" must never enter an automated search space.
 - **Migrations fix forward** — a published `db/migrations/*.sql` is never edited.
+- **Audit chain is append-only:** `UPDATE`, `DELETE` and `TRUNCATE` on `audit_chain` fail, and artifact
+  rows reject `UPDATE`. A test database that gets polluted has to be recreated, not cleaned. Verify only
+  catches a full consistent rewrite by a DB superuser if `head_hash` is compared with a copy kept
+  outside the database.
 - **Embedded UI** requires `-tags embedui`; a plain `go build` omits the web assets.
 - **Root tests on Linux:** run them as root in a container, e.g. `docker run --rm --cap-add NET_ADMIN
   -v "$PWD":/src -w /src -e ARTEX_PG_DSN=postgres://… golang:1.26.11-bookworm go test ./...`. Without
@@ -278,13 +259,6 @@ Card ids in brackets:
 
 ## Decisions
 
-- **2026-11-24** — c-75c593: the bench subject instance builds from the production `Dockerfile` instead
-  of a separate `Dockerfile.bench`, so the benchmark measures the shipped image and there is one image
-  definition. Postgres is a sibling service (not baked in), data/keys are named volumes (Docker Desktop
-  bind mounts fail the isolation self-test), and it is a bridge network with `127.0.0.1` ports instead of
-  the old `network_mode: host` (no port clashes, works on Docker Desktop). Host-published corpora are
-  reached as `host.docker.internal`; the egress filter still denies that to agents until the operator
-  sets `ARTEX_EGRESS_ALLOW` in `bench/.env` — documented, not defaulted, since it opens host services.
 - **2026-11-23** — c-dadc14: the security branch's always-on metadata check resolves each name the
   platform dials (gate on or off); `TestGateOffTaskIsUnchanged` now asserts one lookup per platform
   connection instead of none, since this is the intended behaviour, not a regression. The isolation
@@ -314,51 +288,39 @@ Card ids in brackets:
 - **2026-11-24** — Per-task uids derive a process's identity from the **owner of its working run
   directory**, not from a channel between the server and the shim. Norma always starts bash in the
   server-chosen `tc.WorkingDir`, and only root sets that owner. A task's gid is the same number as its
-  uid, and the exec gid stays a supplementary group (script dirs; spill dirs are grouped to the task
-  uid instead, `c-dd160a`). As a result MCP servers no
+  uid, and the exec gid stays a supplementary group (script and spill dirs). As a result MCP servers no
   longer write into run dirs when the range is on. Release kills the uid's processes and gives its files
   back to root, so a uid returned to the pool owns nothing. The mode stays opt-in until it has run in a
   real deployment.
 
-- **2026-11-24** — Capture-proxy task scope (`c-5a6f96`): carried as a per-task token in the proxy URL
-  userinfo, because a proxy client can only identify itself through its credential and every tool
-  already reads `HTTP_PROXY`. The token only *adds* a task's rules, so it is not treated as a secret
-  and a missing token falls back to the global rules (the floor), while an unknown token fails closed.
-  Proxy dials never wait for approval (an unpinned host opens a request and is refused). The
-  global-egress-proxy path is **accepted**, not routed through the gate: the operator's proxy resolves
-  and reaches the target, so the gate could only make a name-only check. OPS.md tells operators not to
-  run that proxy where it can reach metadata. Keep-alive host pinning is fixed locally with
-  go-mitmproxy's separate client rather than closing the client connection, so clients see no resets.
+- **2026-11-24** — E5: the engagement is the task. The artifact is enforced only by the existing target
+  gate, so there is one enforcement path, and refusals are decided intercept rows. Names are never
+  resolved for the scope match, so a name must be listed by name; this fails closed. The technique
+  classifier is a declared check driven by a data table, not a sandbox; unclassified calls are not
+  limited. The audit chain is fed by DB row triggers (atomic with every writer, present and future),
+  and the hashed payload is stored as text so the bytes are hashed exactly. Users' roles are read from
+  the DB on every request, not from the token, so revocation is immediate.
 
-- **2026-11-24** — Remaining proxy clients (`c-eb32cc`): shared clients (the per-profile chat agent,
-  the http custom tool) resolve the scoped URL per call from the run's `intercept.TargetScope` on the
-  context, rather than being rebuilt per run. A task scope whose task is not loaded gets a URL with
-  an unregistered token (refused), never the global-only URL, and `TaskProxyAddr` no longer mints
-  tokens for unloaded tasks. The transparent TCP listener stays global-only: it has no credential,
-  and per-run uid/cgroup mapping is operator netfilter setup; documented in `docs/OPS.md` §6.
+- **2026-11-24** — Audit head-lock contention (`c-ba9f64`): fixed with deferred constraint triggers
+  (migration 0018) rather than reordering the archive's deletes (which fixes one caller only) or an
+  unchained staging table plus a sequencer (which leaves a window where committed writes are not yet
+  chained, and adds a worker). Entries stay atomic with their writes; the head becomes the last lock a
+  transaction takes. Accepted costs: chain order is commit order, and the actor is `artex.actor` at commit.
 
-- **2026-11-24** — Browser MCP scope (`c-15b39d`): the card assumed one shared browser process; in
-  fact `wireAgentAugment` spawns every stdio MCP per run (worker run, planner round, main-agent and
-  chat turn) on a context that already carries the run's `TargetScope`. So the fix rewrites the spawn,
-  not the process model: any stdio MCP's `--proxy-server` or `HTTP(S)_PROXY`/`ALL_PROXY` naming the
-  recording proxy is replaced by a per-run loopback relay. A relay, not the userinfo, because
-  Chromium drops it from `--proxy-server` and only answers a 407 the proxy never sends. A relay
-  that cannot start skips the server for the run (fail closed) rather than spawning on the plain
-  URL. UI tool discovery (no run) keeps the stored URL, global rules: it lists tools and browses
-  nothing. This branch merges PR #13's branch (`ej/20261124-075745-5a4987`), which this work needs.
+- **2026-11-24** — Client binding (`c-5b5421`): enforced in one middleware step with a declarative
+  per-route binder table that fails closed, rather than in scattered handler checks, so a new client
+  route cannot leak by omission. Findings reuse the #425 company filter. Task ownership counts only
+  operator-made company scope rows, because agent output is untrusted. A multi-company task is fully
+  visible to each bound client (accepted). Bindings apply to `client_read` only.
 
 ## Deltas
 
 <!-- composite:deltas · newest first; Composite rewrites this block on every merge (ej handoff merge / merge_handoff) -->
-- **2026-11-24 11:57 MST** · claude-code · `ej/20261124-114610-cae888` `11d040e`→`b6c05ad` (1 commit) · `h-c36681` — c-a1c0fc (now in review; board cards opened: c-5d033e, c-517c2d): scope-relay tests and limits, on a branch that merges c-15b39d's unmerged branch (ej/20261124-110649-dbd854). wireAgentAugment now releases a prepareMCP closer at once when its MCP fails to connect or list tools; before, it was held until the run ended. A PG test of the hook uses the test binary as a fake stdio MCP. It checks that a hook error skips the server, that the spawned server is the prepared one, and that cleanup releases its closer. ScopeRelay caps client connections at 256 at once. New relay tests cover two concurrent scopes, the keep-alive host change, wss, a deterministic tombstone (a request is held after it is read while the relay closes), and the cap. An opt-in real headless Chrome test (ARTEX_TEST_CHROME) passes: through the relay, dials run on the scope, and a forgotten scope is refused. The tombstone, cap and early-close tests were mutation-checked. verify.sh passes. traffic passes with -race. In server, only TestManagerSOCKS5UDPOptIn… fails, because macOS has no 127.0.0.2. **Next:** c-5d033e: ForgetScope should close the scope's client connections; today an already-open upstream stays usable (dial-time check). c-517c2d (human/bench): a full live task with the Playwright MCP and capture on. Land PR #13, then c-15b39d, then this branch (this branch carries both). **Decided:** An over-cap relay connection is closed, not queued: it fails closed and Chromium retries. 256 matches Chromium's per-profile socket limit. When an MCP's tools/list fails, its client and relay are closed at once. The live check was done with a real Chrome against a relay in a test, not as a full task. A full task needs an image build, an LLM key and an authorized target, so it is on card c-517c2d. The forgotten-scope keep-alive reuse was not fixed here: it predates this work, is not specific to the relay (relays close their connections at run end), and is on card c-5d033e.
-- **2026-11-24 11:53 MST** · claude-code · `ej/20261124-113533-f16c00` `382e26f`→`bea8d58` (2 commits) · `h-356fb9` — c-b73542 (now in review): agent processes are refused cloud metadata and link-local addresses at the dial level on any Linux root start, not only in Docker. The server installs its own iptables chain ARTEX_AGENT_FLOOR covering the exec uid, the MCP uid and -exec-uid-range. It refuses intercept.MetadataPrefixes by -d and by conntrack --ctorigdst; DNS and ARTEX_EGRESS_ALLOW pass. A new product-neutral ownerfw package builds the rules. The isolation self-test dials the metadata endpoints as the executor, and a connection stops the start unless ARTEX_ALLOW_METADATA_EGRESS=1. Verified as root with NET_ADMIN in golang:1.26.11-bookworm. Against a real listener on 169.254.169.254, curl as uid 10001 succeeds before the floor and fails after it, the MCP uid fails too and root succeeds; a DNAT of 169.254.170.2 to loopback is refused. Real-binary starts behave the same way: installed natively, refused with the filter off while metadata answers, and allowed with the opt-out. scripts/verify.sh passes. **Next:** c-02e554: re-check the floor while running, rebuild it atomically, remove stale jumps. Also run the full Docker image with egress.sh plus the floor (scripts/docker-egress-probe.sh), including a no-NET_ADMIN run, to confirm the new refuse-to-start message. **Decided:** The floor is a separate chain and egress.sh was left untouched, so its Docker-only gateway and API-port rules are never lost. The floor is checked by a dial from the executor rather than by reading the rules. A start is refused only when a metadata address answers. DNS passes because native resolvers can be link-local. A bad ARTEX_EGRESS_ALLOW entry is skipped with a warning instead of dropping the floor. Work is tracked on Composite cards rather than GitHub issues (the decision of 2026-11-23).
-- **2026-11-24 11:51 MST** · claude-code · `ej/20261124-114608-2455e2` at `c09f6e4`, no commits · `h-7774a6` — c-12df03 (now in review): the single-uid start-up share walk (shareWithExecGroup) now logs and skips an entry it cannot open, such as a stale ssh ControlMaster socket, instead of failing start-up. It never chowns by name in share mode. New test TestShareWithExecGroupSkipsSocket fails without the fix. egress.sh adds an OUTPUT jump for the MCP uid (ARTEX_EXEC_MCP_UID, default exec uid + 1, read the way mcpUID() reads it). Checked with iptables -S in a NET_ADMIN container: default, env + range, idempotent rerun, and a bad value that fails closed. scripts/verify.sh passes. Commit c09f6e4. **Next:** When branch ej/20261124-092031-1d05de (5be8c4b, c-bd9a6d) merges, keep main's egress.sh: that commit adds a looser MCP-uid rule. Not run: the Linux root suite in Docker for this change (the new test runs without root). h-356fb9 (c-b73542) works on related agent-uid dial denies; its uid set should include the MCP uid. **Decided:** Share mode skips an unopenable entry rather than chowning it by name. A by-name group change could be redirected by a swap to a root-only file, and in single-uid mode the entry keeping its executor owner is harmless. An unreadable ARTEX_EXEC_MCP_UID makes egress.sh fail closed, like an unreadable range.
-- **2026-11-24 11:39 MST** · claude-code · `ej/20261124-113524-71e978` `382e26f`→`7a51f4f` (1 commit) · `h-d512ac` — c-75c593 (now in review): docker-compose.bench.yml builds from a clean clone. It uses the production Dockerfile instead of the gitignored Dockerfile.bench, runs its own Postgres service and named volumes (compose project artex-bench), and publishes 127.0.0.1 ports that ARTEX_BENCH_PORT / ARTEX_BENCH_PROXY_PORT can override. bench/.env.example is committed: no secrets, ARTEX_RSI_LESSONS=off, one ARTEX_PG_PASSWORD for both services, and a commented ARTEX_EGRESS_ALLOW for corpora published on the host. Verified on Docker Desktop arm64: up --build is healthy, the isolation self-test passes, the egress filter is installed, the UI returns 200, and jwt.key copies out. scripts/benchmark/README.md has a new Subject instance section. **Next:** c-f1518c (h-9652aa) can use this instance for the first live held-out run. With a corpus on the host, use --target-host host.docker.internal and set ARTEX_EGRESS_ALLOW to the IP it resolves to inside the container. The -proxy listener logs 127.0.0.1:8788 inside the container, so the published 8788 port is likely unreachable from the host. The same is true of the production compose; it was not investigated. **Decided:** Bench builds the production Dockerfile (measure the shipped image, one image definition). It uses a sibling Postgres instead of a baked-in one. It uses a bridge network and 127.0.0.1 ports instead of network_mode: host, which avoids port clashes and works on Docker Desktop. Named volumes replace bind mounts because of c-775dc2. The host-gateway egress exception is documented but not defaulted, because it opens host services to agents.
+- **2026-11-24 11:23 MST** · claude-code · `ej/20261124-110647-182fa9` `ed9dfc4`→`b6682a1` (1 commit) · `h-6a42d5` — c-5b5421 (now in review): client_read users are bound to companies. Migration 0019 artex_user_companies (audited at commit); admin API GET/PUT /api/users/{id}/companies; server/client_scope.go applies a per-route binder after the role check. Findings routes are narrowed through the #425 company filter with StrictCompany, which ignores agent-added task_scope rows. Tasks and ids outside the binding return 404; an unbound client gets 403; a route without a binder is refused, enforced by TestClientBindersCoverClientRoutes, which found findings/{id}/traffic and its body route open to clients without a binder. The client report and stats no longer leak global counts. TestClientReadBoundToCompanyPG passes and was checked by mutation. This branch merged E5 (PR #16), so it carries E5 too. **Next:** Land PR #16 (E5) first, then this branch. Web UI for bindings is in scope of c-869050. Renumber E1's 0017 above 0019 if it lands later. **Decided:** Declarative per-route binder table that fails closed, not checks scattered across handlers. Task ownership counts only operator-made company scope rows, because agent output is untrusted. A multi-company task is fully visible to each bound client (accepted). Bindings restrict client_read only. Client report/stats need an explicit ?task id.
+- **2026-11-24 11:22 MST** · claude-code · `ej/20261124-110649-dbd854` at `a329eee`, no commits · `h-d87101` — c-15b39d (board card, now in review; follow-up card c-a1c0fc opened): the Playwright browser MCP, and any stdio MCP whose --proxy-server or HTTP(S)_PROXY / ALL_PROXY / PLAYWRIGHT_MCP_PROXY_SERVER names the recording proxy, now dials under the calling run's scope. wireAgentAugment already spawns every stdio MCP per run. A new prepareMCP hook (Manager.scopeMCPProxy, server/mcp_proxy_scope.go) rewrites that reference at spawn time to a per-run loopback scope relay (traffic/scope_relay.go). The relay binds each of its proxy connections to the run's token, because Chromium drops userinfo from --proxy-server. The relay is closed with the run. A relay that cannot start skips the server for that run, and an ended relay connection leaves a refused tombstone binding. The branch merges PR #13's unmerged branch (ej/20261124-075745-5a4987), which provides ScopedProxyAddr and the scope registry. The new tests pass with -race and were mutation-checked; verify.sh passes. An independent review's findings were fixed (tombstone, host/port matching, dial timeout); the rest are on c-a1c0fc. **Next:** c-a1c0fc: PG-backed test of the prepareMCP hook (skip on error, closer released), concurrent/keep-alive/WebSocket relay tests, a per-relay connection cap, and a live Playwright check with capture on. Land PR #13 before or with this branch, since this branch carries it. **Decided:** The browser fix rewrites the spawn and leaves the process model alone: the card's premise of one shared process was wrong, because stdio MCPs are already spawned per run on a context that carries the TargetScope. The scope travels through a loopback relay rather than userinfo, because Chromium drops userinfo and only sends credentials after a 407. Fail closed: if the relay cannot start, the MCP is not started for the run, and an ended connection's binding becomes a refused tombstone, not a gap. UI tool discovery (no run) keeps the stored URL and so the global rules, since it only lists tools. A per-scheme proxy list that cannot be rewritten is logged, not refused. Stacked on PR #13 because the work cannot exist without it.
+- **2026-11-24 11:13 MST** · claude-code · `ej/20261124-110652-e193a7` `0652b65`→`65420b5` (1 commit) · `h-8521a8` — c-3b9252 closed by a test and a decision, with no runtime code change: go-mitmproxy v1.9.2 never shares upstream connections across client connections in ARTEX. Added TestUpstreamConnectionsNotSharedAcrossClients (traffic/upstream_reuse_test.go). Forcing UseSeparateClient makes it fail, so it catches a regression. Added a comment at Traffic.upstreamFor that states the rule for c-5a6f96. **Next:** c-5a6f96: when adding task-scoped rules on proxy dials, return a distinct gate URL/credential per scope from upstreamFor (identifies the scope at the gate and keys go-mitmproxy's separate-client pool). **Decided:** The scope check stays at dial time, and the upstream pool is not changed. One upstream per client connection is pinned by a test. Today the proxy path carries only the global scope, so two scopes cannot meet on one upstream.
+- **2026-11-24 11:03 MST** · claude-code · `ej/20261124-102550-4fdb3c` `1abe24f`→`85d5f39` (8 commits) · `h-721d29` — c-a6891b (card, now in review): built the full Docker image (bbot, chromium, Playwright) from 1abe24f with the committed Dockerfile on Docker Desktop arm64 in 34 min. The bbot dry-run grep passed: trufflehog installed with no ERRR. Run as a separate compose project with named volumes, the image logs `[artex] egress: installed` (IPv4 and IPv6) and passes the isolation self-test. The executor gets REJECT for metadata, the API port (loopback and container IP) and host.docker.internal; root does not. The LAN and the internet stay reachable for both. The Playwright login/logout over the HttpOnly SameSite=Strict cookie passes. Added scripts/docker-egress-probe.sh and scripts/docker-login-probe.js so the check can be repeated. **Next:** Re-run both probe scripts after c-a0af33 (logout revocation) merges: the old-cookie replay should become 401. Also re-run with -exec-uid-range (main #18) to see the range rules. The main checkout has an uncommitted arm64 Dockerfile patch that softens the bbot grep; it is not needed (the committed grep passes), so its owner can drop it. **Decided:** Ran verification as its own compose project (-p artex-verify, ports 18787/18788, named volumes), not with the running artex-artex-1. That container was built from the main checkout's old 7eaf424 without egress.sh, and someone was using it for a live task.
 - _Older hand-offs, a line each; `ej handoff log` has them whole:_
-- **2026-11-24 11:23 MST** · claude-code · `h-6a42d5` — c-5b5421 (now in review): client_read users are bound to companies. **Next:** Land PR #16 (E5) first, then this branch.
-- **2026-11-24 11:22 MST** · claude-code · `h-d87101` — c-15b39d (board card, now in review; follow-up card c-a1c0fc opened): the Playwright browser MCP, and any stdio MCP whose --proxy-server or HTTP(S)_PROXY / ALL_PROXY / PLAYWRIGHT_MCP_PROXY_SERVER names the recording proxy, now dials under the calling run's sc… **Next:** c-a1c0fc: PG-backed test of the prepareMCP hook (skip on error, closer released), concurrent/keep-alive/WebSocket relay tests, a per-relay connection cap, and a live Playwright check with capture on.
-- **2026-11-24 11:13 MST** · claude-code · `h-8521a8` — c-3b9252 closed by a test and a decision, with no runtime code change: go-mitmproxy v1.9.2 never shares upstream connections across client connections in ARTEX. **Next:** c-5a6f96: when adding task-scoped rules on proxy dials, return a distinct gate URL/credential per scope from upstreamFor (identifies the scope at the gate and keys go-mitmproxy's separate-client pool…
-- **2026-11-24 11:03 MST** · claude-code · `h-721d29` — c-a6891b (card, now in review): built the full Docker image (bbot, chromium, Playwright) from 1abe24f with the committed Dockerfile on Docker Desktop arm64 in 34 min. **Next:** Re-run both probe scripts after c-a0af33 (logout revocation) merges: the old-cookie replay should become 401.
 - **2026-11-24 09:41 MST** · claude-code · `h-691201` — c-ba9f64 done (board card): migration 0018 recreates the intercept_pending, artex_users and engagement_authorizations audit triggers as DEFERRABLE INITIALLY DEFERRED constraint triggers, so audit_chain_head is locked only at COMMIT. **Next:** Merge order: E5 (0016), then this branch (0018), then E1 (0017 on ej/20261124-083744-02fa3c).
 - **2026-11-24 09:33 MST** · claude-code · `h-e8d3e5` — Card c-bd9a6d: every residual gap is now either fixed or recorded as accepted in SECURITY.md (commit 5be8c4b).
 - **2026-11-24 08:48 MST** · claude-code · `h-2396f3` — E8 (c-5487e8, now in review): added the planner/worker evaluation suite in scripts/benchmark. **Next:** c-f1518c (human): first live held-out run on a bench instance with ARTEX_RSI_LESSONS=off; check that DVGA is reachable through the port mapping.
@@ -369,6 +331,7 @@ Card ids in brackets:
 - **2026-11-24 06:17 MST** · claude-code · `h-537f2b` — c-8d54d5 done: the capture proxy verifies upstream TLS per host. **Next:** Run `ARTEX_PG_DSN=… go test ./db -run ActiveTaskScopeRulesPG`.
 - **2026-11-24 05:18 MST** · claude-code · `h-5a3839` — c-5a6f96 is done; follow-up cards c-eb32cc and c-9b48b7 are open. **Next:** c-eb32cc: scope the chat and conversation agents, the custom HTTP tools and the transparent listener.
 - **2026-11-23 21:08 MST** · claude-code · `h-43cc9e` — c-775dc2: docker-compose.yml and docker-compose.ghcr.yml now keep /app/data, /app/keys and /app/skills in named volumes, so the stock `docker compose up` starts on Docker Desktop with the isolation self-test passing. **Next:** c-965b0e: Docker's `restart: unless-stopped` still restarts the container after an exit 78.
+- **2026-11-23 21:07 MST** · claude-code · `h-ee4b2b` — c-a0af33: logout now revokes the session server-side. **Next:** Re-run `ARTEX_PG_DSN=… go test ./server` once Docker is healthy. **Issues:** opened #c-8dea4d.
 <!-- /composite:deltas -->
 
 _(written by `merge_handoff`)_

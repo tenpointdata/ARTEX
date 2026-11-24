@@ -200,6 +200,10 @@ type FindingFilter struct {
 	// A company id that does not exist, or is not a number, matches nothing.
 	// Empty = do not filter by company. An AssetScope of c:<id> means the same.
 	Company string
+	// StrictCompany drops the task-scope fallback of Company for scope rows an
+	// agent added (task_scope.source = 'agent'), so agent output cannot widen
+	// what a client-bound user sees. Set for client_read users only.
+	StrictCompany bool
 
 	// The three below are resolved from AssetScope by applyAssetScope; callers
 	// do not set them.
@@ -276,6 +280,10 @@ func (f FindingFilter) where() (string, []any) {
 			args = append(args, assetIDContainments(f.companyAssetIDs))
 			anchored = fmt.Sprintf("f.asset_ids @> ANY($%d::jsonb[])", len(args))
 		}
+		strictSource := ""
+		if f.StrictCompany {
+			strictSource = " AND ts.source <> 'agent'"
+		}
 		// No live asset: attributed through the task's company scope only.
 		args = append(args, f.companyID)
 		conds = append(conds, fmt.Sprintf(`(%s
@@ -287,8 +295,8 @@ func (f FindingFilter) where() (string, []any) {
 				)
 			) AND EXISTS (
 				SELECT 1 FROM task_scope ts
-				WHERE ts.task_id = f.task_id AND ts.kind = 'company' AND ts.company_id = $%d
-			)))`, anchored, len(args)))
+				WHERE ts.task_id = f.task_id AND ts.kind = 'company' AND ts.company_id = $%d%s
+			)))`, anchored, len(args), strictSource))
 	}
 	if query := strings.TrimSpace(f.Query); query != "" {
 		escaped := strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`).Replace(query)
@@ -667,8 +675,14 @@ func (d *DB) FindingStats() (*FindingStats, error) {
 // company = whole table. A company view leaves out archived (cold) tasks: their
 // aggregates carry no asset or company attribution.
 func (d *DB) FindingStatsForCompany(company string) (*FindingStats, error) {
+	return d.FindingStatsFor(FindingFilter{Company: company})
+}
+
+// FindingStatsFor is FindingStatsForCompany taking the company fields
+// (Company, StrictCompany) of f; its other fields are ignored.
+func (d *DB) FindingStatsFor(cf FindingFilter) (*FindingStats, error) {
 	st := &FindingStats{VulnClasses: []string{}, Tasks: []FindingTaskOption{}}
-	f, err := d.resolveCompany(FindingFilter{Company: company})
+	f, err := d.resolveCompany(FindingFilter{Company: cf.Company, StrictCompany: cf.StrictCompany})
 	if err != nil {
 		return nil, err
 	}
@@ -726,7 +740,7 @@ func (d *DB) FindingStatsForCompany(company string) (*FindingStats, error) {
 	if err := trows.Err(); err != nil {
 		return nil, err
 	}
-	if strings.TrimSpace(company) != "" {
+	if strings.TrimSpace(cf.Company) != "" {
 		return st, nil
 	}
 	archived, err := d.archivedTaskAggregates()

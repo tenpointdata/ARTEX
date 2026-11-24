@@ -47,6 +47,9 @@ type targetStore interface {
 	Exemptions() ([]db.TargetExemption, string, error)
 	// LogDecision records an outcome no human took.
 	LogDecision(db.TargetDecision) error
+	// Authorization returns the newest version of the scope's engagement
+	// authorization artifact (see authorization.go), nil when it has none.
+	Authorization(scope db.TargetScopeRef) (*db.EngagementAuthorization, error)
 }
 
 // dbTargetStore is the store of an Interceptor built on a database. Built on
@@ -90,6 +93,13 @@ func (s dbTargetStore) Exemptions() ([]db.TargetExemption, string, error) {
 	return list, digestInput([]byte(raw)), err
 }
 
+func (s dbTargetStore) Authorization(scope db.TargetScopeRef) (*db.EngagementAuthorization, error) {
+	if s.d == nil || scope.TaskID == 0 {
+		return nil, nil
+	}
+	return s.d.CurrentAuthorization(scope.TaskID)
+}
+
 func (s dbTargetStore) LogDecision(r db.TargetDecision) error {
 	if s.d == nil {
 		return nil
@@ -117,7 +127,7 @@ func (i *Interceptor) CheckTargets(ctx context.Context, scope TargetScope, toolN
 	}
 	declared := extractDeclared(toolName, input)
 	if len(declared.targets) == 0 {
-		return nil, TargetResult{}
+		return nil, i.authorizeCall(ctx, scope, toolName, input)
 	}
 	c := &targetCheck{i: i, ctx: ctx, scope: scope, tool: toolName, input: input, urls: declared.urls, connect: connectTool(toolName)}
 	return c.run(declared.targets)
@@ -143,6 +153,8 @@ type targetCheck struct {
 	// can carry a metadata address as an SSRF payload for the target, so the
 	// targets a command declares are not.
 	connect bool
+	// claimOnBlock defers WithCall to a refusal (authorizeCall).
+	claimOnBlock bool
 	// checked is what the run decided about each target, read by dialTarget.
 	checked []*checkedTarget
 }
@@ -180,6 +192,10 @@ func (c *targetCheck) run(targets []Target) ([]TargetRequest, TargetResult) {
 	var err error
 	if c.ref, err = c.scope.ref(); err != nil {
 		return nil, TargetResult{Code: TargetGateUnavailable, Host: targets[0].Host, Port: targets[0].Port, Reason: err.Error()}
+	}
+	// The engagement authorization comes before every other rule.
+	if res := c.authorize(targets); res.Code != "" {
+		return nil, res
 	}
 	first := &checkedTarget{Target: targets[0]}
 	rules, err := i.targets.BlockRules(c.ref)
