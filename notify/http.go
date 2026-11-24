@@ -9,91 +9,65 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"os"
 	"strings"
-	"syscall"
 	"time"
+
+	"github.com/Autumn-27/artex/netguard"
 )
 
-// allowLocalTargets decides whether delivering messages to loopback / link-local
-// addresses is allowed.
+// AllowLocalTargetsEnv is the operator opt-in for private destinations.
 //
-// Default is deny. These address ranges are not where IM bots or public mail
-// servers live, and what they can reach is very sensitive: the admin port of
-// another service on the same machine, and the cloud metadata endpoint
-// (169.254.169.254, which gives out instance credentials). Delivery addresses
-// are configured by admins, but an admin session hijacked via XSS/CSRF, or a
-// second person sharing the same JWT, can change the configuration to read
-// response content back — doJSON writes the first 200 bytes of a 4xx/5xx
-// response body into last_error, and the delivery history API echoes it back,
-// which amounts to a half-blind read primitive.
+// Default is deny: only public unicast addresses are deliverable. Loopback,
+// RFC1918 / unique-local, CGNAT (100.64/10), link-local, unspecified, multicast,
+// reserved and cloud-metadata addresses (and their IPv4-mapped / NAT64 / 6to4
+// forms) are refused at dial time by the shared policy in package netguard,
+// which is the same one the model-list endpoint uses. What they can reach is
+// very sensitive (another service's admin port, instance credentials at
+// 169.254.169.254), and doJSON echoes the first 200 bytes of a 4xx/5xx body
+// into last_error, which the delivery history API returns: a half-blind read
+// primitive.
 //
-// However, a "local SMTP relay" (postfix on 127.0.0.1:25) is a common setup for
-// self-hosted email, and an across-the-board ban would strand people. So there
-// is an explicit escape hatch instead of a hardcoded allowance:
-// set ARTEX_NOTIFY_ALLOW_LOCAL=1 to allow it.
+// A self-hosted intranet Mattermost or a local SMTP relay (postfix on
+// 127.0.0.1:25) is a legitimate setup, so ARTEX_NOTIFY_ALLOW_LOCAL=1 (or its
+// alias ARTEX_NOTIFY_ALLOW_PRIVATE=1) allows loopback, private and CGNAT
+// destinations. Link-local, unspecified, multicast, reserved and metadata
+// addresses stay refused even with the opt-in.
 //
-// It is exported as AllowLocalTargetsEnv so tests can turn it on explicitly —
-// many test cases in this package and the server package use httptest fake
-// receivers on 127.0.0.1, and without turning it on they would all be stopped by
-// the guard.
+// Exported so tests can turn it on: many cases use httptest receivers on
+// 127.0.0.1.
 const AllowLocalTargetsEnv = "ARTEX_NOTIFY_ALLOW_LOCAL"
 
+// AllowPrivateTargetsEnv is an alias of AllowLocalTargetsEnv.
+const AllowPrivateTargetsEnv = "ARTEX_NOTIFY_ALLOW_PRIVATE"
+
 func allowLocalTargets() bool {
-	v := strings.TrimSpace(os.Getenv(AllowLocalTargetsEnv))
-	return v == "1" || strings.EqualFold(v, "true")
+	for _, k := range []string{AllowLocalTargetsEnv, AllowPrivateTargetsEnv} {
+		v := strings.TrimSpace(os.Getenv(k))
+		if v == "1" || strings.EqualFold(v, "true") {
+			return true
+		}
+	}
+	return false
 }
 
-// isBlockedDialIP reports whether the target IP belongs to the ranges "not
-// allowed for delivery by default".
-//
-// Only loopback, link-local (including the cloud metadata 169.254.169.254),
-// unspecified, and multicast are rejected. RFC1918 private networks are **not**
-// rejected: self-hosted Mattermost / SMTP relays on an intranet are very common
-// legitimate uses, and blocking them too would make the feature flat-out
-// unusable in real environments. This trade-off is deliberate — the protection
-// must stop the truly sensitive targets without killing normal deployments along
-// the way.
+// isBlockedDialIP reports whether delivery to ip is refused under the current
+// opt-in. A nil or unparseable IP is refused.
 func isBlockedDialIP(ip net.IP) bool {
-	if ip == nil {
+	addr, ok := netip.AddrFromSlice(ip)
+	if !ok {
 		return true
 	}
-	// IPv4-mapped IPv6 (::ffff:127.0.0.1) must be converted back to IPv4 before
-	// the check, otherwise it bypasses it.
-	if v4 := ip.To4(); v4 != nil {
-		ip = v4
-	}
-	return ip.IsLoopback() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() ||
-		ip.IsInterfaceLocalMulticast() || ip.IsUnspecified() || ip.IsMulticast()
+	return netguard.Blocked(addr, allowLocalTargets())
 }
 
-// blockInternalDial is the Control hook of the http.Transport dialer, checking
-// the target address **when the connection is established**.
-//
-// Why at dial time instead of only validating when the configuration is saved:
-// this is the final point of enforcement. It covers both ways of bypassing
-// configuration-time validation — DNS rebinding (resolving to a public IP at
-// validation time but to an intranet IP at connection time) and redirects
-// (cross-host redirects are already refused, but a same-host redirect can still
-// point the path elsewhere).
-func blockInternalDial(_, address string, _ syscall.RawConn) error {
-	if allowLocalTargets() {
-		return nil
-	}
-	host, _, err := net.SplitHostPort(address)
-	if err != nil {
-		return err
-	}
-	ip := net.ParseIP(host)
-	if ip == nil {
-		return fmt.Errorf("cannot parse target address %q", host)
-	}
-	if isBlockedDialIP(ip) {
-		return fmt.Errorf("refusing to deliver to loopback/link-local address %s (if you really need to deliver to a local service, set %s=1)", ip, AllowLocalTargetsEnv)
-	}
-	return nil
-}
+// blockInternalDial is the Control hook of the dialers, checking the already
+// resolved target address **when the connection is established**. At dial time
+// rather than only at configuration time, so it also covers DNS rebinding
+// (public IP at validation, internal IP at connect) and same-host redirects.
+var blockInternalDial = netguard.Control(allowLocalTargets, " (if you really need to deliver to a private or local service, set "+AllowLocalTargetsEnv+"=1)")
 
 // notifyTransport adds only a dial guard on top of the default Transport. Clone
 // keeps all of the default tuning (connection pool, HTTP/2, timeouts, proxy,
