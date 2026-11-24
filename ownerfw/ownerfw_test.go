@@ -41,12 +41,13 @@ func TestPlanPerFamily(t *testing.T) {
 		"-w -A T_FLOOR -p udp --dport 53 -j RETURN",
 		"-w -A T_FLOOR -d 169.254.10.0/24 -j RETURN",
 		"-w -A T_FLOOR -d 169.254.0.0/16 -j REJECT",
+		"-w -A T_FLOOR -m conntrack --ctorigdst 169.254.0.0/16 -j REJECT",
 	}
 	if !slices.Equal(got, want) {
 		t.Fatalf("ipv4 plan:\n%s\nwant:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
 	}
 	v6 := joined(testRules().Plan(IPv6))
-	if v6[len(v6)-1] != "-w -A T_FLOOR -d fd00:ec2::254/128 -j REJECT" || v6[len(v6)-2] != "-w -A T_FLOOR -d fe80::1/128 -j RETURN" {
+	if v6[len(v6)-2] != "-w -A T_FLOOR -d fd00:ec2::254/128 -j REJECT" || v6[len(v6)-3] != "-w -A T_FLOOR -d fe80::1/128 -j RETURN" {
 		t.Fatalf("ipv6 plan: %v", v6)
 	}
 	if testRules().Plan(IPv6).Family.Binary() != "ip6tables" || IPv4.Binary() != "iptables" {

@@ -114,9 +114,9 @@ func agentEgressRules(p ExecPrivilege, allow string) (ownerfw.Rules, error) {
 	if p.Range.Enabled() {
 		owners = append(owners, p.Range.String())
 	}
-	pass, err := parsePrefixList(allow)
-	if err != nil {
-		return ownerfw.Rules{}, fmt.Errorf("%s: %v", egressAllowEnv, err)
+	pass, bad := parsePrefixList(allow)
+	for _, b := range bad {
+		log.Printf("[egress] WARNING: %s: %q is not an IP address or CIDR; ignored by the agent egress floor", egressAllowEnv, b)
 	}
 	r := ownerfw.Rules{
 		Chain:     egressFloorChain,
@@ -128,21 +128,29 @@ func agentEgressRules(p ExecPrivilege, allow string) (ownerfw.Rules, error) {
 	return r, r.Validate()
 }
 
-// parsePrefixList reads space or comma separated CIDRs and IPs.
-func parsePrefixList(s string) ([]netip.Prefix, error) {
-	var out []netip.Prefix
+// parsePrefixList reads space or comma separated CIDRs and IPs. Entries that are
+// neither come back in bad: one typo must not drop the whole floor.
+func parsePrefixList(s string) (out []netip.Prefix, bad []string) {
 	for _, f := range strings.FieldsFunc(s, func(r rune) bool { return r == ',' || r == ' ' || r == '\t' || r == '\n' }) {
 		if p, err := netip.ParsePrefix(f); err == nil {
 			out = append(out, p)
-			continue
+		} else if a, err := netip.ParseAddr(f); err == nil {
+			out = append(out, netip.PrefixFrom(a, a.BitLen()))
+		} else {
+			bad = append(bad, f)
 		}
-		a, err := netip.ParseAddr(f)
-		if err != nil {
-			return nil, fmt.Errorf("%q is not an IP address or CIDR", f)
-		}
-		out = append(out, netip.PrefixFrom(a, a.BitLen()))
 	}
-	return out, nil
+	return out, bad
+}
+
+// metadataReachedHint is appended to a self-test failure where an executor
+// process reached a metadata address: what to do, chosen from the floor's state.
+func metadataReachedHint(floor EgressFloorStatus) string {
+	accept := "or set " + AllowMetadataEgressEnv + "=1 to accept it (that only skips this check; " + egressAllowEnv + " is what lets an address through)"
+	if len(floor.Installed) > 0 {
+		return floor.String() + ", so another rule lets the packet through: check " + egressAllowEnv + " and the host's other OUTPUT rules, " + accept
+	}
+	return floor.String() + ". Install iptables and run the server as root with CAP_NET_ADMIN (Docker: cap_add: NET_ADMIN), " + accept
 }
 
 // InstallAgentEgressFloor installs the floor on Linux with the privilege drop on

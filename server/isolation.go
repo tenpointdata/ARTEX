@@ -77,10 +77,10 @@ type IsolationTargets struct {
 	// name reach the probe, never its password.
 	DSN string
 	// MetadataDial are host:port addresses (MetadataProbeAddrs) an executor
-	// process must not connect to. EgressFloor is the floor's state
-	// (EgressFloorStatus.String), quoted when one of them connects.
+	// process must not connect to. EgressFloor is what InstallAgentEgressFloor
+	// did; the failure message when one of them connects is chosen from it.
 	MetadataDial []string
-	EgressFloor  string
+	EgressFloor  EgressFloorStatus
 }
 
 // EnforceIsolation decides the start from the self-test result, the platform goos

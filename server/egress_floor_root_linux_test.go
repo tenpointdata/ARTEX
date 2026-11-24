@@ -51,8 +51,23 @@ func TestAgentEgressFloorRefusesMetadataAsRoot(t *testing.T) {
 	t.Setenv(egressFilterEnv, "")
 	t.Setenv(egressAllowEnv, "")
 
-	curlAs := func(uid uint32) error {
-		c := exec.Command("curl", "-sS", "-m", "3", "http://"+meta+"/")
+	// ECS-style: 169.254.170.2:80 is DNATed to a loopback listener. The filter
+	// table sees 127.0.0.1; the floor must still refuse it (original destination).
+	lo, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	loSrv := &http.Server{Handler: srv.Handler}
+	go func() { _ = loSrv.Serve(lo) }()
+	t.Cleanup(func() { loSrv.Close() })
+	dnat := []string{"-w", "-t", "nat", "OUTPUT", "-d", "169.254.170.2", "-p", "tcp", "--dport", "80", "-j", "DNAT", "--to-destination", lo.Addr().String()}
+	if out, err := exec.Command("iptables", append([]string{"-w", "-t", "nat", "-A"}, dnat[3:]...)...).CombinedOutput(); err != nil {
+		t.Fatalf("nat rule: %v %s", err, out)
+	}
+	t.Cleanup(func() { _ = exec.Command("iptables", append([]string{"-w", "-t", "nat", "-D"}, dnat[3:]...)...).Run() })
+
+	curlURL := func(uid uint32, url string) error {
+		c := exec.Command("curl", "-sS", "-m", "3", url)
 		if uid != 0 {
 			c.SysProcAttr = &syscall.SysProcAttr{Credential: &syscall.Credential{Uid: uid, Gid: uid, Groups: []uint32{}}}
 		}
@@ -63,12 +78,17 @@ func TestAgentEgressFloorRefusesMetadataAsRoot(t *testing.T) {
 		}
 		return err
 	}
+	curlAs := func(uid uint32) error { return curlURL(uid, "http://"+meta+"/") }
+	const ecs = "http://169.254.170.2/"
 	if err := curlAs(p.UID); err != nil {
 		t.Fatalf("before the floor the executor should reach the test listener, so the check below means something: %v", err)
 	}
+	if err := curlURL(p.UID, ecs); err != nil {
+		t.Fatalf("before the floor the DNAT path should answer: %v", err)
+	}
 	targets := f.targets()
 	targets.MetadataDial = []string{meta + ":80"}
-	targets.EgressFloor = "the agent egress floor is not installed: test"
+	targets.EgressFloor = EgressFloorStatus{Problem: "test"}
 	err = IsolationSelfTest(p, targets)
 	if err == nil || !strings.Contains(err.Error(), "Bash connected to the instance-metadata address "+meta+":80") ||
 		!strings.Contains(err.Error(), AllowMetadataEgressEnv) {
@@ -98,10 +118,13 @@ func TestAgentEgressFloorRefusesMetadataAsRoot(t *testing.T) {
 	if err := curlAs(p.mcpUID()); err == nil {
 		t.Fatalf("curl %s as the MCP uid %d succeeded with the floor installed", meta, p.mcpUID())
 	}
+	if err := curlURL(p.UID, ecs); err == nil {
+		t.Fatalf("curl %s (DNAT to loopback) as uid %d succeeded with the floor installed", ecs, p.UID)
+	}
 	if err := curlAs(0); err != nil {
 		t.Fatalf("root (the server) must stay unfiltered: %v", err)
 	}
-	targets.EgressFloor = "installed"
+	targets.EgressFloor = EgressFloorStatus{Installed: []ownerfw.Family{ownerfw.IPv4}}
 	if err := IsolationSelfTest(p, targets); err != nil {
 		t.Fatalf("self-test with the floor installed: %v", err)
 	}

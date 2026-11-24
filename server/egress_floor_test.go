@@ -7,6 +7,8 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/Autumn-27/artex/ownerfw"
 )
 
 func TestAgentEgressRulesOwners(t *testing.T) {
@@ -25,8 +27,12 @@ func TestAgentEgressRulesOwners(t *testing.T) {
 	if r, _ := agentEgressRules(p, ""); !slices.Equal(r.Owners, []string{"10001", "30000"}) {
 		t.Fatalf("owners %v", r.Owners)
 	}
-	if _, err := agentEgressRules(p, "not-an-ip"); err == nil || !strings.Contains(err.Error(), egressAllowEnv) {
-		t.Fatalf("err = %v", err)
+	// A bad entry is skipped, not a reason to drop the floor.
+	if r, err := agentEgressRules(p, "not-an-ip, 10.0.0.1"); err != nil || len(r.Pass) != 1 || len(r.Refuse) == 0 {
+		t.Fatalf("rules %+v, err %v", r, err)
+	}
+	if h := metadataReachedHint(EgressFloorStatus{Installed: []ownerfw.Family{ownerfw.IPv4}}); !strings.Contains(h, "another rule") || strings.Contains(h, "Install iptables") {
+		t.Fatalf("hint with the floor installed: %s", h)
 	}
 }
 
@@ -124,9 +130,9 @@ func TestDialableAddrs(t *testing.T) {
 		t.Fatalf("dialable %v", got)
 	}
 	spec := isolationSpec(ExecPrivilege{Enabled: true, UID: 10001, GID: 10001},
-		IsolationTargets{MetadataDial: []string{"169.254.169.254:80"}, EgressFloor: "the agent egress floor is not installed: x"})
+		IsolationTargets{MetadataDial: []string{"169.254.169.254:80"}, EgressFloor: EgressFloorStatus{Problem: "x"}})
 	if !slices.Equal(spec.NoDial, []string{"169.254.169.254:80"}) || !strings.Contains(spec.NoDialHint, AllowMetadataEgressEnv) ||
-		!strings.Contains(spec.NoDialHint, "not installed: x") {
+		!strings.Contains(spec.NoDialHint, "not installed: x") || !strings.Contains(spec.NoDialHint, "NET_ADMIN") {
 		t.Fatalf("spec %+v", spec)
 	}
 }

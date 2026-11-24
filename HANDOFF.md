@@ -114,6 +114,23 @@ Operator-facing changes:
   Root tests in Docker: build the test binary into a 0755 dir (`go test -c -o /t/server.test`). The
   default 0700 go-build dir makes the isolation self-tests fail on `main` too.
 
+**2026-11-24: agent egress floor (card `c-b73542`, in review).** On Linux with the privilege drop on,
+the server now installs its own iptables chain `ARTEX_AGENT_FLOOR` at start-up, so native root installs
+without `egress.sh` are covered too. The chain refuses `intercept.MetadataPrefixes()` (link-local, metadata
+addresses, NAT64 forms; matched by `-d` and `conntrack --ctorigdst`) to the exec uid, the MCP uid and the
+`-exec-uid-range`; DNS and `ARTEX_EGRESS_ALLOW` pass. The isolation self-test then dials the metadata
+endpoints as the executor, and a connection stops a Linux root start unless `ARTEX_ALLOW_METADATA_EGRESS=1`.
+**Behaviour change:** a container without NET_ADMIN, or `ARTEX_EGRESS_FILTER=0`, on a cloud host that
+answers metadata now refuses to start. Code: `server/egress_floor.go`, `ownerfw/` (a product-neutral
+owner-match rule builder), `server/isolation_unix.go` (`NoDial`). `egress.sh` is unchanged and its chain
+coexists. Verified as root with NET_ADMIN in `golang:1.26.11-bookworm`
+(`TestAgentEgressFloorRefusesMetadataAsRoot`): against a listener on 169.254.169.254, curl as uid 10001
+works before the floor and fails after it, the MCP uid fails too and root still works; a DNAT of
+169.254.170.2 to loopback is refused. The real binary started natively logs `[egress] the agent egress
+floor is installed (ipv4, ipv6) for uids 10001, 10002`. With the filter off and metadata answering it
+refuses to start; with the opt-out it starts. Not yet run in the full Docker image together with
+`egress.sh`. Follow-ups are on `c-02e554`.
+
 **2026-11-24: full Docker image verified (card `c-a6891b`).** The complete image (bbot, chromium,
 Playwright) built from `1abe24f` with the committed Dockerfile on Docker Desktop arm64 in 34 min. The
 bbot layer's own dry-run grep passed: trufflehog installed cleanly this time, with no ERRR. Run through
@@ -138,13 +155,15 @@ the newer main (`-exec-uid-range`, #18).
    dials, go-mitmproxy keep-alive host pinning, and the global-egress-proxy bypass. Done = a test or a decision for each.
 4. *(unclaimed)* — **SEC: logout revocation** (S), card `c-a0af33`. Done = a token replayed after
    logout or a password change gets 401, by a test.
-5. *(unclaimed)* — **SEC: Docker Desktop named volumes** (S), card `c-775dc2`. Done = `docker compose up`
+5. *(unclaimed)* — **SEC: agent egress floor follow-ups** (S), card `c-02e554`: re-check the floor
+   while running, rebuild it atomically, remove stale jumps. Done = a root-Linux test for each.
+6. *(unclaimed)* — **SEC: Docker Desktop named volumes** (S), card `c-775dc2`. Done = `docker compose up`
    starts on a Mac with the isolation self-test passing; Linux bind-mount path documented.
-6. *(unclaimed)* — **E1 Client-grade reporting & deliverables** (M). Turn `report/` into
+7. *(unclaimed)* — **E1 Client-grade reporting & deliverables** (M). Turn `report/` into
    CVSS/EPSS-scored, remediation-bearing, standards-mapped deliverables (OWASP ASVS/WSTG, MITRE
    ATT&CK). Done = a report export with per-finding CVSS vector + remediation + framework tags,
    covered by tests. Card `c-8f9cca`.
-7. *(unclaimed)* — **E4 Methodology-driven coverage** (M), card `c-c0bb07`. Extend the coverage ledger to score
+8. *(unclaimed)* — **E4 Methodology-driven coverage** (M), card `c-c0bb07`. Extend the coverage ledger to score
    coverage against a codified methodology checklist, not only asset touch. Done = planner can
    read a methodology and the coverage graph shows checklist completion.
 
@@ -219,12 +238,23 @@ Card ids in brackets:
   root, the `*AsRoot` tests skip; without `ARTEX_PG_DSN`, the PG-backed tests skip (macOS runs miss both).
 - **Docker Desktop (Mac):** bind-mounted `data/`, `keys/` and `skills/` are writable by any uid in the
   container, so the isolation self-test refuses to start. Use named volumes (`c-775dc2`).
+- **Egress floor test:** `TestAgentEgressFloorRefusesMetadataAsRoot` needs root, NET_ADMIN, iptables,
+  iproute2 and curl (`apt-get install -y iptables iproute2` in `golang:1.26.11-bookworm`); it skips without
+  them. The floor's rules show up in `iptables -S ARTEX_AGENT_FLOOR`.
 - **Egress probes:** as the executor, `/app/artex __artex-exec-drop 10001 10001 -- curl …`; rule hits
   show up in `iptables -L ARTEX_EGRESS -v -n -x`.
 - **Secrets** are AES-256-GCM sealed with per-column AAD; losing the key (`keys/secret.key` or
   `ARTEX_SECRET_KEY`) loses stored secrets.
 
 ## Decisions
+
+- **2026-11-24** — c-b73542: the agent egress floor is a separate chain (`ARTEX_AGENT_FLOOR`) installed by
+  the server, and `egress.sh` was not rewritten. Rebuilding egress.sh's `ARTEX_EGRESS` from Go would have
+  dropped its Docker-only gateway and API-port rules whenever their owners differed. The floor is checked
+  by a dial from the executor rather than by reading the rules, so any cause of a leak stops the start.
+  A start is refused only when a metadata address answers; a host that does not answer starts with a
+  warning. DNS (port 53) passes, because native resolvers can be link-local (GCP, AWS) or the Azure
+  WireServer. A bad `ARTEX_EGRESS_ALLOW` entry is skipped with a warning rather than dropping the floor.
 
 - **2026-11-23** — c-dadc14: the security branch's always-on metadata check resolves each name the
   platform dials (gate on or off); `TestGateOffTaskIsUnchanged` now asserts one lookup per platform

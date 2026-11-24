@@ -139,9 +139,14 @@ func (r Rules) Plan(f Family) Plan {
 			add("-A", r.Chain, "-d", d.Masked().String(), "-j", "RETURN")
 		}
 	}
+	// A refused destination is matched twice: as the packet's destination and as
+	// the connection's original destination. The nat table rewrites addresses
+	// before the filter table sees them, so a DNAT of a refused address (ECS
+	// redirects 169.254.170.2 to a loopback agent) would otherwise pass.
 	for _, d := range r.Refuse {
 		if f.holds(d) {
 			add("-A", r.Chain, "-d", d.Masked().String(), "-j", "REJECT")
+			add("-A", r.Chain, "-m", "conntrack", "--ctorigdst", d.Masked().String(), "-j", "REJECT")
 		}
 	}
 	return p

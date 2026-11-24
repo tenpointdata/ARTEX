@@ -224,7 +224,7 @@ func run() int {
 	// escape is set; elsewhere the server starts degraded and says so.
 	selfTest := server.IsolationSelfTest(priv, server.IsolationTargets{
 		DataDir: *dataDir, KeyDir: keyDir, ConfigPath: cfgPath, SkillDir: skillDir, DSN: dsn,
-		MetadataDial: server.MetadataProbeAddrs(), EgressFloor: egressFloor.String(),
+		MetadataDial: server.MetadataProbeAddrs(), EgressFloor: egressFloor,
 	})
 	isolation, err := server.EnforceIsolation(runtime.GOOS, priv, selfTest, *devNoIsolation)
 	if err != nil {

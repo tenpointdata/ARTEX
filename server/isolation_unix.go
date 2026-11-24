@@ -114,8 +114,7 @@ func isolationSpec(p ExecPrivilege, t IsolationTargets) isolationProbeSpec {
 	}
 	if len(t.MetadataDial) > 0 {
 		spec.NoDial = t.MetadataDial
-		spec.NoDialHint = t.EgressFloor + ". Install iptables and run the server with CAP_NET_ADMIN, or set " +
-			AllowMetadataEgressEnv + "=1 to accept that agent processes reach the cloud instance-metadata service"
+		spec.NoDialHint = metadataReachedHint(t.EgressFloor)
 	}
 	if t.DSN != "" {
 		if cfg, err := pgx.ParseConfig(t.DSN); err == nil {
