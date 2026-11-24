@@ -18,6 +18,7 @@ import {
 import { PREFERENCE_DEFAULTS } from "@/lib/preferences/preferences-config";
 import { cn } from "@/lib/utils";
 
+import { ClientCompanyGate } from "./_components/client-company-gate";
 import { MainContent } from "./_components/main-content";
 
 // Reads a layout-critical preference from the browser cookie (falls back to the
@@ -88,7 +89,9 @@ export default function Layout({ children }: Readonly<{ children: ReactNode }>) 
             "min-w-0 overflow-x-hidden",
           )}
         >
-          <MainContent>{children}</MainContent>
+          <MainContent>
+            <ClientCompanyGate>{children}</ClientCompanyGate>
+          </MainContent>
         </SidebarInset>
       </SidebarProvider>
     </SessionProvider>

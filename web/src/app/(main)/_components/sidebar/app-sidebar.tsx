@@ -18,7 +18,7 @@ import {
 import { APP_CONFIG } from "@/config/app-config";
 import { useCurrentUser } from "@/hooks/use-current-user";
 import { useSession } from "@/hooks/use-session";
-import { can } from "@/lib/governance";
+import { can, landingPath } from "@/lib/governance";
 import { navFor, sidebarItems } from "@/navigation/sidebar/sidebar-items";
 import { usePreferencesStore } from "@/stores/preferences/preferences-provider";
 
@@ -47,7 +47,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
         <SidebarMenu>
           <SidebarMenuItem>
             <SidebarMenuButton asChild>
-              <Link prefetch={false} href={can(session, "read") ? "/function/tasks" : "/function/findings"}>
+              <Link prefetch={false} href={landingPath(session)}>
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <picture className="contents">
                   <source srcSet="/logo.webp" type="image/webp" />
@@ -58,8 +58,8 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
             </SidebarMenuButton>
           </SidebarMenuItem>
         </SidebarMenu>
-        {/* The switcher lists every company; a client_read session may not (GET /api/companies needs read). */}
-        {can(session, "read") && <CompanySwitcher />}
+        {/* A client_read session picks among its bound companies only (GET /api/me/companies). */}
+        <CompanySwitcher bound={!can(session, "read")} />
       </SidebarHeader>
       <SidebarContent>
         <NavMain items={items} />
