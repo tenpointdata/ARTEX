@@ -72,7 +72,7 @@ IPv6 /64 plus a 100-failures/min global ceiling past which unknown sources are p
 every workflow action pinned by SHA (all 13 checked against their tags), release token least-privilege,
 `npm ci --ignore-scripts` in CI/release, bbot from a `--require-hashes` file, Playwright from a committed
 lockfile with `npm ci`. Verified: Go tests against Postgres 16 (only the known macOS 127.0.0.2 UDP test
-fails), web tsc + unit tests, extension tests, an independent review of the auth work (its findings are fixed); the Docker image build could not finish here (PyPI read timeouts), so bbot hashes were checked with `pip download --require-hashes` instead. Not
+fails), web tsc + unit tests, extension tests, an independent review of the auth work (its findings are fixed); the full Docker image build could not finish here (PyPI ran at ~22 KB/s and timed out twice in the bbot step), so instead: every bbot pin's hash was matched to that release's files on PyPI, each package has a cp312 manylinux wheel on both arches (wordninja is the one sdist), `uv pip compile` against the pins resolves exactly the same 68 packages on x86_64 and aarch64, and `npm ci --ignore-scripts` from `docker/playwright` installs and runs `playwright-cli`. A full image build is still owed (card `c-d689e2`). Not
 verified: release/CI workflows on GitHub (run on the next push), Linux-root and arm64/amd64 cross builds.
 Residual: `bbot --install-all-deps` still downloads module tools unpinned (trust on first use).
 
