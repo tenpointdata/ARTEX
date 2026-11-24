@@ -2834,5 +2834,18 @@
   "e.g. rbac.denied, or row. for all row changes": "例如 rbac.denied，或用 row. 表示所有行变更",
   "empty (covers every target; the target gate still applies)": "空（覆盖所有目标；目标门禁仍然生效）",
   "you": "你",
-  "{name} sees only the reports and findings of the companies checked here. With none checked the account is refused everywhere.": "{name} 只能看到此处勾选的企业的报告和发现。若一个都不勾选，该账号在所有位置都会被拒绝。"
+  "{name} sees only the reports and findings of the companies checked here. With none checked the account is refused everywhere.": "{name} 只能看到此处勾选的企业的报告和发现。若一个都不勾选，该账号在所有位置都会被拒绝。",
+  "Running tasks": "运行中的任务",
+  "Newest findings": "最新发现",
+  "Updated {time}": "更新于 {time}",
+  "Show these findings": "显示这些发现",
+  "Triage this finding": "分诊此发现",
+  "Verdict": "结论",
+  "Skip": "跳过",
+  "Open a finding, then press a verdict key; the next finding opens on its own.": "打开一个发现，然后按结论键；下一个发现会自动打开。",
+  "next / previous": "下一个 / 上一个",
+  "close": "关闭",
+  "Copied {count} URLs": "已复制 {count} 个 URL",
+  "Copy URLs": "复制 URL",
+  "Delete targets of selection": "删除所选项的目标"
 }

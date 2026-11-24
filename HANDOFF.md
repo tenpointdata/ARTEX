@@ -59,6 +59,26 @@ See `docs/ARCHITECTURE.md` for the code-level map. Summary:
 
 ## Current state
 
+**2026-11-24 (c-73af97, E9 frontend/UX pass)**: findings triage, the live dashboard and file sizes.
+
+- **File sizes and types.** Every `web/src` TS/TSX file is now ≤600 lines; the largest was 4290. No `any` remains: tools-page casts and `Record<string, any>` became typed narrowing and `unknown`. Split files keep their old paths as barrels, so imports are unchanged:
+  - `lib/types.ts` → `lib/types/*`
+  - `lib/api.ts` → `lib/api/*`
+  - `lib/mock/*` → `lib/mock/data/*` and `lib/mock/handler/*`
+- **Findings triage.** The pure core is `web/src/lib/triage.ts` (tests: `npm run test:triage`, added to `verify.sh`). An open finding has a verdict bar: Confirm, False positive, Duplicate, Accept risk, Ignore, In progress, with keys c/f/d/a/i/p, j/k to move, Esc to close. After a verdict the next finding opens on its own. Stat tiles are one-click filters, and Pending starts the queue.
+- **Findings URL.** The list now reads URL params (`?status=pending&severity=…&task=…&view=…&triage=1`), so the dashboard deep-links straight into the triage queue.
+- **Measured** in Chromium against the mock backend (`NEXT_PUBLIC_MOCK=1`), same build, triaging 3 pending findings:
+  - old path (status filter dropdown, expand, status dropdown): 11 interactions
+  - new path (Pending tile, then one key each): 4 interactions
+  - both took pending from 15 to 12
+- **Dashboard.** Now `dashboard/_components/*`: KPI tiles link to their lists; running tasks, newest findings and activity are tables. It is still polling (no global push channel exists): a Live/Paused indicator, pause when hidden, refresh on focus.
+- **Assets.** Clear-selection was added to the existing bulk delete. The per-type lists were already tables and are now driven from data.
+- **Traffic.** Select-all is now indeterminate when partly selected, and the selection survives paging. New bulk actions: copy URLs, and delete targets (whole hosts, behind a confirm). The hook-versions list is now a table.
+- **Verified:** `tsc` clean, `test:i18n` and all web node tests pass, findings and dashboard checked in a browser on the mock backend.
+- **Not checked:** the other split pages in a browser (they were split verbatim), and a real backend.
+- **Merge risk:** fork `h-683872` (`c-92bb52`, role-gating controls on existing pages) edits pages this pass split (system/*, tasks, traffic, assets). Expect conflicts; re-apply its gating inside the extracted `_components/`.
+- **Follow-ups:** `c-45c921` (dashboard push channel), `c-4b7989` (per-exchange traffic bulk delete/export), `c-f729e8` (approvals triage with `lib/triage`, grouped-view page advance, biome lint debt in moved code).
+
 **2026-11-24 (c-ca2bd0, E4 follow-up)** — An operator can choose a task's methodologies. Migration
 **0022** adds `tasks.methodologies TEXT[]` (empty `{}` = automatic, as before). The create request
 (`methodologies`, ids matched loosely, stored canonical, unknown id = 400) and the create form
@@ -264,6 +284,9 @@ body, through the versioned prompt API, and the starting bodies are restored aft
 ## Triage (next handful)
 
 **Agents' lane**
+0. *(unclaimed)* — **E9 follow-ups** (S–M): `c-45c921` (global SSE for the dashboard), `c-4b7989`
+   (per-exchange traffic bulk delete/export), `c-f729e8` (approvals triage via `lib/triage`, biome debt).
+   "Done when" is on each card.
 1. *(unclaimed)* — **SEC: per-task uid follow-ups** (S each): `c-12df03` (single-uid start-up fails on a
    socket; MCP uid not egress-filtered), `c-e70e5c` (release ended tasks at start-up; per-key lock). The "Done when" is on each card.
 2. *(unclaimed)* — **E5 UI: hide role-lacking actions on existing pages** (M), card `c-92bb52`. Done = as

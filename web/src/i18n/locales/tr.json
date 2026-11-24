@@ -2834,5 +2834,18 @@
   "e.g. rbac.denied, or row. for all row changes": "ör. rbac.denied veya tüm satır değişiklikleri için row.",
   "empty (covers every target; the target gate still applies)": "boş (her hedefi kapsar; hedef geçidi yine de uygulanır)",
   "you": "siz",
-  "{name} sees only the reports and findings of the companies checked here. With none checked the account is refused everywhere.": "{name} yalnızca burada işaretlenen şirketlerin raporlarını ve bulgularını görür. Hiçbiri işaretli değilse hesap her yerde reddedilir."
+  "{name} sees only the reports and findings of the companies checked here. With none checked the account is refused everywhere.": "{name} yalnızca burada işaretlenen şirketlerin raporlarını ve bulgularını görür. Hiçbiri işaretli değilse hesap her yerde reddedilir.",
+  "Running tasks": "Çalışan görevler",
+  "Newest findings": "En yeni bulgular",
+  "Updated {time}": "Güncellendi: {time}",
+  "Show these findings": "Bu bulguları göster",
+  "Triage this finding": "Bu bulguyu değerlendir",
+  "Verdict": "Karar",
+  "Skip": "Atla",
+  "Open a finding, then press a verdict key; the next finding opens on its own.": "Bir bulgu açın, ardından bir karar tuşuna basın; sonraki bulgu kendiliğinden açılır.",
+  "next / previous": "sonraki / önceki",
+  "close": "kapat",
+  "Copied {count} URLs": "{count} URL kopyalandı",
+  "Copy URLs": "URL'leri kopyala",
+  "Delete targets of selection": "Seçimin hedeflerini sil"
 }
