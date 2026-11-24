@@ -153,6 +153,8 @@ type targetCheck struct {
 	// can carry a metadata address as an SSRF payload for the target, so the
 	// targets a command declares are not.
 	connect bool
+	// claimOnBlock defers WithCall to a refusal (authorizeCall).
+	claimOnBlock bool
 	// checked is what the run decided about each target, read by dialTarget.
 	checked []*checkedTarget
 }

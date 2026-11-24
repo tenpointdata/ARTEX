@@ -56,12 +56,24 @@ func (i *Interceptor) authorizeCall(ctx context.Context, scope TargetScope, tool
 	if i == nil || i.targets == nil {
 		return TargetResult{}
 	}
-	c := &targetCheck{i: i, ctx: WithCall(ctx, toolName, input), scope: scope, tool: toolName, input: input}
+	// No WithCall here: it claims the call's trace entry, which the guard
+	// claims itself once the call passes. A refusal claims it (refuse).
+	c := &targetCheck{i: i, ctx: ctx, scope: scope, tool: toolName, input: input, claimOnBlock: true}
 	var err error
 	if c.ref, err = scope.ref(); err != nil {
 		return TargetResult{Code: TargetGateUnavailable, Reason: err.Error()}
 	}
 	return c.authorize(nil)
+}
+
+// refuse is block for the authorization check: a call that is not otherwise
+// checked claims its trace entry only now, when it is refused.
+func (c *targetCheck) refuse(code, outcome string, ct *checkedTarget, reason string) TargetResult {
+	if c.claimOnBlock {
+		c.ctx, c.claimOnBlock = WithCall(c.ctx, c.tool, c.input), false
+	}
+	_, res := c.block(code, outcome, ct, reason)
+	return res
 }
 
 // authorize applies the task's artifact, when it has one, to the call and the
@@ -78,8 +90,7 @@ func (c *targetCheck) authorize(targets []Target) TargetResult {
 	}
 	a, err := c.i.targets.Authorization(c.ref)
 	if err != nil {
-		_, res := c.block(TargetGateUnavailable, "gate_unavailable", first, "the engagement authorization could not be read: "+err.Error())
-		return res
+		return c.refuse(TargetGateUnavailable, "gate_unavailable", first, "the engagement authorization could not be read: "+err.Error())
 	}
 	if a == nil {
 		return TargetResult{}
@@ -93,28 +104,24 @@ func (c *targetCheck) authorize(targets []Target) TargetResult {
 		now := authNow()
 		switch {
 		case a.Revoked:
-			_, res := c.block(AuthorizationRevoked, "authorization_revoked", first,
+			return c.refuse(AuthorizationRevoked, "authorization_revoked", first,
 				fmt.Sprintf("%s is revoked: no action against targets is authorized", terms))
-			return res
 		case !a.InForce(now):
-			_, res := c.block(AuthorizationOutOfWindow, "authorization_window", first,
+			return c.refuse(AuthorizationOutOfWindow, "authorization_window", first,
 				fmt.Sprintf("%s authorizes action from %s until %s; it is now %s", terms,
 					a.NotBefore.UTC().Format(time.RFC3339), a.NotAfter.UTC().Format(time.RFC3339), now.UTC().Format(time.RFC3339)))
-			return res
 		}
 	}
 	for _, class := range ClassifyTechniques(tool, input) {
 		if !a.AllowsTechnique(class) {
-			_, res := c.block(AuthorizationTechniqueDenied, "authorization_technique", first,
+			return c.refuse(AuthorizationTechniqueDenied, "authorization_technique", first,
 				fmt.Sprintf("%s does not allow the technique class %s (allowed: %s)", terms, class, strings.Join(a.Techniques, ", ")))
-			return res
 		}
 	}
 	for _, t := range targets {
 		if !a.CoversHost(t.Kind, t.Host) {
-			_, res := c.block(AuthorizationOutOfScope, "authorization_scope", &checkedTarget{Target: t},
+			return c.refuse(AuthorizationOutOfScope, "authorization_scope", &checkedTarget{Target: t},
 				fmt.Sprintf("%s is not in the scope of %s", t, terms))
-			return res
 		}
 	}
 	return TargetResult{}
