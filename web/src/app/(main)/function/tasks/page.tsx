@@ -141,6 +141,8 @@ import type {
 import { cn } from "@/lib/utils";
 import { useActiveCompanyID } from "@/stores/company/company-store";
 
+import { MethodologyPicker } from "./methodology-picker";
+
 // fmtBytes renders a human file size for the upload manifest.
 function fmtBytes(n: number): string {
   if (n >= 1 << 20) return `${(n / (1 << 20)).toFixed(1)} MB`;
@@ -3185,6 +3187,7 @@ function CreateTaskSheet({
   const [heartbeatMin, setHeartbeatMin] = React.useState("10"); // planner heartbeat (minutes); default 10, minimum 10 (matching the backend)
   const [seedFirstIntent, setSeedFirstIntent] = React.useState(false); // dispatch a seed intent at creation so the worker starts without waiting for the first planner round; off by default, standard plan-then-execute
   const [coverageEnabled, setCoverageEnabled] = React.useState(true); // asset coverage feature; on by default. Off = no coverage computed/displayed, no scope accumulation, scope-related tools hidden (company links unaffected)
+  const [methodologies, setMethodologies] = React.useState<string[]>([]); // chosen methodology ids; empty = automatic
   const [interceptRules, setInterceptRules] = React.useState<AssetInterceptRuleInput[]>([]); // task-level asset intercept rules (this task only, never entering the global table)
   const [credentials, setCredentials] = React.useState<TaskCredentialInput[]>([]); // test accounts declared at creation (#3); an empty password = the agent registers that account and records it
   // Method 1, file upload: files are staged under drafts/<draftId>/uploads/ before the task is created, and their absolute paths are appended to the description.
@@ -3254,6 +3257,7 @@ function CreateTaskSheet({
         seedFirstIntent,
         planHeartbeatSeconds: heartbeatSec,
         coverageEnabled,
+        methodologies: coverageEnabled ? methodologies : [],
         interceptRules: interceptRules
           .map((r) => ({ ...r, pattern: r.pattern.trim() }))
           .filter((r) => r.pattern !== ""),
@@ -3275,6 +3279,7 @@ function CreateTaskSheet({
       setHeartbeatMin("10");
       setSeedFirstIntent(false);
       setCoverageEnabled(true);
+      setMethodologies([]);
       setInterceptRules([]);
       setCredentials([]);
       setUploadCount(0);
@@ -3573,6 +3578,7 @@ function CreateTaskSheet({
                     )}
                   </p>
                 </div>
+                {coverageEnabled && <MethodologyPicker value={methodologies} onChange={setMethodologies} />}
               </CollapsibleContent>
             </Collapsible>
           </div>

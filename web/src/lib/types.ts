@@ -40,6 +40,7 @@ export interface Task {
   archive_blocked_by_task_id?: string; // live direct dependent that must be archived first
   company_ids?: number[]; // associated company scopes; current company assets join the task at creation
   coverage_enabled?: boolean; // asset coverage feature switch (fixed at creation, on by default); false = do not compute/show coverage
+  methodologies?: string[]; // operator-chosen methodology ids (fixed at creation); empty = derived from the goal and description
 }
 
 export interface TaskCategory {
@@ -1871,4 +1872,54 @@ export interface TamperTraceLine {
 export interface TamperDryRunResult extends TamperDryRunIO {
   changed: boolean;
   lines: TamperTraceLine[] | null;
+}
+
+export type MethodologyItemStatusValue = "open" | "in_progress" | "covered";
+
+export interface MethodologyItemStatus {
+  id: string;
+  category: string;
+  title: string;
+  status: MethodologyItemStatusValue;
+  outcomes: string[];
+  intents: number[];
+}
+
+/** A built-in testing methodology as offered on the task create form (GET /api/methodologies). */
+export interface MethodologyRef {
+  id: string;
+  name: string;
+  version: string;
+  source: string;
+}
+
+export interface MethodologySummary extends MethodologyRef {
+  applies_when: string[];
+  item_count: number;
+}
+
+export interface MethodologyScore extends MethodologyRef {
+  total: number;
+  covered: number;
+  in_progress: number;
+  open: number;
+  /** 0..1 */
+  pct: number;
+  items: MethodologyItemStatus[];
+}
+
+/** Response of GET /api/tasks/{id}/coverage. */
+export interface TaskCoverage {
+  /** Whether the asset coverage feature is on; when false the other fields are zero values. */
+  enabled: boolean;
+  scope_rows: number;
+  denominator: number;
+  tested: number;
+  pct: number | null;
+  by_type: { type: string; total: number; tested: number }[];
+  /** Coverage ledger (absent when the feature is off): gaps = open items; an unexamined class is never clean. */
+  gaps?: { kind: string; surface?: string; risk_area: string }[];
+  completeness?: { complete: boolean; state: string; caveat: string };
+  /** Checklist completion per testing methodology; absent/empty when none applies. */
+  methodologies?: MethodologyScore[];
 }
