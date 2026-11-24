@@ -84,6 +84,11 @@ Linux-root tests, the Docker egress iptables rules, the Postgres-backed tests an
 - Per-run executor HOME; MCP servers run as uid 10002 (`ARTEX_EXEC_MCP_UID`). The workspace file
   manager uses `os.Root`.
 
+**2026-11-24** — `scripts/verify.sh` passes with `ARTEX_PG_DSN` set to a local Postgres 17 on macOS
+(card `c-7816d0`). Four PG-backed `./server` tests were fixed: one stale expectation (gate-off lookups
+come from the egress floor, by design), two environment skips (trust auth, no 127.0.0.2), and one
+ID-collision flake in the shared test database. No production code changed.
+
 ## Triage (next handful)
 
 **Agents' lane**
@@ -151,6 +156,15 @@ Card ids in brackets:
   upstream-proxy URL, which is our loopback gate (random credential, `traffic/upstream_gate.go`). Do not
   set `SetUpstreamProxy` back to returning nil: nil means a bare `net.Dialer` as root, with no checks (`c-485de0`).
 
+- **Local PG tests:** `initdb -A trust -U postgres` + `pg_ctl` (set `LC_ALL=en_US.UTF-8` on macOS),
+  then `ARTEX_PG_DSN=postgres://postgres@localhost:PORT/db?sslmode=disable scripts/verify.sh`. Each
+  package uses its own `<db>_<pkg>` database, shared across that package's tests, so a test must not
+  assume fresh sequences. With trust auth `TestConnectWithoutPasswordRealPG` skips; on macOS the UDP
+  part of the SOCKS5 test skips unless `sudo ifconfig lo0 alias 127.0.0.2 up`.
+- **Gate off still resolves names** the platform dials (WebFetch, custom http tool, redirects): the
+  egress floor in `intercept/target_egress.go` applies block rules and the metadata deny to addresses.
+  It writes no target rows and asks for nothing.
+
 - **Guardrails are invariants.** Scope/target gate, interception gate, budgets, noise governor,
   untrusted-output boundary, audit trail — never weaken/bypass/route around them. `RSI.md`
   "immutable surfaces" must never enter an automated search space.
@@ -180,6 +194,11 @@ Card ids in brackets:
   self-signed targets set `ARTEX_CAPTURE_INSECURE_UPSTREAM=1` for that run only, until per-target trust
   (card `c-8d54d5`) exists. Reason: the goproxy setting is global, so turning it on also leaves package
   downloads through the proxy open to tampering.
+
+- **2026-11-24** — `TestGateOffTaskIsUnchanged` failing on "3 lookups" was a stale test, not a gate
+  regression: the lookups are the intended always-on egress floor from `d9964fc`. The test was
+  updated to require them for connect tools and forbid them for commands, instead of relaxing the
+  egress check.
 
 ## Deltas
 
