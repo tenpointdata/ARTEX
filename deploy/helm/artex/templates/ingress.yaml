@@ -5,7 +5,11 @@ metadata:
   name: {{ include "artex.fullname" . }}
   labels:
     {{- include "artex.labels" . | nindent 4 }}
-  {{- with .Values.control.ingress.annotations }}
+  {{- $ann := .Values.control.ingress.annotations | default dict }}
+  {{- if .Values.controlTLS.enabled }}
+  {{- $ann = merge (dict) $ann (dict "nginx.ingress.kubernetes.io/backend-protocol" "HTTPS") }}
+  {{- end }}
+  {{- with $ann }}
   annotations: {{ toYaml . | nindent 4 }}
   {{- end }}
 spec:

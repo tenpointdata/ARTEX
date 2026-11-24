@@ -7,12 +7,35 @@
 # ARTEX_SECRET_KEY must be set in .env (base64 of 32 bytes): every node must
 # decrypt the same secret columns. For real separate hosts use the Helm chart
 # (deploy/helm/artex) or run the worker command below on each host.
+#
+# The control API is HTTPS (docs/DISTRIBUTED.md "Transport"): artex-tls-init
+# makes a private CA and the control certificate once (`artex node-tls`), the
+# control node serves it, and workers trust only that CA (ARTEX_CONTROL_CA).
+# The UI is then https://localhost:8787; the browser warns until you trust
+# ca.crt (docker compose cp worker-1:/app/control-ca/ca.crt .).
 services:
+  artex-tls-init:
+    image: artex:local
+    # Writes the key and certificate to artex-tls (control only) and the CA
+    # certificate to artex-control-ca (workers). Keeps existing files.
+    entrypoint: ["/app/artex", "node-tls", "-dir", "/tls", "-ca-dir", "/ca", "-names", "artex,localhost", "-ips", "127.0.0.1"]
+    volumes:
+      - artex-tls:/tls
+      - artex-control-ca:/ca
+    restart: "no"
+
   artex:
     # The proxy listens beyond loopback for the workers; in the control role it
     # refuses any non-loopback client that presents no worker scope token.
     command: ["-role", "control", "-addr", ":8787", "-proxy", "0.0.0.0:8788"]
+    depends_on:
+      artex-tls-init:
+        condition: service_completed_successfully
+    volumes:
+      - artex-tls:/app/tls:ro
     environment:
+      ARTEX_TLS_CERT: /app/tls/tls.crt
+      ARTEX_TLS_KEY: /app/tls/tls.key
       ARTEX_PROXY_ALLOW_NONLOOPBACK: "1"
       ARTEX_ROLE: control
       ARTEX_NODE_ID: control
@@ -35,8 +58,10 @@ services:
       ARTEX_ROLE: worker
       ARTEX_NODE_ID: worker-1
       ARTEX_NODE_WORKERS: "3"
+      # The proxy hop is plain HTTP (see docs/DISTRIBUTED.md "Transport").
       ARTEX_CONTROL_PROXY: http://artex:8788
-      ARTEX_CONTROL_API: http://artex:8787
+      ARTEX_CONTROL_API: https://artex:8787
+      ARTEX_CONTROL_CA: /app/control-ca/ca.crt
       ARTEX_PG_HOST: postgres
       ARTEX_PG_PORT: "5432"
       ARTEX_PG_USER: ${POSTGRES_USER:-artex}
@@ -53,7 +78,9 @@ services:
       ARTEX_EGRESS_ALLOW: ${ARTEX_EGRESS_ALLOW:-}
       ARTEX_UNTRUSTED_BOUNDARY: ${ARTEX_UNTRUSTED_BOUNDARY:-}
       ARTEX_TARGET_USER_AGENT: ${ARTEX_TARGET_USER_AGENT:-}
-    volumes: []
+    # Only the CA certificate: worker containers never see the control key.
+    volumes:
+      - artex-control-ca:/app/control-ca:ro
     restart: unless-stopped
 
   worker-2:
@@ -61,3 +88,7 @@ services:
     environment:
       <<: *worker-env
       ARTEX_NODE_ID: worker-2
+
+volumes:
+  artex-tls:
+  artex-control-ca:

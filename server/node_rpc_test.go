@@ -3,6 +3,7 @@ package server
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -146,8 +147,18 @@ func TestWorkerNodeFindingBindsControlCapture(t *testing.T) {
 	cs := &Server{m: control, node: NodeConfig{Role: RoleControl}, nodeRPC: newNodeRPCVerifier(db.NodeRPCKey)}
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST "+nodeRPCPrefix+"{op}", cs.handleNodeRPC)
-	api := httptest.NewServer(cs.requireAuth(mux))
+	// The control API over TLS with the CA pinned on the worker, the deployed
+	// default (node_tls.go).
+	apiCA := newTestCA(t)
+	api := httptest.NewUnstartedServer(cs.requireAuth(mux))
+	api.TLS = &tls.Config{Certificates: []tls.Certificate{apiCA.leaf}}
+	api.StartTLS()
 	defer api.Close()
+	apiCAFile := writeCA(t, apiCA)
+	pinned, err := controlHTTPClient(api.URL, apiCAFile)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	pg := control.pg
 	if _, err := pg.Exec(`DELETE FROM worker_nodes`); err != nil {
@@ -157,7 +168,7 @@ func TestWorkerNodeFindingBindsControlCapture(t *testing.T) {
 		t.Fatal(err)
 	}
 	node := NodeConfig{Role: RoleWorker, NodeID: "node-ev", Host: "node-ev", Workers: 1,
-		ControlProxy: control.traffic.ProxyAddr(), ControlAPI: api.URL}
+		ControlProxy: control.traffic.ProxyAddr(), ControlAPI: api.URL, ControlCA: apiCAFile}
 	worker, err := NewManagerForNode(t.TempDir(), "", node)
 	if err != nil {
 		t.Fatal(err)
@@ -310,12 +321,15 @@ func TestWorkerNodeFindingBindsControlCapture(t *testing.T) {
 	}
 
 	// Unsigned and forged calls are refused.
-	r, _ := http.Post(api.URL+nodeRPCPrefix+"exists", "application/json", strings.NewReader(`{"traffic_id":"`+trafficID+`"}`))
+	r, err := pinned.Post(api.URL+nodeRPCPrefix+"exists", "application/json", strings.NewReader(`{"traffic_id":"`+trafficID+`"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
 	if r.StatusCode != http.StatusUnauthorized {
 		t.Fatalf("unsigned node RPC = %d, want 401", r.StatusCode)
 	}
 	_ = r.Body.Close()
-	forged := newControlRPC(api.URL, "node-ev", func() []byte { return []byte("not the deployment key, 32 bytes") }, nil)
+	forged := newControlRPC(api.URL, "node-ev", func() []byte { return []byte("not the deployment key, 32 bytes") }, pinned)
 	var out nodeExistsReply
 	if err := forged.call(ctx, "exists", nodeExistsReq{TrafficID: trafficID}, &out); err == nil {
 		t.Fatal("a node RPC signed with another key was served")

@@ -88,6 +88,34 @@ securityContext:
     # CHOWN/SETUID/SETGID/DAC_OVERRIDE/FOWNER to prepare data and switch to the executor uid.
     add: [CHOWN, SETUID, SETGID, DAC_OVERRIDE, FOWNER]
 
+# ------------------------------------------------------- control API TLS ---
+# TLS on the control API: the UI, and the worker nodes' node RPC, whose payloads carry
+# captured target traffic (session cookies, credentials). On by default. Workers reach
+# https://<release>-control and trust only the CA in the Secret's CA key (ARTEX_CONTROL_CA),
+# never the system roots. The control node reloads a renewed certificate within 30 s;
+# workers read the CA at start-up, so roll the workers after a CA change.
+controlTLS:
+  enabled: true
+  # generate     : the chart makes a private CA and a server certificate once (kept
+  #                across upgrades through `lookup`; NOT under `helm template`/GitOps).
+  # secret       : existingSecret holds tls.crt, tls.key and the CA under caKey.
+  # certManager  : a cert-manager Certificate; the issuer must be a CA issuer (CA, Vault,
+  #                ...) so the Secret's ca.crt is the CA that signed the certificate.
+  source: generate
+  existingSecret: ""
+  caKey: ca.crt
+  generate:
+    validityDays: 3650      # renew by deleting the Secret and upgrading, then roll workers
+  certManager:
+    issuerRef:
+      name: ""
+      kind: Issuer          # or ClusterIssuer
+      group: cert-manager.io
+    duration: 2160h
+    renewBefore: 360h
+  # Names beyond <release>-control[.<ns>[.svc[.cluster.local]]] and localhost.
+  extraDnsNames: []
+
 # -------------------------------------------------------------- control ------
 control:
   # Exactly one replica: the control node holds in-memory planner state.
@@ -118,6 +146,9 @@ control:
   ingress:
     enabled: false
     className: ""
+    # With controlTLS.enabled the backend speaks HTTPS: the chart adds
+    # nginx.ingress.kubernetes.io/backend-protocol: HTTPS and the Service port has
+    # appProtocol https. Other controllers need their own backend-TLS setting.
     annotations: {}
     hosts:
       - host: artex.example.com
@@ -129,7 +160,10 @@ control:
     #    hosts: [artex.example.com]
   # Capture proxy bind inside the control pod. Worker nodes reach it through the
   # ClusterIP Service <release>-control-proxy:8788. In the control role the proxy
-  # refuses any non-loopback client that presents no worker scope token.
+  # refuses any non-loopback client that presents no worker scope token. The proxy
+  # hop is plain HTTP (controlTLS covers the API only): HTTPS targets stay TLS inside
+  # CONNECT, but plain-HTTP target traffic and the scope token cross in clear text;
+  # see docs/DISTRIBUTED.md "Transport".
   proxyAddr: "0.0.0.0:8788"
   terminationGracePeriodSeconds: 60
   podAnnotations: {}

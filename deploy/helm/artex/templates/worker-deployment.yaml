@@ -54,11 +54,15 @@ spec:
           args: ["-role", "worker", "-proxy", "", "-health-addr", ":{{ $w.healthPort }}"]
           envFrom:
             {{- include "artex.envFrom" . | nindent 12 }}
+          {{- $caEnv := dict }}
+          {{- if .Values.controlTLS.enabled }}
+          {{- $caEnv = dict "ARTEX_CONTROL_CA" "/app/control-ca/ca.crt" }}
+          {{- end }}
           env:
             - name: ARTEX_NODE_ID
               valueFrom:
                 fieldRef: {fieldPath: metadata.name}
-            {{- include "artex.sharedEnv" (dict "ctx" . "extra" (merge (dict "ARTEX_ROLE" "worker" "ARTEX_NODE_WORKERS" (toString $w.concurrency) "ARTEX_HEALTH_ADDR" (printf ":%v" $w.healthPort) "ARTEX_CONTROL_PROXY" (printf "http://%s-control-proxy:8788" (include "artex.fullname" .)) "ARTEX_CONTROL_API" (printf "http://%s-control:%v" (include "artex.fullname" .) .Values.control.service.port)) $w.extraEnv)) | nindent 12 }}
+            {{- include "artex.sharedEnv" (dict "ctx" . "extra" (merge (dict "ARTEX_ROLE" "worker" "ARTEX_NODE_WORKERS" (toString $w.concurrency) "ARTEX_HEALTH_ADDR" (printf ":%v" $w.healthPort) "ARTEX_CONTROL_PROXY" (printf "http://%s-control-proxy:8788" (include "artex.fullname" .)) "ARTEX_CONTROL_API" (printf "%s://%s-control:%v" (include "artex.controlScheme" .) (include "artex.fullname" .) .Values.control.service.port)) $caEnv $w.extraEnv)) | nindent 12 }}
           ports:
             - {name: health, containerPort: {{ $w.healthPort }}}
           startupProbe:
@@ -78,7 +82,18 @@ spec:
           volumeMounts:
             - {name: data, mountPath: /app/data}
             - {name: keys, mountPath: /app/keys}
+            {{- if .Values.controlTLS.enabled }}
+            - {name: control-ca, mountPath: /app/control-ca, readOnly: true}
+            {{- end }}
       volumes:
+        {{- if .Values.controlTLS.enabled }}
+        # Only the CA certificate: worker pods never mount the control node's key.
+        - name: control-ca
+          secret:
+            secretName: {{ include "artex.controlTLSSecret" . }}
+            items:
+              - {key: {{ include "artex.controlTLSCAKey" . }}, path: ca.crt}
+        {{- end }}
         - name: data
           emptyDir: {sizeLimit: {{ $w.ephemeralDataSizeLimit }}}
         - name: keys

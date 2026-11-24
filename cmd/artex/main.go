@@ -80,6 +80,10 @@ func main() {
 	// Started as the Bash shim or as an MCP drop command: drop the identity and exec
 	// the real program. It returns only for an ordinary start.
 	server.RunExecShimIfRequested(os.Args)
+	// A one-shot helper, not a server start: make the node TLS files and exit.
+	if len(os.Args) > 1 && os.Args[1] == nodeTLSCommand {
+		os.Exit(runNodeTLS(os.Args[2:], os.Stdout))
+	}
 	// Before any listener or child exists: keep the secrets out of /proc/<pid>/environ.
 	server.SealProcessEnv()
 	os.Exit(run())
