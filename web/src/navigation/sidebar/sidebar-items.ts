@@ -20,10 +20,12 @@ import {
   Sparkles,
   Target,
   Terminal,
+  Users,
   Wrench,
 } from "lucide-react";
 
 import { t } from "@/i18n";
+import type { Permission } from "@/lib/governance-types";
 
 export type NavBadge = "new" | "soon";
 
@@ -35,6 +37,9 @@ export interface NavSubItem {
   badge?: NavBadge;
   disabled?: boolean;
   newTab?: boolean;
+  // need is the permission the page requires; the sidebar hides it otherwise.
+  // Unset means "read" (server/rbac_policy.go: a GET needs read by default).
+  need?: Permission;
 }
 
 interface NavItemBase {
@@ -44,6 +49,7 @@ interface NavItemBase {
   badge?: NavBadge;
   disabled?: boolean;
   newTab?: boolean;
+  need?: Permission;
 }
 
 export interface NavMainLinkItem extends NavItemBase {
@@ -69,15 +75,15 @@ export const sidebarItems: NavGroup[] = [
     label: t("Functions"),
     items: [
       { id: "dashboard", title: t("Dashboard"), url: "/dashboard", icon: LayoutDashboard },
-      { id: "chat", title: t("Chat"), url: "/chat", icon: MessageSquare },
+      { id: "chat", title: t("Chat"), url: "/chat", icon: MessageSquare, need: "operate" },
       { id: "tasks", title: t("Tasks"), url: "/function/tasks", icon: Target },
-      { id: "findings", title: t("Findings"), url: "/function/findings", icon: Bug },
+      { id: "findings", title: t("Findings"), url: "/function/findings", icon: Bug, need: "client_read" },
       { id: "traffic", title: t("Traffic"), url: "/function/traffic", icon: Activity },
       { id: "commands", title: t("Tool Execution"), url: "/function/commands", icon: Terminal },
-      { id: "llm-records", title: t("LLM Recording"), url: "/function/llm-records", icon: Radio },
+      { id: "llm-records", title: t("LLM Recording"), url: "/function/llm-records", icon: Radio, need: "operate" },
       { id: "assets", title: t("Assets"), url: "/function/assets", icon: Network },
       { id: "sync", title: t("Asset Sync"), url: "/function/sync", icon: FolderSync },
-      { id: "workspace", title: t("Workspace"), url: "/function/workspace", icon: FolderOpen },
+      { id: "workspace", title: t("Workspace"), url: "/function/workspace", icon: FolderOpen, need: "operate" },
     ],
   },
   {
@@ -93,8 +99,21 @@ export const sidebarItems: NavGroup[] = [
       { id: "intercept", title: t("Interception Rules"), url: "/system/intercept", icon: ShieldAlert },
       { id: "asset-intercept", title: t("Asset Interception"), url: "/system/intercept/assets", icon: Ban },
       { id: "approvals", title: t("Approval Records"), url: "/system/intercept/approvals", icon: ClipboardList },
-      { id: "logs", title: t("Logs"), url: "/system/logs", icon: ScrollText },
+      { id: "users", title: t("Users"), url: "/system/users", icon: Users, need: "admin" },
+      { id: "logs", title: t("Logs"), url: "/system/logs", icon: ScrollText, need: "operate" },
       { id: "settings", title: t("System Settings"), url: "/system/settings", icon: Settings2 },
     ],
   },
 ];
+
+// navFor keeps the items (and sub-items) the session's permissions allow, and
+// drops groups left empty.
+export function navFor(groups: NavGroup[], allowed: (p: Permission) => boolean): NavGroup[] {
+  const ok = (x: { need?: Permission }) => allowed(x.need ?? "read");
+  return groups
+    .map((g) => ({
+      ...g,
+      items: g.items.filter(ok).map((it) => (it.subItems ? { ...it, subItems: it.subItems.filter(ok) } : it)),
+    }))
+    .filter((g) => g.items.length > 0);
+}

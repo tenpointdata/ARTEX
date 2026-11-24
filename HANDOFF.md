@@ -64,6 +64,12 @@ PR #16 + c-5b5421: archives carry the artifact, an artifact forces the gate on, 
 the task, console users change their own password, 2 s caches (`memo/`) for SSE re-checks and the
 gate's artifact read. Detail in `docs/GOVERNANCE.md`; follow-ups `c-5018f6`, `c-01377e`.
 
+**2026-11-24 — E5 web UI (`c-869050`, in review)** on `ej/20261124-132958-94f4bf` (carries E5 + client_read).
+`/system/users`, task **Authorization** tab, Approval Records **Chain** tab with Verify; sidebar filtered by
+`useCan` (`web/src/hooks/use-session.tsx`); 403 never logs out (`web/src/lib/api-errors.ts`); login takes any
+username. Browser-tested as admin, reviewer and client_read against a real backend. Open: `c-92bb52`,
+`c-7c4715`, `c-601ec6`.
+
 **2026-11-24 (c-d25ff9, E3)** — The `RSI.md` Loop C benchmark gate and Loop B lesson graduation are built,
 flag off (`ARTEX_RSI_LOOP`, default off, read per request). Pure core `rsi/` (search-space allowlist:
 `prompt_body` for goals/planner/worker and `lesson`; immutable and git-reviewed surfaces refused;
@@ -115,7 +121,7 @@ is tested against Postgres 17 on macOS; see `docs/GOVERNANCE.md`.
   write-then-lock deadlock is gone. 0018 rather than 0017 because the E1 branch
   (`ej/20261124-083744-02fa3c`) takes 0017. Tests: `db/audit_chain_concurrency_test.go` (both
   concurrency tests fail without 0018). This branch merged the E5 branch in, so it carries E5 too.
-- **Not done.** There is no web UI for E5 yet (card `c-869050`). The login page still assumes `ARTEX`.
+- **Web UI:** see the c-869050 entry above.
 
 **2026-11-24 — client_read bound to companies (card `c-5b5421`, in review)** is on branch
 `ej/20261124-110647-182fa9`. That branch merged the E5 branch (PR #16) in, so it carries E5 too.
@@ -243,7 +249,9 @@ body, through the versioned prompt API, and the starting bodies are restored aft
 **Agents' lane**
 1. *(unclaimed)* — **SEC: per-task uid follow-ups** (S each): `c-12df03` (single-uid start-up fails on a
    socket; MCP uid not egress-filtered), `c-e70e5c` (release ended tasks at start-up; per-key lock). The "Done when" is on each card.
-2. *(unclaimed)* — **E5: web UI for users / authorization / chain / client bindings** (M), card `c-869050`.
+2. *(unclaimed)* — **E5 UI: hide role-lacking actions on existing pages** (M), card `c-92bb52`. Done = as
+   reviewer and operator, no visible control answers 403. Then `c-7c4715` (client_read console: my-companies
+   endpoint and switcher, M) and `c-601ec6` (chain newest-first paging, S).
 3. *(unclaimed)* — **SEC: gorilla/websocket bump, GO-2026-6278** (XS), card `c-c10f2c`; needs network.
    Done = govulncheck clean.
 4. *(unclaimed)* — **SEC: upstream-gate residuals** (M), card `c-5a6f96`: task-scoped rules on proxy
@@ -320,7 +328,9 @@ Card ids in brackets:
 - **E3** [`c-d25ff9`] — gate built (in review). Follow-ups: hardening `c-0d277f`, UI `c-936308`, first live run `c-772190`, proposer/critic `c-c89f5b`.
 - **E4** [`c-c0bb07`] Methodology-driven coverage (OWASP WSTG / API Top 10 as structured checklists).
 - **E5** [`c-669406`] Engagement governance. The backend is done on `ej/20261124-055929-bd2253`. Follow-ups:
-  `c-5b5421` (client binding), `c-869050` (UI); `c-f4115c` (lifecycle gaps) is in review, follow-ups `c-5018f6`, `c-01377e`.
+  `c-5b5421` (client binding), `c-869050` (UI, in review), `c-f4115c` (lifecycle gaps, in review; follow-ups
+  `c-5018f6`, `c-01377e`), `c-92bb52` (role-aware controls on existing pages), `c-7c4715` (client_read
+  console), `c-601ec6` (chain paging).
 - **TEST** [`c-3157b4`] `TestGateOffTaskIsUnchanged` fails on main with Postgres (also fails before E5).
 - **E6** [`c-cb0093`] Cost/observability dashboard + OpenTelemetry export, building on existing context telemetry.
 - **E7** [`c-d60149`] Distributed/remote workers (queue-backed intents) for larger engagements; Helm chart.
@@ -402,6 +412,11 @@ Card ids in brackets:
   `artex.actor` at commit, so a transaction-wide actor would relabel the restored intercept rows).
   Caches: one generic `memo` package (TTL + race-safe invalidation), 2 s, invalidated by every write
   through `db`; the first auth check of a request stays uncached.
+- **2026-11-24** — c-869050: the E5 UI branch merges the E5 + client_read branch rather than waiting
+  for PR #16, so the UI is built and browser-tested against the real API; merging it lands E5 too. The
+  governance client lives in `web/src/lib/governance-api.ts` (not `api.ts`, already over 600 lines) and
+  reuses its `http()`. The UI hides by permission only as a convenience; the server's policy stays the
+  enforcement. The Dashboard is hidden for `client_read` because its widgets call operator-wide routes.
 - **2026-11-24** — E3 (c-d25ff9): "one explicit owner action" is an owner-password step-up on adopt,
   because on single-user ARTEX a bearer token minted from `jwt.key` (what the loop holds) is the same
   identity as the owner. The server recomputes every verdict from raw records rather than accepting the
@@ -525,8 +540,8 @@ Card ids in brackets:
 - **2026-11-24 13:46 MST** · claude-code · `ej/20261124-132958-94f4bf` `60e20d8`→`7f9af4f` (4 commits) · `h-7f6f23` — c-869050 (now in review): web UI for E5. /system/users admin table (inline role/enabled, set password, delete, client_read company bindings); task detail Authorization tab (status badge, version history table, admin-only new-version form and revoke); Approval Records Chain tab (filters, paging, entry sheet, Verify showing head_seq/head_hash, broken_at, rows_mismatched). Session role/permissions drive a permission-filtered sidebar via useCan; a 403 shows a message and never logs out; the login form takes any username. Branch merges ej/20261124-110647-182fa9 (E5 PR #16 + client_read), so it carries E5. Verified in headless Chromium against a real backend + Postgres 17 as admin, reviewer (forced 403 stays signed in; tampered chain shows Broken at seq 6) and client_read (lands on Findings, no refused calls). verify.sh --web-only (now with governance unit tests and the i18n check), build:static, and the db migration test after merging main pass. **Next:** c-92bb52: gate mutating controls on existing pages by role (reviewer currently sees Interception Rules edit controls). c-7c4715: client_read console (my-companies endpoint + switcher, client dashboard). c-601ec6: chain newest-first paging and deep link to the approval row. Land PR #16 / the c-5b5421 branch or this branch (it carries both). **Decided:** Built on the unmerged E5 + client_read branch rather than waiting, so the UI was tested against the real API. Governance client lives in web/src/lib/governance-api.ts (api.ts is already over 600 lines) reusing http(). UI hiding is a convenience; the server policy stays the enforcement. Dashboard and company switcher are hidden for client_read because they call operator-wide routes. Audit kind quick-picks are identifiers, not translated. **Issues:** opened #c-601ec6, #c-7c4715, #c-92bb52.
 - **2026-11-24 13:36 MST** · claude-code · `ej/20261124-132441-98ba1e` `4fdcbd4`→`88d42a7` (3 commits) · `h-59bfe6` — c-9b48b7: confirmed go-mitmproxy keep-alive host pinning is still unfixed through v1.9.5 (= upstream main 07e0ca5), and no upstream report exists. Drafted the issue text and a tested 10-line patch with a regression test (docs/upstream/go-mitmproxy-keepalive-host-pinning.{md,patch}). The test fails without the fix and passes with it; upstream go test ./... passes. NOT filed: this is outward-facing and waits on Ian. unpinHostChange stays, its comment now points at the draft, and ARTEX regression tests and verify.sh pass. **Next:** Ian: approve filing (human lane). Then an agent files the issue and PR at lqqyt2423/go-mitmproxy as the doc describes. After a fixed release: bump go.mod, delete unpinHostChange and absoluteForm, keep the tests, run verify.sh. **Decided:** The upstream fix uses the separate client for a host change instead of redialling in place, because wrapServerConn.Close half-closes the non-TLS client connection (CloseRead), which would kill the client. It is limited to plain-HTTP proxy connections (a flag set in initHttpDialFn), so the new plain-HTTP-in-CONNECT tunnel mode is untouched. ARTEX stays on v1.9.2, because v1.9.5 does not fix this.
 - **2026-11-24 13:26 MST** · claude-code · `ej/20261124-131356-6e38dd` `62c34d8`→`28bc549` (1 commit) · `h-4efcbc` — c-965b0e done and c-775dc2 landed: merged the unmerged branch ej/20261123-192351-fab3f4 (named volumes, exit 78, start.sh idle hold e1d7a27) and added an image HEALTHCHECK that is unhealthy while start.sh holds on an isolation refusal (root-only marker /run/artex-refused, cleared at start). Verified on Docker Desktop arm64 with a fresh image: bind mounts give Up (unhealthy), 0 restarts over 2+ min, docker stop in 1 s (exit 78, stays exited); named volumes give Up (healthy); a stale marker is cleared by docker restart; uid 10001 cannot write /run. README documents it. scripts/verify.sh passes. Cards closed: c-965b0e, c-775dc2. **Next:** Run docker-compose.bind.yml on a real Linux host (human lane). Optionally restart the Docker daemon with a held container to confirm it refuses and holds again. **Decided:** Option (b), idle hold plus an unhealthy healthcheck, over restart: on-failure. unless-stopped keeps auto-start after a daemon restart or reboot, the remedy stays the last log output, and compose ps shows the failure. The marker lives in root-only /run so an agent process cannot fake or clear the health state. The healthcheck tries HTTP and then HTTPS -k on 127.0.0.1:8787/api/health; a custom -addr port would read as unhealthy.
+- **2026-11-24 13:25 MST** · me · `ej/20261124-131053-4ef671` at `b05b9fa`, no commits · `h-7df71f` — c-7e0087 (now in review): each ARTEX server's agent egress floor has its own chain, ARTEX_AGENT_FLOOR_<exec uid>, with jumps tagged artex-floor-<exec uid>. A server only touches jumps to its own chain. ownerfw.Rules.PeerPrefix tolerates other servers' jumps above ours, so two running floors no longer re-apply over each other every 60 s. A start removes the legacy shared ARTEX_AGENT_FLOOR chain for each family once its own floor is in force there; that cleanup is kept for one release. With the filter off, a start removes its own chain and the legacy one. With no privilege drop, it removes only the legacy one. This branch merges c-02e554's unmerged branch (ej/20261124-122709-d136a7). New root test TestAgentEgressFloorTwoServersAsRoot checks the other server's executor after every iptables call made for a server that restarts, re-applies and turns its filter off. It passes as root with NET_ADMIN in golang:1.26.11-bookworm on nf_tables and legacy. A shared-chain mutation and a no-peer-prefix mutation each fail it. The full ./server and ./ownerfw suites pass as root, and scripts/verify.sh passes. **Next:** Land c-b73542 (ej/20261124-113533-f16c00), then c-02e554 (ej/20261124-122709-d136a7), then this branch. One release later, drop legacyEgressFloorChain and its removal (TODO c-7e0087 in server/egress_floor.go). Still not run: the full Docker image with egress.sh plus the floor (scripts/docker-egress-probe.sh). **Decided:** Each server gets its own chain, named by its exec uid, rather than enforcing one server per netns: refusing to start would break the native install plus network_mode: host setup. Peer jumps are tolerated by chain-name prefix and their chains are not checked; only root can create them. The legacy chain is removed per family only after our own floor is in force for that family. A running server of the earlier release is open for up to 60 s, which is accepted for the migration.
 - _Older hand-offs, a line each; `ej handoff log` has them whole:_
-- **2026-11-24 13:25 MST** · me · `h-7df71f` — c-7e0087 (now in review): each ARTEX server's agent egress floor has its own chain, ARTEX_AGENT_FLOOR_<exec uid>, with jumps tagged artex-floor-<exec uid>. **Next:** Land c-b73542 (ej/20261124-113533-f16c00), then c-02e554 (ej/20261124-122709-d136a7), then this branch.
 - **2026-11-24 13:13 MST** · claude-code · `h-7925fc` — c-9ca57a built and verified on branch ej/c-9ca57a-llm-cost-rbac (pushed, commit 7d6b4cf, no PR), stacked on the client_read branch ej/20261124-110647-182fa9 (carries E5 / PR #16) and E6 (PR #28), because neither has landed on main. **Next:** After PR #16, the c-5b5421 branch and PR #28 land: merge main into ej/c-9ca57a-llm-cost-rbac (only HANDOFF.md should conflict; the stacked branch kept stale HANDOFF copies), run scripts/verify.sh and…
 - **2026-11-24 13:03 MST** · claude-code · `h-ce7d36` — E3 (c-d25ff9, now in review): built the RSI.md Loop C benchmark gate and Loop B lesson graduation, with ARTEX_RSI_LOOP off by default. **Next:** c-0d277f (hardening: a server-side per-task arm ledger, suite pre-registration, sync for retired adopted lessons). **Issues:** opened #c-0d277f, #c-772190, #c-936308, #c-c89f5b.
 - **2026-11-24 12:56 MST** · claude-code · `h-ef9b28` — c-c0bb07 (E4, now in review): the OWASP WSTG 4.2 (97 tests) and the OWASP API Top 10 2023 are typed, embedded, validated checklists in the new leaf package methodology/. **Next:** c-ca2bd0: let the operator choose the methodology per task (migration plus create form).
@@ -537,6 +552,7 @@ Card ids in brackets:
 - **2026-11-24 11:53 MST** · claude-code · `h-356fb9` — c-b73542 (now in review): agent processes are refused cloud metadata and link-local addresses at the dial level on any Linux root start, not only in Docker. **Next:** c-02e554: re-check the floor while running, rebuild it atomically, remove stale jumps.
 - **2026-11-24 11:51 MST** · claude-code · `h-7774a6` — c-12df03 (now in review): the single-uid start-up share walk (shareWithExecGroup) now logs and skips an entry it cannot open, such as a stale ssh ControlMaster socket, instead of failing start-up. **Next:** When branch ej/20261124-092031-1d05de (5be8c4b, c-bd9a6d) merges, keep main's egress.sh: that commit adds a looser MCP-uid rule.
 - **2026-11-24 11:39 MST** · claude-code · `h-d512ac` — c-75c593 (now in review): docker-compose.bench.yml builds from a clean clone. **Next:** c-f1518c (h-9652aa) can use this instance for the first live held-out run.
+- **2026-11-24 11:23 MST** · claude-code · `h-6a42d5` — c-5b5421 (now in review): client_read users are bound to companies. **Next:** Land PR #16 (E5) first, then this branch.
 <!-- /composite:deltas -->
 
 _(written by `merge_handoff`)_
