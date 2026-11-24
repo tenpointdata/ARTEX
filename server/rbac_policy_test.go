@@ -83,8 +83,11 @@ func clientReadAllowed(method, path string) bool {
 	case "/api/report", "/api/stats", "/api/tasks/{id}/outcome", "/api/tasks/{id}/coverage":
 		return true
 	}
-	if path == "/api/exploration/findings/retests/active" {
-		return false // live retests across every client
+	switch path {
+	case "/api/exploration/findings/retests/active": // live retests across every client
+		return false
+	case "/api/exploration/findings/{id}/integrations": // tracker tickets and raw scanner records
+		return false
 	}
 	return strings.HasPrefix(path, "/api/report/") || path == "/api/exploration/findings" ||
 		strings.HasPrefix(path, "/api/exploration/findings/")
@@ -172,6 +175,14 @@ func TestRBACPolicyByRole(t *testing.T) {
 		{"GET", "/api/report", permClientRead},
 		{"GET", "/api/exploration/findings", permClientRead},
 		{"GET", "/api/exploration/findings/5/lineage", permClientRead},
+		{"GET", "/api/exploration/findings/5/integrations", permRead},
+		{"POST", "/api/integrations/trackers", permAdmin},
+		{"PATCH", "/api/integrations/trackers/2", permAdmin},
+		{"DELETE", "/api/integrations/trackers/2", permAdmin},
+		{"POST", "/api/integrations/trackers/2/push", permOperate},
+		{"POST", "/api/integrations/trackers/2/sync", permOperate},
+		{"POST", "/api/integrations/imports", permOperate},
+		{"GET", "/api/integrations/imports", permRead},
 		{"GET", "/api/stats", permClientRead},
 		{"GET", "/api/tasks/t1/outcome", permClientRead},
 		{"GET", "/api/tasks/t1/coverage", permClientRead},
