@@ -1,6 +1,6 @@
 # HANDOFF.md — ARTEX
 
-**Last updated:** 2026-11-23 16:51 MST, by claude-code: Verified the security fixes (now on main via PR #1, plus main's c-485de0 upstream gate) on Linux as root with Postgres, in Docker with the egress iptables filter, and in a browser over the HttpOnly cookie. Earlier hand-offs are under Deltas and in `ej handoff log`.
+**Last updated:** 2026-11-24 11:03 MST, by claude-code: c-a6891b (card, now in review): built the full Docker image (bbot, chromium, Playwright) from 1abe24f with the committed Dockerfile on Docker Desktop arm64 in 34 min. Earlier hand-offs are under Deltas and in `ej handoff log`.
 
 > Single entry point for whoever picks this up next (any agent or human), with no access to the
 > originating conversation. Read this first, then the sections of the code it points at.
@@ -72,8 +72,8 @@ Verified 2026-11-23 (card `c-dadc14`, done):
   runtime base, `[artex] egress: installed` is logged, `-m owner`/`-m addrtype` load on bookworm's
   nf_tables iptables 1.8.9, and the executor is refused for 169.254.169.254, 100.100.100.200, the
   gateway, host.docker.internal (root reaches the host service) and :8787 on every local address,
-  while a LAN router, another container and the internet stay reachable. The full image did not
-  finish building on a slow link (`c-a6891b`).
+  while a LAN router, another container and the internet stay reachable. The full image gives the
+  same results (2026-11-24, `c-a6891b`, below).
 - Web: `npm ci` and `npx tsc --noEmit` clean. `npm run lint` fails with 84 errors, all already on main
   and none in the changed files (`c-834a5a`). Headless Chromium: setup, login, Sign out over the
   HttpOnly SameSite=Strict cookie work and `document.cookie` is empty, **but a token copied before
@@ -114,31 +114,41 @@ Operator-facing changes:
   Root tests in Docker: build the test binary into a 0755 dir (`go test -c -o /t/server.test`). The
   default 0700 go-build dir makes the isolation self-tests fail on `main` too.
 
+**2026-11-24: full Docker image verified (card `c-a6891b`).** The complete image (bbot, chromium,
+Playwright) built from `1abe24f` with the committed Dockerfile on Docker Desktop arm64 in 34 min. The
+bbot layer's own dry-run grep passed: trufflehog installed cleanly this time, with no ERRR. Run through
+`docker-compose.yml` with named volumes, it logs `[artex] egress: installed for uid 10001 (ipv4)…(ipv6)`
+and the isolation self-test passes. Checked with `scripts/docker-egress-probe.sh` (new): the executor
+gets REJECT on 169.254.169.254, 127.0.0.1:8787, the container IP's :8787 and host.docker.internal; root
+reaches all of them except metadata, which Docker Desktop doesn't serve (timeout). Both reach the LAN
+router and example.com. `scripts/docker-login-probe.js` (new, uses the image's Playwright) passes
+login, HttpOnly + SameSite=Strict cookie, token hidden from scripts, Sign out → /login and 401. Replaying
+the pre-logout cookie still gets 200 because revocation (`c-a0af33`) is not on main yet. Not re-run on
+the newer main (`-exec-uid-range`, #18).
+
 ## Triage (next handful)
 
 **Agents' lane**
-0. *(unclaimed)* — **SEC: per-task uid follow-ups** (S each): `c-12df03` (single-uid start-up fails on a
+1. *(unclaimed)* — **SEC: per-task uid follow-ups** (S each): `c-12df03` (single-uid start-up fails on a
    socket; MCP uid not egress-filtered), `c-dd160a` (spill dirs readable across tasks), `c-e70e5c`
    (release ended tasks at start-up; per-key lock). The "Done when" is on each card.
-1. *(unclaimed)* — **SEC: gorilla/websocket bump, GO-2026-6278** (XS), card `c-c10f2c`; needs network.
+2. *(unclaimed)* — **SEC: gorilla/websocket bump, GO-2026-6278** (XS), card `c-c10f2c`; needs network.
    Done = govulncheck clean.
-2. *(unclaimed)* — **SEC: upstream-gate residuals** (M), card `c-5a6f96`: task-scoped rules on proxy
+3. *(unclaimed)* — **SEC: upstream-gate residuals** (M), card `c-5a6f96`: task-scoped rules on proxy
    dials, go-mitmproxy keep-alive host pinning, and the global-egress-proxy bypass. Done = a test or a decision for each.
-3. *(unclaimed)* — **SEC: logout revocation** (S), card `c-a0af33`. Done = a token replayed after
+4. *(unclaimed)* — **SEC: logout revocation** (S), card `c-a0af33`. Done = a token replayed after
    logout or a password change gets 401, by a test.
-4. *(unclaimed)* — **SEC: Docker Desktop named volumes** (S), card `c-775dc2`. Done = `docker compose up`
+5. *(unclaimed)* — **SEC: Docker Desktop named volumes** (S), card `c-775dc2`. Done = `docker compose up`
    starts on a Mac with the isolation self-test passing; Linux bind-mount path documented.
-5. *(unclaimed)* — **E1 Client-grade reporting & deliverables** (M). Turn `report/` into
+6. *(unclaimed)* — **E1 Client-grade reporting & deliverables** (M). Turn `report/` into
    CVSS/EPSS-scored, remediation-bearing, standards-mapped deliverables (OWASP ASVS/WSTG, MITRE
    ATT&CK). Done = a report export with per-finding CVSS vector + remediation + framework tags,
    covered by tests. Card `c-8f9cca`.
-6. *(unclaimed)* — **E4 Methodology-driven coverage** (M), card `c-c0bb07`. Extend the coverage ledger to score
+7. *(unclaimed)* — **E4 Methodology-driven coverage** (M), card `c-c0bb07`. Extend the coverage ledger to score
    coverage against a codified methodology checklist, not only asset touch. Done = planner can
    read a methodology and the coverage graph shows checklist completion.
 
 **Human lane**
-- **Full-image Docker check** (card `c-a6891b`): needs a fast link for the recon-toolbox build; repeat
-  the egress probes and the login script there (the slim-image run passed).
 - Revisit tracking: E1–E10 are on the private Composite board (decided 2026-11-23, repo is public).
   File GitHub issues only if the repo goes private or you want them public.
 - Decide engagement-governance direction (E5): how formal the rules-of-engagement/authorization
@@ -158,6 +168,12 @@ Operator-facing changes:
 - **Verify (reproduces CI):** `scripts/verify.sh` (fast set, no Docker); `--full` adds `go test -race`
   + web static build; `--security` runs `govulncheck ./...`.
 - **Benchmark harness:** `docker-compose.bench.yml` + `scripts/benchmark`.
+- **Container egress/login check:** after `docker compose up`, run
+  `scripts/docker-egress-probe.sh <artex container> [host port] [LAN url]`, then set the admin
+  password and run `scripts/docker-login-probe.js` inside the container (usage in its header).
+  On Docker Desktop, use named volumes for data/keys/skills (card `c-775dc2`); a separate
+  `docker compose -p <name>` project with its own ports keeps a verification stack apart from a
+  running one.
 
 ## Open work
 
@@ -177,7 +193,6 @@ Card ids in brackets:
 - **SEC** [`c-5a6f96`] Capture-proxy upstream gate residuals (task-scoped rules, go-mitmproxy host pinning, egress-proxy bypass).
 - **SEC** [`c-a0af33`] Logout does not revoke the session token (valid until the 7-day JWT TTL).
 - **SEC** [`c-775dc2`] Docker Desktop bind mounts defeat executor isolation; stock compose will not start on a Mac.
-- [`c-a6891b`] Repeat the egress/login check on the full image once it builds.
 - [`c-834a5a`] web: 84 pre-existing biome lint errors; `npm run lint` cannot gate CI yet.
 - **SEC** [`c-8d54d5`] Capture proxy: insecure upstream only for in-scope targets.
 - **SEC** [`c-c10f2c`] gorilla/websocket bump (GO-2026-6278).
@@ -248,9 +263,22 @@ Card ids in brackets:
 ## Deltas
 
 <!-- composite:deltas · newest first; Composite rewrites this block on every merge (ej handoff merge / merge_handoff) -->
-- **2026-11-23 16:51 MST** · claude-code · `ej/20261123-152406-fccff3` `87f3a86`→`841aec9` (5 commits) · `h-61510f` — Verified the security fixes (now on main via PR #1, plus main's c-485de0 upstream gate) on Linux as root with Postgres, in Docker with the egress iptables filter, and in a browser over the HttpOnly cookie. go vet + go test ./... as root in golang:1.26.11-bookworm with ARTEX_PG_DSN: all packages pass after two test fixes (fc8c3f9): the isolation probe now runs a 0755 copy of the go-test binary via the isolationProbeBinary hook (it failed on main too), and TestGateOffTaskIsUnchanged asserts one lookup per platform connection. Through docker-compose.yml with NET_ADMIN on a slim image of the same runtime base, egress.sh installs on bookworm's nf_tables iptables, and the executor is refused for metadata, the gateway, host.docker.internal and :8787 while the LAN and the internet stay reachable. Web tsc is clean; lint has 84 errors, all already on main. Login and logout work over the cookie. Closed card c-dadc14; opened c-a0af33, c-775dc2, c-a6891b, c-834a5a. **Next:** c-a0af33: server-side logout revocation (token epoch). c-775dc2: named volumes so the compose stack starts on Docker Desktop. c-a6891b: repeat the probes on the full image when a fast link is available. c-834a5a: clear the lint baseline. Then c-c10f2c and c-5a6f96. **Decided:** The gate-off lookups are intended (the always-on metadata check), so the test changed, not the code. The probe binary is a test hook; production still execs os.Executable(). The egress check ran on a slim image because the full image's recon-toolbox layers would not finish on this link; base, iptables, binary and scripts are identical. Logout revocation and Docker Desktop bind mounts predate the branch and need design choices, so they were filed as cards.
-- **2026-11-23 15:14 MST** · claude-code · `ej/20261123-145205-6a3af6` `7eaf424`→`e3a7fad` (19 commits) · `h-04e098` — Fixed the High and Medium findings (#1–#16) from the 2026-11-23 ARTEX security audit on the local branch ej/20261123-145205-6a3af6. The fixes cover scope/metadata egress checks, bare-host gating, strict allow rules, fail-closed native sandboxing, a symlink-safe file manager, per-run HOME, a separate MCP uid, an HttpOnly session cookie, TLS and an insecure-bind guard, capture-proxy TLS verification, permissions and loopback-only listening, a Docker egress iptables filter, install.sh hardening, framed compaction and agent-authored goal/hint provenance. go build, vet and test pass on macOS. **Next:** c-485de0: route the MITM proxy's upstream dials through the metadata/block check. c-dadc14: verify on Linux root, in Docker, against Postgres, and run the web tsc. c-c10f2c: websocket bump (needs network). Then c-8d54d5, c-bd9a6d and c-cc25b6. **Decided:** Fail closed with explicit env opt-outs. No metadata deny on Bash command text (SSRF payloads); enforce it at dial level instead. Block rules stay substring-matched; allow rules are strict. Follow-ups go on the private board because the repo is public. **Issues:** opened #c-485de0, #c-8d54d5, #c-bd9a6d, #c-c10f2c, #c-cc25b6, #c-dadc14.
-- **2026-11-23 13:37 MST** · claude-code · `main` at `81eafd0`, no commits · `h-e3d121` — Stood ARTEX up locally as a Composite project and produced a comprehensive expansion plan. Cloned tenpointdata/ARTEX to ~/Documents/Projects/ARTEX at 81eafd0; registered Composite project ARTEX; verified backend builds (go build ./... exit 0, Go 1.27.1); scaffolded AGENTS.md, CLAUDE.md (imports @AGENTS.md), and HANDOFF.md in standard form. Wrote the expansion plan & analysis as an Office doc. **Decided:** Kept ARTEX an AGPL-3.0 fork under tenpointdata rather than renaming. All proposed expansion is guardrail-preserving; no item touches the RSI.md immutable surfaces and Loop-C learning (E3) is gated behind that contract and the E8 benchmark. Deferred filing public issues pending owner decision. Expansion plan: Office doc o-b38b1ac0efa9 (#/office/o-b38b1ac0efa9).
+- **2026-11-24 11:03 MST** · claude-code · `ej/20261124-102550-4fdb3c` `1abe24f`→`85d5f39` (8 commits) · `h-721d29` — c-a6891b (card, now in review): built the full Docker image (bbot, chromium, Playwright) from 1abe24f with the committed Dockerfile on Docker Desktop arm64 in 34 min. The bbot dry-run grep passed: trufflehog installed with no ERRR. Run as a separate compose project with named volumes, the image logs `[artex] egress: installed` (IPv4 and IPv6) and passes the isolation self-test. The executor gets REJECT for metadata, the API port (loopback and container IP) and host.docker.internal; root does not. The LAN and the internet stay reachable for both. The Playwright login/logout over the HttpOnly SameSite=Strict cookie passes. Added scripts/docker-egress-probe.sh and scripts/docker-login-probe.js so the check can be repeated. **Next:** Re-run both probe scripts after c-a0af33 (logout revocation) merges: the old-cookie replay should become 401. Also re-run with -exec-uid-range (main #18) to see the range rules. The main checkout has an uncommitted arm64 Dockerfile patch that softens the bbot grep; it is not needed (the committed grep passes), so its owner can drop it. **Decided:** Ran verification as its own compose project (-p artex-verify, ports 18787/18788, named volumes), not with the running artex-artex-1. That container was built from the main checkout's old 7eaf424 without egress.sh, and someone was using it for a live task.
+- **2026-11-24 09:41 MST** · claude-code · `ej/20261124-092436-5933f8` at `730ddb1`, no commits · `h-691201` — c-ba9f64 done (board card): migration 0018 recreates the intercept_pending, artex_users and engagement_authorizations audit triggers as DEFERRABLE INITIALLY DEFERRED constraint triggers, so audit_chain_head is locked only at COMMIT. A task archive no longer stalls gate decisions, logins and rbac.denied entries, and write-then-lock transactions cannot deadlock on the head. New PG tests in db/audit_chain_concurrency_test.go (archive alongside gate decisions, lock-order deadlock, rollback) fail without 0018 and pass with it. go test ./db ./intercept ./guard pass against Postgres 17. ./server fails only the three tests HANDOFF already lists. verify.sh passes. This branch merged the unmerged E5 branch ej/20261124-055929-bd2253, so it carries E5 too. **Next:** Merge order: E5 (0016), then this branch (0018), then E1 (0017 on ej/20261124-083744-02fa3c). The loader fails closed on a pending version older than one already applied, so a DB that ran 0018 would refuse 0017: renumber E1 to 0019 (or this to 0017 / E1 to 0018) at merge, and update the migrate_test.go want-list. Remaining cost: commits carrying audited rows are still serialized while they append, for example a big archive's per-row DELETE entries. **Decided:** Deferred constraint triggers, rather than moving the archive's deletes (fixes one caller only) or an unchained staging table plus a sequencer (leaves committed-but-unchained writes and adds a worker). Accepted: chain order is commit order. The actor is artex.actor at commit. ALTER/TRUNCATE of an audited table after writing to it in the same tx fails. Numbered 0018 because E1 holds 0017.
+- **2026-11-24 09:33 MST** · claude-code · `ej/20261124-092031-1d05de` `1abe24f`→`5be8c4b` (1 commit) · `h-e8d3e5` — Card c-bd9a6d: every residual gap is now either fixed or recorded as accepted in SECURITY.md (commit 5be8c4b). Fixes: - Constraints are rendered by origin. Main-agent constraints become data-framed proposals, and an agent-written allow grants nothing. The overview marks them Agent-proposed with an Adopt button; any operator edit records the origin as human. - The workspace file manager no longer follows symlinks (server/nofollow_root.go), which closes the in-root redirect into traffic/_ca, _index and _blobs. - The capture proxy has optional auth through ARTEX_PROXY_AUTH (HTTP Basic, plus SOCKS5 RFC 1929). - egress.sh now also filters the MCP uid 10002. - web: removed getToken() and the Bearer headers. Accepted: rows stored as human before the fix, the shared executor uid, MCP secrets passed in argv, no metadata deny on Bash command text, and hard links in the file manager. scripts/verify.sh passes on macOS. **Decided:** Agent-written constraints are proposals, and adopting one is an operator edit, so no migration was needed. Rows from before the fix stay operator-owned because they cannot be told apart from the operator's own. Proxy auth is opt-in, and ARTEX_PROXY_ALLOW_NONLOOPBACK stays as the explicit open-relay opt-out. Overwrites in the file manager replace the file and keep its owner and mode.
+- **2026-11-24 08:48 MST** · claude-code · `ej/20261124-083747-53e005` `1abe24f`→`d9781b8` (1 commit) · `h-2396f3` — E8 (c-5487e8, now in review): added the planner/worker evaluation suite in scripts/benchmark. eval_suite.py run applies a baseline and a candidate prompt arm over a held-out suite. Both arms run under one stamp: model chain, schedule seed, per-task budget, judge and content-hashed ground truth. Runs are sequential and the starting prompts are restored afterwards. The output is per-gate passes/n with Wilson and Newcombe intervals, a paired gained/lost table and cost per arm; compare refuses mismatched stamps. Added suites heldout-v1 (Juice Shop v20.4.0, DVGA 2.2.0, DrostBench 005…095) and a disjoint dev-v1, DVGA ground truth, and a run_bench refactor (build_parser/prepare/run). 15 new tests; verify.sh passes; never run live. Board cards opened: c-f1518c, c-085c80, c-75c593, c-d73308. **Next:** c-f1518c (human): first live held-out run on a bench instance with ARTEX_RSI_LESSONS=off; check that DVGA is reachable through the port mapping. c-085c80: hand-verify the DVGA ground truth. c-75c593: bench image reproducible from a clean clone. c-d73308: optional provider sampling seed. E3 (c-d25ff9) can build its Loop-C gate on eval_suite compare. **Decided:** Arms change only the editable goals/planner/worker body, through the versioned prompt API, so the immutable surfaces cannot be in an arm. The suite refuses a busy instance and runs sequentially, because prompts are read live. The seed fixes the schedule, not the LLM, since ARTEX has no sampling seed; replicates control variance. Gates are counted over ground-truth entries. Failed runs are excluded from the denominators and counted separately. A judge failure aborts the suite.
+- _Older hand-offs, a line each; `ej handoff log` has them whole:_
+- **2026-11-24 08:07 MST** · claude-code · `h-c42a5d` — c-eb32cc done (board cards: closed c-eb32cc; opened c-15b39d, c-3b9252). **Next:** c-3b9252: check whether go-mitmproxy reuses upstream connections across scopes.
+- **2026-11-24 07:59 MST** · claude-code · `h-6bba55` — Board card c-f89815 is fixed. **Next:** Reconcile TestGateOffTaskIsUnchanged with the c-3157b4 fix when it lands: the http tool now makes one dial lookup with the gate off.
+- **2026-11-24 06:49 MST** · claude-code · `h-7dc82c` — E5 engagement governance backend. **Next:** c-ba9f64 (audit head-lock contention), c-5b5421 (bind client_read to a client), c-869050 (web UI incl. **Issues:** opened #c-3157b4, #c-5b5421, #c-869050, #c-ba9f64, #c-f4115c.
+- **2026-11-24 06:21 MST** · claude-code · `h-9348ac` — E2 backend landed (card c-6def05 → review): package ticketing (GitHub/Jira/DefectDojo over notify.Do with masking + SSRF guard + stable dedup key), two-way finding↔ticket status sync, package scanimport (Nmap, Nuclei, ZAP, Burp, SARIF) and an import API that… **Next:** c-597eb6: web UI for trackers and imports.
+- **2026-11-24 06:17 MST** · claude-code · `h-537f2b` — c-8d54d5 done: the capture proxy verifies upstream TLS per host. **Next:** Run `ARTEX_PG_DSN=… go test ./db -run ActiveTaskScopeRulesPG`.
+- **2026-11-24 05:18 MST** · claude-code · `h-5a3839` — c-5a6f96 is done; follow-up cards c-eb32cc and c-9b48b7 are open. **Next:** c-eb32cc: scope the chat and conversation agents, the custom HTTP tools and the transparent listener.
+- **2026-11-23 21:08 MST** · claude-code · `h-43cc9e` — c-775dc2: docker-compose.yml and docker-compose.ghcr.yml now keep /app/data, /app/keys and /app/skills in named volumes, so the stock `docker compose up` starts on Docker Desktop with the isolation self-test passing. **Next:** c-965b0e: Docker's `restart: unless-stopped` still restarts the container after an exit 78.
+- **2026-11-23 21:07 MST** · claude-code · `h-ee4b2b` — c-a0af33: logout now revokes the session server-side. **Next:** Re-run `ARTEX_PG_DSN=… go test ./server` once Docker is healthy. **Issues:** opened #c-8dea4d.
+- **2026-11-23 16:51 MST** · claude-code · `h-61510f` — Verified the security fixes (now on main via PR #1, plus main's c-485de0 upstream gate) on Linux as root with Postgres, in Docker with the egress iptables filter, and in a browser over the HttpOnly cookie. **Next:** c-a0af33: server-side logout revocation (token epoch).
+- **2026-11-23 15:14 MST** · claude-code · `h-04e098` — Fixed the High and Medium findings (#1–#16) from the 2026-11-23 ARTEX security audit on the local branch ej/20261123-145205-6a3af6. **Next:** c-485de0: route the MITM proxy's upstream dials through the metadata/block check. **Issues:** opened #c-485de0, #c-8d54d5, #c-bd9a6d, #c-c10f2c, #c-cc25b6, #c-dadc14.
+- **2026-11-23 13:37 MST** · claude-code · `h-e3d121` — Stood ARTEX up locally as a Composite project and produced a comprehensive expansion plan.
 <!-- /composite:deltas -->
 
 _(written by `merge_handoff`)_
