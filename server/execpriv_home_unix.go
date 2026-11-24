@@ -33,7 +33,9 @@ import (
 // Each home is created by root without following a symlink and handed to its uid
 // with mode 0700 through a descriptor. Nothing the image installs lives in these
 // homes: tool data is at fixed paths (PLAYWRIGHT_BROWSERS_PATH,
-// NUCLEI_TEMPLATES_DIR) that the environment allowlist keeps.
+// NUCLEI_TEMPLATES_DIR) that the environment allowlist keeps. bbot has no such
+// override, so the bbot on PATH copies a read-only seed into the caller's home
+// itself, as the caller, before it starts (docker/bbot-home.sh).
 //
 // With a single executor uid this is not isolation between live runs: every agent
 // process has the same uid, so one can still write into another run directory that

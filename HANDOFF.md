@@ -1,6 +1,6 @@
 # HANDOFF.md — ARTEX
 
-**Last updated:** 2026-11-24 14:52 MST, by claude-code: c-13e86c fixed: the activity stream 401 after a console login predates E5. Earlier hand-offs are under Deltas and in `ej handoff log`.
+**Last updated:** 2026-11-24 16:45 MST, by claude-code: c-1229ff fixed: agent-started bbot scans get the image's tools, config and core-deps marker through a seeding PATH wrapper. Earlier hand-offs are under Deltas and in `ej handoff log`.
 
 > Single entry point for whoever picks this up next (any agent or human), with no access to the
 > originating conversation. Read this first, then the sections of the code it points at.
@@ -58,6 +58,15 @@ See `docs/ARCHITECTURE.md` for the code-level map. Summary:
 - `docs/` — `ARCHITECTURE.md`, `OPS.md`, traffic docs, `RSI.md` (self-improvement governance contract).
 
 ## Current state
+
+**2026-11-24 — bbot as the executor (`c-1229ff`, fixed).** bbot finds tools, bbot.yml and the core-deps marker only
+under `$HOME`; agent runs get a fresh per-run home, so tool-backed modules found nothing and every scan ran
+`ansible-galaxy` (network). The image now snapshots root's bbot home into `/opt/bbot/home-seed` and
+`/usr/local/bin/bbot` is a wrapper that copies it into `$HOME` (no overwrite) before the real bbot
+(`docker/bbot-home.sh`; build step after `chmod 0711 /root`, outside c-2af578's hunk). The build's `check` mode
+scans a loopback server as uid 10001 from an empty home and fails without WEBSCREENSHOT/PROTOCOL events or on
+any ansible/Galaxy line. Verified as a layer on `artex:verify` (arm64), `--network=none`, plus both negative
+cases; the full image was not rebuilt. Works with c-2af578's `/opt/bbot/tools` layout (links resolve).
 
 **2026-11-24 — SSE 401 after console login (`c-13e86c`, fixed; pre-E5).** Streams are same-origin only
 (`web/src/lib/sse.ts`), dev gzip off, `openSSE` writes `: open`. Test `server/activity_stream_auth_pg_test.go`;
@@ -313,6 +322,9 @@ Card ids in brackets:
 
 ## Known issues and gotchas
 
+- **bbot as the executor:** call `bbot` from PATH, not `/opt/bbot/bin/bbot` (only the wrapper seeds the home).
+  `portscan` (masscan) needs `sudo`/root and fails as the executor (card `c-18c9c6`); `retirejs` and `dnsbrute`
+  download their repository/wordlist at setup, so they hard-fail (and abort the scan) without egress to GitHub.
 - **`next dev` writes `web/AGENTS.md`** (Next 16 agent rules) on start. Delete it before committing; it
   is not this repo's file.
 - **SSE in dev goes through the Next rewrite** (`/api/*` → `AUTOPENTEST_API`, default :8787). Keep
@@ -363,6 +375,11 @@ Card ids in brackets:
   `ARTEX_SECRET_KEY`) loses stored secrets.
 
 ## Decisions
+
+- **2026-11-24** — c-1229ff: bbot's home is seeded by a PATH wrapper running as the caller, not by the
+  server's `execHomeFor`. Root writing into an executor-owned home invites symlink races; the wrapper copies
+  into the caller's own home with the caller's rights, and bbot 3.0.2 has no env override for its home.
+  Tools are per-entry links in a caller-owned dir because bbot aborts when `~/.bbot/tools` is not writable.
 
 - **2026-11-24** — c-13e86c: SSE streams are same-origin only, with no cross-origin override. The cookie is
   the only credential a script-free EventSource can present, and the backend's CORS answers `*`, which a

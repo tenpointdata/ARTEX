@@ -278,6 +278,20 @@ COPY --from=build /out/artex /app/artex
 COPY start.sh egress.sh /app/
 RUN chmod +x /app/artex /app/start.sh && mkdir -p -m 0700 /app/keys \
     && chmod 0711 /root
+# bbot finds its tools, config and core-deps marker only under $HOME, and agent
+# processes get a fresh per-run HOME. Snapshot root's bbot home into a read-only
+# seed; the bbot on PATH copies it into the caller's home (never overwriting) and
+# then runs the real bbot (docker/bbot-home.sh). The check scans a loopback HTTP
+# server as the executor from an empty home: gowitness and fingerprintx must
+# produce events, and nothing may call ansible-galaxy.
+COPY docker/bbot-home.sh /opt/bbot/bbot-home.sh
+RUN set -eux; \
+    chmod 0755 /opt/bbot/bbot-home.sh; \
+    sh /opt/bbot/bbot-home.sh seed /opt/bbot/home-seed /opt/bbot/bin/python; \
+    rm -f /usr/local/bin/bbot; \
+    printf '#!/bin/sh\nexec /opt/bbot/bbot-home.sh exec /opt/bbot/home-seed /opt/bbot/bin/bbot "$@"\n' >/usr/local/bin/bbot; \
+    chmod 0755 /usr/local/bin/bbot; \
+    sh /opt/bbot/bbot-home.sh check /opt/bbot/home-seed 10001
 # No setuid or setgid programs (su, passwd, mount, bbot's chrome_sandbox, ...): an
 # agent process runs as the executor and must not regain root through one, even
 # when the container runs without docker-compose.yml's no-new-privileges.

@@ -69,6 +69,11 @@ directory, because `ingest_bbot` refuses any path outside it.
 scan-time dependency check would run pip, which fails (or hangs) under a
 program's egress allowlist. One scan per intent, named after it
 (`passive-subdoms`, `takeover`, `params`).
+Run it as `bbot` (the one on PATH), never `/opt/bbot/bin/bbot`: the PATH
+wrapper puts the image's module tools, `bbot.yml` and dependency markers into
+your home first, and without them tool-backed modules (gowitness, trufflehog,
+fingerprintx, ...) fail setup. `portscan` (masscan) needs root and fails as
+the executor; use nmap instead.
 
 0. Sanity first: `bbot --version && bbot -l | head -40` (the table lists each
    module's Needs-API-Key and flags; trust it over memory).
