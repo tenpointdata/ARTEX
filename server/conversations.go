@@ -226,7 +226,7 @@ func (s *Server) pgDeleteConversation(w http.ResponseWriter, r *http.Request) {
 	}
 	s.removeConversationSpill(c.ID)
 	releaseSessionExecIdentity(s.convBusyKey(c.ID)) // the session's executor uid goes back
-	s.m.forgetConversationScope(c.ID) // a proxy client still naming it is refused
+	s.m.forgetConversationScope(c.ID)               // a proxy client still naming it is refused
 	writeJSON(w, 200, map[string]any{"deleted": c.ID})
 }
 
