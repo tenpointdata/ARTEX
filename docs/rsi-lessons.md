@@ -81,7 +81,18 @@ company attribution is a later change.
 `GET /api/tasks/{id}/lessons` returns the lessons visible to a task plus the
 rendered block. Selection is scoped:
 
-- a lesson with no company is visible only to a task that also has no company;
+- a lesson is reused only inside its own engagement. A company lesson is visible
+  to tasks of that company. A lesson from a task with no company carries a
+  `scope_key`: a digest of the task's operator-declared (`source='manual'`)
+  target scope, so two tasks against the same declared target share lessons; a
+  task that declares no target gets its own key and sees only its own lessons.
+  Lessons written before `scope_key` existed (migration 0015) have an empty key
+  and are selected by no task; re-run `POST /api/tasks/{id}/lessons/extract` to
+  rebuild them;
+- `ARTEX_RSI_LESSONS_SHARED=1` (off by default) also offers lessons from other
+  engagements, but only ones written after scrubbing (`rsi_lessons.scrubbed`).
+  They are marked `cross_scope`, rendered as `other engagement`, scrubbed again
+  at render time, and returned without evidence ids or company id;
 - company scope comes from `task_scope`, not `tasks.company_id`; a lesson is
   company-scoped only when the source task had exactly one company, and a
   task with several companies is not given a new lesson;
@@ -95,6 +106,16 @@ rendered block. Selection is scoped:
 Duplicates are merged at extraction time by a dedupe key over kind, scope, cue,
 and action, so the same lesson from several tasks becomes one row with several
 evidence entries and a higher support count.
+
+## Scrubbing
+
+A lesson is injected into later tasks, so its text is scrubbed when written
+(`ScrubLessonText`, `db/lesson_scrub.go`): URLs, emails, IPv4/IPv6 addresses,
+hostnames, the task's own scope values and company names, bearer/JWT/`key=value`
+credentials, and long mixed letter-digit tokens become placeholders (`<url>`,
+`<email>`, `<ip>`, `<host>`, `<target>`, `<secret>`). This is pattern matching,
+not proof: it is the reason cross-engagement reuse is opt-in, and selection
+scopes by engagement regardless of it. File-like names (`config.php`) are kept.
 
 ## Rendering and safety
 
