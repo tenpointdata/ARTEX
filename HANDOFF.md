@@ -59,6 +59,10 @@ See `docs/ARCHITECTURE.md` for the code-level map. Summary:
 
 ## Current state
 
+**2026-11-24 — SSE 401 after console login (`c-13e86c`, fixed; pre-E5).** Streams are same-origin only
+(`web/src/lib/sse.ts`), dev gzip off, `openSSE` writes `: open`. Test `server/activity_stream_auth_pg_test.go`;
+browser-checked on the E5 stack.
+
 **2026-11-24 — E5 web UI (`c-869050`, in review)** on `ej/20261124-132958-94f4bf` (carries E5 + client_read).
 `/system/users`, task **Authorization** tab, Approval Records **Chain** tab with Verify; sidebar filtered by
 `useCan` (`web/src/hooks/use-session.tsx`); 403 never logs out (`web/src/lib/api-errors.ts`); login takes any
@@ -345,6 +349,12 @@ Card ids in brackets:
 
 ## Known issues and gotchas
 
+- **`next dev` writes `web/AGENTS.md`** (Next 16 agent rules) on start. Delete it before committing; it
+  is not this repo's file.
+- **SSE in dev goes through the Next rewrite** (`/api/*` → `AUTOPENTEST_API`, default :8787). Keep
+  `compress: false` in the dev branch of `web/next.config.mjs` and the `: open` comment in `openSSE`, or
+  streams buffer or stay unopened in the browser.
+
 - **Migration 0020 (RSI) vs other branches' 0015–0019:** the runner refuses a pending migration older
   than the newest applied one, so merge 0015–0019 (E2, E5, E1, c-ba9f64, c-5b5421) before this branch
   reaches a database, or renumber 0020 forward at merge. `db/migrate_test.go` lists 0020 explicitly.
@@ -389,6 +399,11 @@ Card ids in brackets:
   `ARTEX_SECRET_KEY`) loses stored secrets.
 
 ## Decisions
+
+- **2026-11-24** — c-13e86c: SSE streams are same-origin only, with no cross-origin override. The cookie is
+  the only credential a script-free EventSource can present, and the backend's CORS answers `*`, which a
+  credentialed request may not use. Credentialed CORS for dev origins was rejected: cookies are not
+  port-isolated, so it would let a page on another port of the same host (a lab target) read the streams.
 
 - **2026-11-24** — c-869050: the E5 UI branch merges the E5 + client_read branch rather than waiting
   for PR #16, so the UI is built and browser-tested against the real API; merging it lands E5 too. The
