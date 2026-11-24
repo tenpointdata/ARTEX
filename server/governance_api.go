@@ -39,8 +39,14 @@ func (s *Server) authorizationTaskID(w http.ResponseWriter, r *http.Request) (*d
 	if pg == nil {
 		return nil, 0, false
 	}
-	id, ok := s.taskCredentialTaskID(w, r)
-	return pg, id, ok
+	// The id is checked against the tasks table (AddAuthorization), not the
+	// in-memory registry, so an artifact can be set before a task is loaded.
+	id, ok := pathInt(r, "id")
+	if !ok || id <= 0 {
+		writeErr(w, 400, "task id must be a positive integer")
+		return nil, 0, false
+	}
+	return pg, id, true
 }
 
 // GET /api/tasks/{id}/authorization
