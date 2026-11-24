@@ -304,7 +304,7 @@ func (i *Interceptor) loadLocked() error {
 	var val string
 	var ok bool
 	if err == nil {
-		val, ok, err = i.db.GetSetting("intercept_enabled_tools")
+		val, ok, err = i.db.GetSetting(db.InterceptEnabledToolsKey)
 	}
 	if err != nil {
 		i.storeFailedLocked(err)
@@ -385,7 +385,7 @@ func (i *Interceptor) IsToolEnabled(name string) bool {
 // configured to enter the intercept rule system. When the setting has never been
 // saved the hard-coded default list is returned.
 func (i *Interceptor) GetEnabledTools() ([]string, error) {
-	val, ok, err := i.db.GetSetting("intercept_enabled_tools")
+	val, ok, err := i.db.GetSetting(db.InterceptEnabledToolsKey)
 	if err != nil {
 		return nil, err
 	}
@@ -402,18 +402,20 @@ func (i *Interceptor) GetEnabledTools() ([]string, error) {
 }
 
 // SetEnabledTools persists the list of tool names that should enter the intercept
-// rule system, then invalidates the cache so the next call of every process
-// picks up the new list. An error from the invalidation is returned: the list
-// is saved, but other processes may not see it yet.
+// rule system. The write and the shared revision bump commit together
+// (db.SetInterceptEnabledTools), so every process picks up the new list within
+// the revision window; then this process drops its own cache. An error means
+// nothing was saved.
 func (i *Interceptor) SetEnabledTools(tools []string) error {
 	b, err := json.Marshal(tools)
 	if err != nil {
 		return err
 	}
-	if err := i.db.SetSetting("intercept_enabled_tools", string(b)); err != nil {
+	if err := i.db.SetInterceptEnabledTools(string(b)); err != nil {
 		return err
 	}
-	return i.Invalidate()
+	i.DropCache()
+	return nil
 }
 
 // Decision is the outcome of a successful rule match.
