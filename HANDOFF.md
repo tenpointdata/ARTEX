@@ -70,7 +70,7 @@ resuming. Test `TestIntentResumesOnAnotherNodeFromSharedTranscript`. Design and 
 control state from Postgres (migration **0023**), failing closed; traffic goes through the control node's
 recording proxy. Helm chart `deploy/helm/artex`, `docker-compose.distributed.yml`; design, tests and limits in
 `docs/DISTRIBUTED.md`. Not verified: a real two-host install (`c-8cfbfe`). Gaps: `c-3b781a` (in review),
-`c-18f7a8`.
+`c-18f7a8`, `c-43dbfc` (sidechains, spills and run dirs of worker-node runs).
 
 **2026-11-24 — SSE 401 after console login (`c-13e86c`, fixed; pre-E5).** Streams are same-origin only
 (`web/src/lib/sse.ts`), dev gzip off, `openSSE` writes `: open`. Test `server/activity_stream_auth_pg_test.go`;
