@@ -11,8 +11,26 @@ export interface CurrentUser {
   role: string;
 }
 
+import { PERMISSIONS, type Permission, parsePermissions } from "@/lib/permissions";
+
 // The console has a single account.
 const OPERATOR: CurrentUser = { id: "1", name: "ARTEX", username: "ARTEX", email: "", avatar: "", role: "operator" };
+
+// One session lookup per page load. An empty answer (signed out, unreachable)
+// is not kept, so the next caller after login asks again.
+let permissionsOnce: Promise<Permission[]> | null = null;
+
+async function fetchPermissions(): Promise<Permission[]> {
+  if (process.env.NEXT_PUBLIC_MOCK === "1") return [...PERMISSIONS];
+  try {
+    const r = await fetch("/api/auth/session", { credentials: "same-origin" });
+    if (!r.ok) return [];
+    const body = (await r.json()) as { permissions?: unknown };
+    return parsePermissions(body.permissions);
+  } catch {
+    return [];
+  }
+}
 
 export const auth = {
   // True when the browser's session cookie is valid. Mock demo: always signed in.
@@ -36,6 +54,15 @@ export const auth = {
     } catch {
       // The caller still navigates to /login; the server rejects the stale cookie anyway.
     }
+  },
+
+  // The signed-in role's permissions (empty when signed out or unreachable).
+  permissions(): Promise<Permission[]> {
+    permissionsOnce ??= fetchPermissions().then((p) => {
+      if (p.length === 0) permissionsOnce = null;
+      return p;
+    });
+    return permissionsOnce;
   },
 
   getCurrentUser(): CurrentUser {

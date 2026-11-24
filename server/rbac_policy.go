@@ -118,6 +118,12 @@ var rbacPolicy = []policyRule{
 	// --- read: live retests across every client ---
 	{http.MethodGet, "/api/exploration/findings/retests/active", false, permRead},
 
+	// --- read: LLM spend across every task and company (the global llm_usage
+	// ledger: task names, cost, tokens). Named so a change to the default
+	// cannot open them to client_read; no client binder narrows them. ---
+	{http.MethodGet, "/api/llm/cost", false, permRead},
+	{http.MethodGet, "/api/tokens", true, permRead},
+
 	// --- client_read: the allowlist for the client-facing role. Each route
 	// must also have a binder in clientBinders (client_scope.go), which
 	// narrows it to the user's companies. ---

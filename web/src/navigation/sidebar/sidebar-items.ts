@@ -4,9 +4,9 @@ import {
   BellRing,
   Bot,
   Brain,
-  Coins,
   Bug,
   ClipboardList,
+  Coins,
   FolderOpen,
   FolderSync,
   LayoutDashboard,
@@ -25,10 +25,13 @@ import {
 } from "lucide-react";
 
 import { t } from "@/i18n";
+import type { PermissionGated } from "@/lib/permissions";
 
 export type NavBadge = "new" | "soon";
 
-export interface NavSubItem {
+// `requires` hides an entry from roles without that permission (the server
+// refuses the route anyway; this keeps the menu to what the role can open).
+export interface NavSubItem extends PermissionGated {
   id: string;
   title: string;
   url: string;
@@ -38,7 +41,7 @@ export interface NavSubItem {
   newTab?: boolean;
 }
 
-interface NavItemBase {
+interface NavItemBase extends PermissionGated {
   id: string;
   title: string;
   icon?: LucideIcon;
@@ -76,7 +79,8 @@ export const sidebarItems: NavGroup[] = [
       { id: "traffic", title: t("Traffic"), url: "/function/traffic", icon: Activity },
       { id: "commands", title: t("Tool Execution"), url: "/function/commands", icon: Terminal },
       { id: "llm-records", title: t("LLM Recording"), url: "/function/llm-records", icon: Radio },
-      { id: "cost", title: t("Cost & efficiency"), url: "/function/cost", icon: Coins },
+      // Global spend across every company: not for client_read (c-9ca57a).
+      { id: "cost", title: t("Cost & efficiency"), url: "/function/cost", icon: Coins, requires: "read" },
       { id: "assets", title: t("Assets"), url: "/function/assets", icon: Network },
       { id: "sync", title: t("Asset Sync"), url: "/function/sync", icon: FolderSync },
       { id: "workspace", title: t("Workspace"), url: "/function/workspace", icon: FolderOpen },
