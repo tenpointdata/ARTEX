@@ -117,6 +117,10 @@ var rbacPolicy = []policyRule{
 
 	// --- read: live retests across every client ---
 	{http.MethodGet, "/api/exploration/findings/retests/active", false, permRead},
+	// --- read: a finding's tracker tickets and scanner-import provenance are
+	// internal (tracker URLs, import files); the client_read findings prefix
+	// below must not reach them (E2 × E5). ---
+	{http.MethodGet, "/api/exploration/findings/{id}/integrations", false, permRead},
 
 	// --- client_read: the allowlist for the client-facing role. Each route
 	// must also have a binder in clientBinders (client_scope.go), which
