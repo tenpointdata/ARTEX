@@ -79,6 +79,11 @@ Linux-root tests, the Docker egress iptables rules, the Postgres-backed tests an
   proxy's own upstream dials: go-mitmproxy's upstream is a loopback gate (`traffic/upstream_gate.go`)
   that dials with `Interceptor.DialSOCKS5`. This applies global rules only; task rules are tracked on `c-5a6f96`.
   Block rules apply even with the gate off. Fuzzy allow rules match on name and address boundaries.
+  Since 2026-11-24 (card `c-f89815`) the custom `http` tool's direct call goes through
+  `intercept.PinnedDialer` with the gate off too, when the scope carries an Interceptor (`dialUngated`:
+  fresh lookup, check, dial only the checked addresses), as WebFetch and SOCKS5 already did. Before,
+  it used `http.DefaultTransport`, so a rebinding name could pass the cached check and get dialled at
+  a metadata address. The proxy path is unchanged.
 - Main-agent writes carry origin `mainagent` and are framed as agent-authored. Norma compaction
   summaries are framed as untrusted data.
 - Per-run executor HOME; MCP servers run as uid 10002 (`ARTEX_EXEC_MCP_UID`). The workspace file
@@ -151,6 +156,9 @@ Card ids in brackets:
   upstream-proxy URL, which is our loopback gate (random credential, `traffic/upstream_gate.go`). Do not
   set `SetUpstreamProxy` back to returning nil: nil means a bare `net.Dialer` as root, with no checks (`c-485de0`).
 
+- `server` tests on macOS: `TestManagerSOCKS5UDPOptInAndAssetBlockRuleDropsDatagram` needs the
+  `127.0.0.2` loopback alias (`sudo ifconfig lo0 alias 127.0.0.2`); without it, it fails at bind.
+  Postgres-backed tests need `ARTEX_PG_DSN` (a throwaway `postgres:16` container works).
 - **Guardrails are invariants.** Scope/target gate, interception gate, budgets, noise governor,
   untrusted-output boundary, audit trail — never weaken/bypass/route around them. `RSI.md`
   "immutable surfaces" must never enter an automated search space.
