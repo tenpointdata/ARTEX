@@ -17,6 +17,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { t } from "@/i18n";
 import { api } from "@/lib/api";
+import { buildConfig as buildConfigFromFields } from "@/lib/config-form";
 import type { NotificationChannel, NotificationFilter, NotificationMeta } from "@/lib/types";
 
 import {
@@ -26,7 +27,6 @@ import {
   KIND_LABEL,
   parseIDs,
   parseKeywords,
-  parseKV,
   SEVERITY_OPTIONS,
 } from "./_components/channel-fields";
 import { ConfigField, FilterSummary } from "./_components/channel-form";
@@ -130,49 +130,9 @@ export default function NotifyPage() {
     setOpen(true);
   }
 
-  // buildConfig turns form state into the channel config.
-  //
-  // One rule, two kinds of values:
-  //   - masked values ("__masked__...") are sent back verbatim → the backend reads this as "field unchanged, keep the stored value"
-  //   - everything else is submitted as user input, where an empty string means "clear this field"
-  //
-  // Credential fields get no special treatment (no "skip when empty") because that would make it **impossible** to clear
-  // a mis-set key — no action in the UI could express "I want this gone". Under the current rule,
-  // emptying the input equals clearing the field: one unambiguous, user-controlled semantic.
-  // Masked values never appear in inputs (see ConfigField), so "text in the box" always means
-  // "the user typed it".
+  // buildConfig: masked values go back verbatim (keep), an empty box clears; see lib/config-form.ts.
   function buildConfig(): Record<string, unknown> {
-    const defs = CHANNEL_FIELDS[form.kind] ?? [];
-    const out: Record<string, unknown> = {};
-    for (const d of defs) {
-      const raw = form.config[d.key];
-      if (d.kind === "switch") {
-        out[d.key] = raw === true;
-        continue;
-      }
-      if (typeof raw === "string" && raw.startsWith("__masked__")) {
-        out[d.key] = raw;
-        continue;
-      }
-      if (d.kind === "number") {
-        const n = Number(raw);
-        out[d.key] = Number.isFinite(n) && n > 0 ? n : 0;
-        continue;
-      }
-      if (d.kind === "kv") {
-        out[d.key] = parseKV(String(raw ?? ""));
-        continue;
-      }
-      if (d.kind === "list") {
-        out[d.key] = String(raw ?? "")
-          .split(/[\s,]+/)
-          .map((s) => s.trim())
-          .filter(Boolean);
-        continue;
-      }
-      out[d.key] = String(raw ?? "").trim();
-    }
-    return out;
+    return buildConfigFromFields(CHANNEL_FIELDS[form.kind] ?? [], form.config);
   }
 
   function buildFilter(): NotificationFilter {
