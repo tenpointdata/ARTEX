@@ -22,8 +22,15 @@ triggers in 0018 and client bindings in 0019.
   as `rbac.denied`.
 - Reviewers can't read raw traffic exchanges, blobs, HAR exports or the traffic stream, and can't read
   conversation messages: those carry the credentials the agents used.
-- `POST /api/auth/change-password` changes only the `ARTEX` password, and only an `ARTEX` session can
-  call it. An admin changes a console user's password with `PATCH /api/users/{id}`.
+- `POST /api/auth/change-password` (old + new password) changes the caller's own password: the `ARTEX`
+  password for an `ARTEX` session, the user's own for a console user. It is rate-limited like login.
+  For a console user the change applies only if the user's version is still the one in the caller's
+  session (else 409), and it bumps the version, which ends every session of that user including the
+  current one. An admin can also set a console user's password with `PATCH /api/users/{id}`.
+- Open SSE streams re-check the session on every event. The first check of a request reads the users
+  table; the re-checks inside a stream use a 2-second cache that `UpdateUser`, `DeleteUser` and a
+  password change invalidate at once, so only a change made outside this process (psql, another
+  instance) can take up to 2 s to end a stream.
 - The names `system`, `anonymous`, `human`, `rule`, `model`, `target`, `db` and `admin` are reserved,
   because the audit trail uses them for automatic actors.
 - A user's session token carries the user's version, and any password, role or disabled change bumps
@@ -90,8 +97,25 @@ hops. A task without an artifact is gated exactly as before.
 
 **Undeclared connections.** A command can build its target at run time, for example
 `curl "https://$(cat host)"`. The scope check then sees only what goes through the platform's dialer.
-For a task with an artifact, turn the target gate on as well, so that undeclared targets still need a
-pin, and run with the Docker egress filter.
+So an artifact requires the target gate: storing a version turns the task's gate on in the same
+transaction, `PATCH /api/tasks/{id}` with `target_gate: false` answers 409 while the task has an
+artifact, and a child spawned under an artifact is gated. Run with the Docker egress filter as well.
+
+**Expiry and revocation pause the task.** The scheduler checks every 5 s for running or queued tasks
+whose newest version is revoked or past `not_after`, and pauses them (cause `authorization_ended`); a
+revocation through the API pauses at once. Such a task can't be resumed through the control API until
+an admin stores a version that has not ended. A window that has not started yet does not pause: the
+gate refuses calls until it starts.
+
+**Caching.** The gate reads the artifact through a per-task cache (`db.CachedAuthorization`, 2 s).
+`AddAuthorization` invalidates it after commit, so a version stored through the API applies to the next
+call; a row changed outside this process is seen within 2 s.
+
+**Archives.** A task archive carries the artifact's versions in its package. Archiving leaves the rows
+in place with the task stub, so the gate still applies them after a restore. A restore re-creates
+archived versions missing from the database (audit actor `archive-restore`), keeps a database version
+that differs from the archive, and reports both as restore warnings. Deleting an archive deletes the
+task and its versions; the audit chain keeps their history.
 
 Tools that cannot reach a target are never refused, even when the artifact can't be read: these are the
 `noTargetTools` such as `Read`, `record_fact` and `report_finding`, so agents can still write up an

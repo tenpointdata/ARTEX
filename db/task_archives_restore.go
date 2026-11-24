@@ -64,6 +64,9 @@ WHERE relation.source_task_id=$1 LIMIT 1`, taskID).Scan(&dependent)
 	if _, err := tx.Exec(`LOCK TABLE assets, exploration_anchors IN SHARE ROW EXCLUSIVE MODE`); err != nil {
 		return err
 	}
+	// engagement_authorizations is deliberately not compacted: the rows are tiny,
+	// stay with the task stub so the target gate still applies them if the task is
+	// restored, and deleting them would only add DELETE entries to the audit chain.
 	if _, err := tx.Exec(`DELETE FROM intercept_pending WHERE COALESCE(task_id,'')=$1`, strconv.FormatInt(taskID, 10)); err != nil {
 		return err
 	}
@@ -294,11 +297,93 @@ WHERE archive.id=$1 FOR UPDATE OF archive,task`, archiveID).Scan(&taskID, &expID
 	if err := restoreInterceptRows(tx, remappedTables["intercept_pending"]); err != nil {
 		return nil, err
 	}
+	// After the intercept rows, which keep their own audit actors.
+	if warning, err := restoreEngagementAuthorizations(tx, taskID, snapshot.Tables["engagement_authorizations"]); err != nil {
+		return nil, fmt.Errorf("restore engagement_authorizations: %w", err)
+	} else {
+		warnings = append(warnings, warning...)
+	}
 	warningsRaw, _ := json.Marshal(warnings)
 	if _, err := tx.Exec(`UPDATE task_archives SET warnings=$2,phase='database_restored',progress=85,error='' WHERE id=$1`, archiveID, string(warningsRaw)); err != nil {
 		return nil, err
 	}
-	return warnings, tx.Commit()
+	err = tx.Commit()
+	// After the commit, so a gate read racing it cannot cache the old versions.
+	d.invalidateAuthorization(taskID)
+	return warnings, err
+}
+
+// archiveRestoreActor is the audit chain actor of rows the restore re-creates.
+const archiveRestoreActor = "archive-restore"
+
+// restoreEngagementAuthorizations re-creates the archived artifact versions that
+// are missing from the database (the task stub normally still carries them).
+// The database wins over the archive: a version present with different terms is
+// kept and reported. Archives written before the table was snapshotted have no
+// rows and restore unchanged. New ids come from the sequence, so an archived id
+// can never collide with another task's row.
+func restoreEngagementAuthorizations(tx *sql.Tx, taskID int64, raw json.RawMessage) ([]string, error) {
+	rows, err := decodeArchiveRows(raw)
+	if err != nil || len(rows) == 0 {
+		return nil, err
+	}
+	for _, row := range rows {
+		row["task_id"] = taskID
+	}
+	encoded, _ := json.Marshal(rows)
+	const archived = `json_populate_recordset(NULL::engagement_authorizations,$1::json)`
+	var differing []int
+	changed, err := tx.Query(`SELECT a.version FROM `+archived+` a
+JOIN engagement_authorizations e ON e.task_id=a.task_id AND e.version=a.version
+WHERE (e.reference,e.authorized_by,e.scope,e.techniques,e.not_before,e.not_after,e.revoked,e.note,e.created_by)
+  IS DISTINCT FROM (a.reference,a.authorized_by,a.scope,a.techniques,a.not_before,a.not_after,a.revoked,a.note,a.created_by)
+ORDER BY a.version`, string(encoded))
+	if err != nil {
+		return nil, err
+	}
+	for changed.Next() {
+		var version int
+		if err := changed.Scan(&version); err != nil {
+			changed.Close()
+			return nil, err
+		}
+		differing = append(differing, version)
+	}
+	if err := errors.Join(changed.Err(), changed.Close()); err != nil {
+		return nil, err
+	}
+	// Migration 0018 defers the audit entries to COMMIT and reads artex.actor
+	// there, so one value would cover every audited row of this transaction,
+	// including the intercept rows restored above. Fire this table's entries at
+	// the end of the INSERT instead, under their own actor. The head lock is
+	// then taken here, after every other lock of the restore, and held to commit.
+	if _, err := tx.Exec(`SET CONSTRAINTS trg_engagement_authorizations_audit IMMEDIATE`); err != nil {
+		return nil, err
+	}
+	if _, err := tx.Exec(`SELECT set_config('artex.actor',$1,true)`, archiveRestoreActor); err != nil {
+		return nil, err
+	}
+	res, err := tx.Exec(`INSERT INTO engagement_authorizations(task_id,version,reference,authorized_by,scope,techniques,
+  not_before,not_after,revoked,note,created_by,created_at)
+SELECT task_id,version,reference,authorized_by,scope,techniques,not_before,not_after,revoked,note,created_by,created_at
+FROM `+archived+` ORDER BY version ON CONFLICT (task_id,version) DO NOTHING`, string(encoded))
+	if err != nil {
+		return nil, err
+	}
+	if _, err := tx.Exec(`SELECT set_config('artex.actor','',true)`); err != nil {
+		return nil, err
+	}
+	if _, err := tx.Exec(`SET CONSTRAINTS trg_engagement_authorizations_audit DEFERRED`); err != nil {
+		return nil, err
+	}
+	warnings := []string{}
+	if n, _ := res.RowsAffected(); n > 0 {
+		warnings = append(warnings, fmt.Sprintf("re-created %d engagement authorization versions missing from the database", n))
+	}
+	for _, version := range differing {
+		warnings = append(warnings, fmt.Sprintf("engagement authorization version %d differs from the archive; the database copy was kept", version))
+	}
+	return warnings, nil
 }
 
 func restoreExplorationStub(tx *sql.Tx, raw json.RawMessage, expID int64) error {

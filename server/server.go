@@ -3468,7 +3468,7 @@ func (s *Server) streamLogs(w http.ResponseWriter, r *http.Request) {
 	}
 	lines, cursor := logSink.recent(since, 1000)
 	for _, l := range lines {
-		if !s.sessionOK(tok) {
+		if !s.sessionStillOK(tok) {
 			return
 		}
 		send(l)
@@ -3486,7 +3486,7 @@ func (s *Server) streamLogs(w http.ResponseWriter, r *http.Request) {
 		case <-ctx.Done():
 			return
 		case l, ok := <-ch:
-			if !ok || !s.sessionOK(tok) {
+			if !ok || !s.sessionStillOK(tok) {
 				return
 			}
 			if l.Seq <= since {
@@ -3495,7 +3495,7 @@ func (s *Server) streamLogs(w http.ResponseWriter, r *http.Request) {
 			since = l.Seq
 			send(l)
 		case <-ping.C:
-			if !s.sessionOK(tok) {
+			if !s.sessionStillOK(tok) {
 				return
 			}
 			fmt.Fprint(w, ": ping\n\n")
@@ -3570,7 +3570,7 @@ func (s *Server) streamActivity(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		for _, a := range items {
-			if !s.sessionOK(tok) {
+			if !s.sessionStillOK(tok) {
 				return
 			}
 			sendSSE(a)
@@ -3592,7 +3592,7 @@ func (s *Server) streamActivity(w http.ResponseWriter, r *http.Request) {
 		case <-ctx.Done():
 			return
 		case a, ok := <-ch:
-			if !ok || !s.sessionOK(tok) {
+			if !ok || !s.sessionStillOK(tok) {
 				return
 			}
 			if a.ID <= since {
@@ -3604,7 +3604,7 @@ func (s *Server) streamActivity(w http.ResponseWriter, r *http.Request) {
 			since = a.ID
 			sendSSE(a)
 		case <-ping.C:
-			if !s.sessionOK(tok) {
+			if !s.sessionStillOK(tok) {
 				return
 			}
 			fmt.Fprint(w, ": ping\n\n")

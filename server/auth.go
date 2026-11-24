@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"crypto/subtle"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -227,6 +228,18 @@ func verifyJWT(tokenStr string, key []byte, version int64) bool {
 // Console-user tokens are checked against the users table instead (rbac.go).
 func (s *Server) sessionOK(token string) bool {
 	_, ok := s.sessionPrincipal(token)
+	return ok
+}
+
+// sessionStillOK is sessionOK for re-checking a stream that already passed
+// sessionOK when it opened (each event of an SSE stream). A console user's row
+// comes from a 2 s read-through cache instead of one query per event. Revoking
+// through this process (UpdateUser, DeleteUser, ChangeOwnPassword) invalidates
+// the entry at once, so the next event ends the stream; a change made outside
+// this process (another instance, psql) is seen within the TTL. Any lookup
+// error still rejects. A request's first check must use sessionOK.
+func (s *Server) sessionStillOK(token string) bool {
+	_, ok := s.principalFor(token, true)
 	return ok
 }
 
@@ -547,23 +560,21 @@ func (s *Server) authInit(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]any{"token": tok})
 }
 
-// POST /api/auth/change-password — changes the admin password. Requires a valid
-// token (this route is under /api/auth/* which requireAuth exempts, so the token
-// is validated here) AND the current password.
+// POST /api/auth/change-password — changes the caller's own password: the
+// bootstrap ARTEX password, or a console user's. Requires a valid token (this
+// route is under /api/auth/* which requireAuth exempts, so the token is
+// validated here) AND the current password. Either way the change bumps a
+// version that ends every session, the caller's included, and the response
+// carries no replacement token: the caller signs in again.
 func (s *Server) authChangePassword(w http.ResponseWriter, r *http.Request) {
 	pg := s.pg(w)
 	if pg == nil {
 		return
 	}
-	who, ok := s.sessionPrincipal(extractToken(r))
+	tok := extractToken(r)
+	who, ok := s.sessionPrincipal(tok)
 	if !ok {
 		writeErr(w, 401, "Unauthorized")
-		return
-	}
-	// This changes the bootstrap ARTEX password only. A console user's
-	// password is changed by an admin (PATCH /api/users/{id}).
-	if who.UserID != 0 {
-		writeErr(w, 403, "only the ARTEX bootstrap login can change its password here; ask an admin to change a console user's password")
 		return
 	}
 	if wait := s.passwordChangeWait(r); wait > 0 {
@@ -586,6 +597,16 @@ func (s *Server) authChangePassword(w http.ResponseWriter, r *http.Request) {
 	}
 	if msg := validatePassword(req.NewPassword); msg != "" {
 		writeErr(w, 400, msg)
+		return
+	}
+	if who.UserID != 0 {
+		// The version the caller authenticated with: a change made since wins.
+		claims, ok := parseSession(tok, s.jwtKey)
+		if !ok {
+			writeErr(w, 401, "Unauthorized")
+			return
+		}
+		s.changeUserPassword(w, r, who, claims.UV, req.OldPassword, req.NewPassword)
 		return
 	}
 	hash, ok, err := pg.GetSetting(s.passwordHashKey())
@@ -615,6 +636,46 @@ func (s *Server) authChangePassword(w http.ResponseWriter, r *http.Request) {
 	}
 	s.passwordChangeReset(r)
 	s.applyPasswordVersion(version)
+	writeJSON(w, 200, map[string]any{"ok": true})
+}
+
+// changeUserPassword is authChangePassword for a console user. uv is the
+// user version in the caller's own token; the write applies only at that
+// version, so a concurrent admin change wins (409). newPassword has passed
+// validatePassword. Nothing here logs a password or a hash.
+func (s *Server) changeUserPassword(w http.ResponseWriter, r *http.Request, who principal, uv int64, oldPassword, newPassword string) {
+	pg := s.m.pg
+	ua, err := pg.GetUserAuthByID(who.UserID)
+	if errors.Is(err, db.ErrUserNotFound) {
+		writeErr(w, 401, "Unauthorized")
+		return
+	}
+	if err != nil {
+		writeErr(w, 503, errDataSourceUnavailable)
+		return
+	}
+	if ua.Disabled {
+		writeErr(w, 403, "This account is disabled")
+		return
+	}
+	if err := bcrypt.CompareHashAndPassword([]byte(ua.PasswordHash), []byte(oldPassword)); err != nil {
+		writeErr(w, 401, "Current password is wrong")
+		return
+	}
+	newHash, err := bcrypt.GenerateFromPassword([]byte(newPassword), bcrypt.DefaultCost)
+	if err != nil {
+		writeErr(w, 500, "Password encryption failed")
+		return
+	}
+	if _, err := pg.ChangeOwnPassword(who.Username, who.UserID, uv, string(newHash)); err != nil {
+		if errors.Is(err, db.ErrUserChanged) {
+			writeErr(w, 409, "Your account was changed while the password was being changed; sign in again and retry")
+			return
+		}
+		writeErr(w, 500, "Save failed: "+err.Error())
+		return
+	}
+	s.passwordChangeReset(r)
 	writeJSON(w, 200, map[string]any{"ok": true})
 }
 

@@ -31,6 +31,8 @@ var (
 		"The user paused the task via the task control API (POST /api/tasks/{id}/control, action=pause). This Planner/Worker run was actively cancelled; running intents return to frontier(open) and are re-claimed and executed from scratch after the task resumes")
 	AbortPausedByOrchestrator = cause("paused_by_orchestrator", "The orchestrating agent paused the task",
 		"The orchestrating agent called the pause_task tool to pause this task. This Planner/Worker run was actively cancelled; running intents return to frontier(open) and are executed again after resuming")
+	AbortAuthorizationEnded = cause("authorization_ended", "The engagement authorization ended",
+		"The task's engagement authorization artifact expired (not_after passed) or was revoked, so the server paused the task. The target gate already refuses every call against a target; an admin must store a new version (POST /api/tasks/{id}/authorization) before the task can resume")
 	AbortTaskDeleted = cause("task_deleted", "The task was deleted",
 		"The task is being deleted (DELETE /api/tasks/{id}); the deletion barrier has cancelled the task's running Planner, Worker, and main agent; this run's results will not be used")
 	AbortPausedOnReload = cause("paused_on_reload", "Restored the paused state on startup",

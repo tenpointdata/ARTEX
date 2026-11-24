@@ -142,6 +142,11 @@ func (s *Server) storeAuthorization(w http.ResponseWriter, r *http.Request, pg *
 		writeErr(w, 500, err.Error())
 		return
 	}
+	// AddAuthorization turned the stored gate on; a loaded task reads its own flag.
+	s.m.forceTargetGate(id)
+	if a.Ended(time.Now()) {
+		s.pauseForEndedAuthorization(id) // a revocation pauses at once, not on the next tick
+	}
 	writeJSON(w, 200, a)
 }
 

@@ -435,7 +435,50 @@ type TaskPatch struct {
 // UpdateTask applies a partial task name/pin mutation and returns the updated row.
 // Re-pinning an already pinned task preserves its original position.
 func (d *DB) UpdateTask(id int64, patch TaskPatch) (*Task, error) {
-	task, err := scanTask(d.QueryRow(`UPDATE tasks SET
+	if patch.TargetGate != nil && !*patch.TargetGate {
+		return d.updateTaskGateOff(id, patch)
+	}
+	return updateTaskRow(d, id, patch)
+}
+
+// ErrTargetGateRequired refuses turning the target gate off for a task that
+// has an engagement authorization artifact: without the gate the artifact's
+// scope sees only declared targets and the platform's own dials, so a command
+// that builds its target at run time would escape it (docs/GOVERNANCE.md).
+var ErrTargetGateRequired = errors.New("the task has an engagement authorization, which requires the target gate; it cannot be turned off")
+
+// updateTaskGateOff applies a patch that turns the gate off, under the task
+// row lock AddAuthorization takes, so an artifact stored concurrently either
+// lands first (and the patch is refused) or sees the gate off and turns it on.
+func (d *DB) updateTaskGateOff(id int64, patch TaskPatch) (*Task, error) {
+	tx, err := d.Begin()
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback() //nolint:errcheck
+	var hasArtifact bool
+	err = tx.QueryRow(`SELECT EXISTS(SELECT 1 FROM engagement_authorizations WHERE task_id = t.id)
+FROM tasks t WHERE t.id = $1 AND t.deleted_at IS NULL FOR UPDATE OF t`, id).Scan(&hasArtifact)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	if hasArtifact {
+		return nil, ErrTargetGateRequired
+	}
+	task, err := updateTaskRow(tx, id, patch)
+	if err != nil || task == nil {
+		return task, err
+	}
+	return task, tx.Commit()
+}
+
+func updateTaskRow(q interface {
+	QueryRow(string, ...any) *sql.Row
+}, id int64, patch TaskPatch) (*Task, error) {
+	task, err := scanTask(q.QueryRow(`UPDATE tasks SET
 	name = CASE WHEN $2::boolean THEN $3 ELSE name END,
 	pinned_at = CASE
 		WHEN $4::boolean IS NULL THEN pinned_at

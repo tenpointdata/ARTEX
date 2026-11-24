@@ -335,6 +335,11 @@ func (s *Server) toolSpawnTask() actool.CoreTool {
 			if err != nil {
 				return actool.Errorf(err.Error()), nil
 			}
+			if inherited != nil && gate == nil {
+				// An artifact requires the gate (db.ErrTargetGateRequired).
+				on := true
+				gate = &on
+			}
 			t, err := s.m.CreateTaskWithOptions(a.Description, a.Goal, db.TaskCreateOptions{
 				SourceTaskIDs:        sourceIDs,
 				LLMProfileIDs:        llmIDs,

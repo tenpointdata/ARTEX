@@ -50,7 +50,8 @@ func (sc *Scheduler) Run(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-t.C:
-			sc.s.reconcileConcurrency() // concurrency cap: start queued tasks as free slots appear
+			sc.s.reconcileConcurrency()     // concurrency cap: start queued tasks as free slots appear
+			sc.s.pauseEndedAuthorizations() // engagement authorization expired or revoked
 			sc.step()
 		}
 	}

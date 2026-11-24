@@ -299,6 +299,12 @@ func (d *DB) AddAuthorization(taskID int64, in AuthorizationInput, revoked bool,
 	if !alive {
 		return nil, ErrAuthorizationNoTask
 	}
+	// An artifact requires the target gate (ErrTargetGateRequired): storing
+	// one turns the gate on in the same transaction. The caller updates a
+	// loaded task's in-memory flag.
+	if _, err := tx.Exec(`UPDATE tasks SET target_gate = true WHERE id = $1 AND NOT target_gate`, taskID); err != nil {
+		return nil, err
+	}
 	a, err := scanAuthorization(tx.QueryRow(`
 INSERT INTO engagement_authorizations(task_id, version, reference, authorized_by, scope, techniques,
     not_before, not_after, revoked, note, created_by)
@@ -324,4 +330,37 @@ RETURNING `+authorizationColumns,
 func (a *EngagementAuthorization) Input() AuthorizationInput {
 	return AuthorizationInput{Reference: a.Reference, AuthorizedBy: a.AuthorizedBy, Scope: a.Scope,
 		Techniques: a.Techniques, NotBefore: a.NotBefore, NotAfter: a.NotAfter, Note: a.Note}
+}
+
+// TasksWithEndedAuthorization returns the live, unpaused, non-terminal tasks
+// whose newest artifact version is revoked or whose window ended at or before
+// now. A window that has not started yet is not ended: the gate refuses calls
+// until it starts, and the task is left to run into it.
+func (d *DB) TasksWithEndedAuthorization(now time.Time) ([]int64, error) {
+	rows, err := d.Query(`SELECT t.id FROM tasks t
+JOIN LATERAL (SELECT revoked, not_after FROM engagement_authorizations ea
+              WHERE ea.task_id = t.id ORDER BY version DESC LIMIT 1) a ON true
+WHERE t.deleted_at IS NULL AND NOT t.paused AND t.status NOT IN ('done','failed','timeout')
+  AND (a.revoked OR a.not_after <= $1)
+ORDER BY t.id`, now.UTC())
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var ids []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
+}
+
+// Ended reports whether the artifact can no longer authorize anything without
+// a new version: revoked, or its window is over. A window that has not
+// started is not ended.
+func (a *EngagementAuthorization) Ended(now time.Time) bool {
+	return a.Revoked || !now.Before(a.NotAfter)
 }

@@ -64,8 +64,16 @@ func parseSession(tokenStr string, key []byte) (*sessionClaims, bool) {
 	return claims, true
 }
 
-// sessionPrincipal validates token and returns who it acts as.
+// sessionPrincipal validates token and returns who it acts as. It reads the
+// users table directly: the first check of every request.
 func (s *Server) sessionPrincipal(token string) (principal, bool) {
+	return s.principalFor(token, false)
+}
+
+// principalFor is sessionPrincipal with the user lookup optionally served from
+// the short-lived user cache (cached), for re-checking a session that already
+// passed a direct check, such as each event of an open SSE stream.
+func (s *Server) principalFor(token string, cached bool) (principal, bool) {
 	if token == "" {
 		return principal{}, false
 	}
@@ -76,7 +84,7 @@ func (s *Server) sessionPrincipal(token string) (principal, bool) {
 	if claims.UID == 0 {
 		return s.legacyPrincipal(claims)
 	}
-	return s.userPrincipal(claims)
+	return s.userPrincipal(claims, cached)
 }
 
 // legacyPrincipal applies the bootstrap login's password-version check.
@@ -91,11 +99,15 @@ func (s *Server) legacyPrincipal(c *sessionClaims) (principal, bool) {
 }
 
 // userPrincipal checks a user token against the users table. Fails closed.
-func (s *Server) userPrincipal(c *sessionClaims) (principal, bool) {
+func (s *Server) userPrincipal(c *sessionClaims, cached bool) (principal, bool) {
 	if s.m == nil || s.m.pg == nil {
 		return principal{}, false
 	}
-	u, err := s.m.pg.GetUser(c.UID)
+	get := s.m.pg.GetUser
+	if cached {
+		get = s.m.pg.CachedUser
+	}
+	u, err := get(c.UID)
 	if err != nil {
 		if !errors.Is(err, db.ErrUserNotFound) {
 			log.Printf("[auth] user %d lookup failed; rejecting the session: %v", c.UID, err)

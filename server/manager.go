@@ -1130,6 +1130,17 @@ func (m *Manager) UpdateTaskMetadata(taskID string, patch pgdb.TaskPatch) (*Task
 	return task, nil
 }
 
+// forceTargetGate turns on the in-memory gate flag of a loaded task after the
+// stored one was turned on with an engagement authorization (db.AddAuthorization).
+func (m *Manager) forceTargetGate(taskID int64) {
+	m.mu.RLock()
+	task := m.tasks[strconv.FormatInt(taskID, 10)]
+	m.mu.RUnlock()
+	if task != nil {
+		task.targetGate.Store(true)
+	}
+}
+
 // CreateTask creates a task + its exploration and makes it active.
 // timeoutSeconds is the task-level wall-clock budget (0 = no time limit).
 func (m *Manager) CreateTask(description, goal string, llmProfileID *int64, timeoutSeconds, planHeartbeatSeconds int) (*Task, error) {

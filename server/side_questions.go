@@ -555,7 +555,7 @@ func (s *Server) sideEvents(w http.ResponseWriter, r *http.Request) {
 	heartbeat := time.NewTicker(15 * time.Second)
 	defer heartbeat.Stop()
 	for {
-		if !s.sessionOK(tok) {
+		if !s.sessionStillOK(tok) {
 			return
 		}
 		e := first

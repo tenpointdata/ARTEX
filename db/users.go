@@ -42,6 +42,9 @@ func ValidUserRole(role string) bool {
 var (
 	ErrUserNotFound = errors.New("user not found")
 	ErrUserExists   = errors.New("username already exists")
+	// ErrUserChanged means ChangeOwnPassword matched no row: the user was
+	// changed, disabled or deleted after the caller's session was issued.
+	ErrUserChanged = errors.New("user changed since the session was issued")
 )
 
 // User is a console user without its password hash.
@@ -144,6 +147,18 @@ func (d *DB) GetUserAuth(username string) (UserAuth, error) {
 	return a, err
 }
 
+// GetUserAuthByID is GetUserAuth for a user id, for a signed-in user proving
+// its current password. It reads the database directly, never a cache.
+func (d *DB) GetUserAuthByID(id int64) (UserAuth, error) {
+	var a UserAuth
+	u, err := scanUser(d.QueryRow(`SELECT `+userCols+`, password_hash FROM artex_users WHERE id = $1`, id), &a.PasswordHash)
+	if errors.Is(err, sql.ErrNoRows) {
+		return UserAuth{}, ErrUserNotFound
+	}
+	a.User = u
+	return a, err
+}
+
 // ListUsers returns every user, without hashes, ordered by username.
 func (d *DB) ListUsers() ([]User, error) {
 	rows, err := d.Query(`SELECT ` + userCols + ` FROM artex_users ORDER BY username`)
@@ -182,6 +197,27 @@ func (d *DB) UpdateUser(actor string, id int64, p UserPatch) (User, error) {
 	d.invalidateUser(id)
 	if errors.Is(err, sql.ErrNoRows) {
 		return User{}, ErrUserNotFound
+	}
+	return u, err
+}
+
+// ChangeOwnPassword sets a new password hash for the user with id on its own
+// behalf. actor (the user's own name) goes in the audit chain. The write
+// applies only while the user still has expectVersion (the version in the
+// session the caller authenticated with) and is not disabled, so a concurrent
+// change by an admin wins and this one returns ErrUserChanged. It bumps the
+// version, which ends every session of the user, the caller's included.
+func (d *DB) ChangeOwnPassword(actor string, id, expectVersion int64, newHash string) (User, error) {
+	var u User
+	err := d.withActor(actor, func(tx *sql.Tx) error {
+		var err error
+		u, err = scanUser(tx.QueryRow(`UPDATE artex_users SET password_hash = $3, version = version + 1
+			WHERE id = $1 AND version = $2 AND NOT disabled RETURNING `+userCols, id, expectVersion, newHash))
+		return err
+	})
+	d.invalidateUser(id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return User{}, ErrUserChanged
 	}
 	return u, err
 }

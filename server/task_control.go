@@ -136,6 +136,9 @@ func (s *Server) applyTaskControlWithCause(t *Task, action string, pauseCause er
 		out.Paused, out.Status = true, "paused"
 		go s.reconcileConcurrency()
 	case "resume":
+		if err := s.refuseResumeWithEndedAuthorization(t); err != nil {
+			return out, err
+		}
 		queued, err := s.admitPausedTask(t)
 		if err != nil {
 			return out, err
