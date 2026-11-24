@@ -79,18 +79,19 @@ func TestRotatePasswordRollsBackHashWhenVersionCannotIncrement(t *testing.T) {
 		t.Fatalf("version=%q err=%v, want the previous value", ver, err)
 	}
 
+	before := time.Now().UnixMilli()
 	n, err := d.RotatePassword(hashKey, "new-hash", freshKey)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if n != 1 {
-		t.Fatalf("first version=%d want 1", n)
+	if n < before {
+		t.Fatalf("first version=%d, want at least the clock %d so a lost row cannot revive old tokens", n, before)
 	}
-	n, err = d.RotatePassword(hashKey, "newer-hash", freshKey)
+	m, err := d.RotatePassword(hashKey, "newer-hash", freshKey)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if n != 2 {
-		t.Fatalf("second version=%d want 2", n)
+	if m != n+1 {
+		t.Fatalf("second version=%d want %d", m, n+1)
 	}
 }

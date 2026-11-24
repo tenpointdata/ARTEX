@@ -645,15 +645,25 @@ func (s *Server) authLogin(w http.ResponseWriter, r *http.Request) {
 // is no per-account lockout and no password length check here.
 func (s *Server) login(w http.ResponseWriter, r *http.Request, getSetting func(string) (string, bool, error)) {
 	ip := limitKey(clientIP(r, s.trustedProxies))
-	wait := s.loginLimit.allow(ip)
-	if wait == 0 {
-		wait = s.loginCeiling.wait(ip)
+	// The global ceiling decides first, so an attempt it refuses does not
+	// also use up the caller's own per-address allowance.
+	pace, admitted := s.loginCeiling.admit(ip)
+	wait := pace
+	if admitted {
+		wait = s.loginLimit.allow(ip)
 	}
 	if wait > 0 {
 		secs := int((wait + time.Second - 1) / time.Second)
 		w.Header().Set("Retry-After", strconv.Itoa(secs))
 		writeErr(w, 429, fmt.Sprintf("Too many login attempts, try again in %d seconds", secs))
 		return
+	}
+	if pace > 0 {
+		select {
+		case <-time.After(pace):
+		case <-r.Context().Done():
+			return
+		}
 	}
 	var req struct {
 		Username string `json:"username"`

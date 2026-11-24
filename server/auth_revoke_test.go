@@ -3,6 +3,7 @@ package server
 import (
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -32,6 +33,23 @@ func TestLogoutRevokesPresentedToken(t *testing.T) {
 	}
 	if !s.sessionOK(other) {
 		t.Fatal("logout revoked a different session")
+	}
+}
+
+// A request carrying a bearer token and a cookie ends both sessions.
+func TestLogoutRevokesEveryPresentedToken(t *testing.T) {
+	s := &Server{jwtKey: revokeTestKey}
+	bearer, _ := signJWT(s.jwtKey)
+	cookie, _ := signJWT(s.jwtKey)
+	r := requestWithToken("POST", "/api/auth/logout", bearer)
+	r.AddCookie(&http.Cookie{Name: sessionCookiePlain, Value: cookie})
+	w := httptest.NewRecorder()
+	s.authLogout(w, r)
+	if w.Code != 200 {
+		t.Fatalf("logout status %d", w.Code)
+	}
+	if s.sessionOK(bearer) || s.sessionOK(cookie) {
+		t.Fatalf("after logout bearer=%v cookie=%v, want both revoked", s.sessionOK(bearer), s.sessionOK(cookie))
 	}
 }
 

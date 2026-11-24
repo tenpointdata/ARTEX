@@ -66,11 +66,35 @@ func sessionCookieValue(r *http.Request) string {
 	return ""
 }
 
-// POST /api/auth/logout revokes the presented token (cookie or bearer) on the
+// presentedTokens is every session token r carries: bearer header, either
+// cookie, and ?token=. extractToken picks one; logout must end them all, or a
+// request with both a bearer and a cookie would leave the cookie's token live.
+func presentedTokens(r *http.Request) []string {
+	var out []string
+	if h := r.Header.Get("Authorization"); strings.HasPrefix(h, "Bearer ") {
+		out = append(out, strings.TrimPrefix(h, "Bearer "))
+	}
+	for _, name := range []string{sessionCookieSecure, sessionCookiePlain} {
+		if c, err := r.Cookie(name); err == nil && c.Value != "" {
+			out = append(out, c.Value)
+		}
+	}
+	if q := r.URL.Query().Get("token"); q != "" {
+		out = append(out, q)
+	}
+	return out
+}
+
+// POST /api/auth/logout revokes every presented token (bearer, cookies, query) on the
 // server, so a copy of it stops working too (auth_revoke.go), and clears the
 // session cookie (both names, whichever the browser holds).
 func (s *Server) authLogout(w http.ResponseWriter, r *http.Request) {
-	err := s.revokeSession(extractToken(r))
+	var err error
+	for _, tok := range presentedTokens(r) {
+		if e := s.revokeSession(tok); e != nil {
+			err = e
+		}
+	}
 	for _, name := range []string{sessionCookieSecure, sessionCookiePlain} {
 		http.SetCookie(w, &http.Cookie{
 			Name: name, Value: "", Path: "/", MaxAge: -1,

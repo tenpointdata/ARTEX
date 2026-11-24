@@ -71,7 +71,10 @@ ON CONFLICT (key) DO NOTHING`, key, value)
 }
 
 // RotatePassword stores hash and increments the monotonic version in one
-// transaction. A failure leaves both rows unchanged. The returned version is
+// transaction. A missing version row starts at the current Unix time in
+// milliseconds, not 1, so it stays ahead of tokens signed before the row was
+// lost (InsertPassword does the same). A non-numeric row fails the change and
+// leaves both rows unchanged. The returned version is
 // the value new sessions must carry.
 func (d *DB) RotatePassword(hashKey, hash, versionKey string) (int64, error) {
 	tx, err := d.Begin()
@@ -90,10 +93,9 @@ ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()`, has
 	}
 	var raw string
 	if err := tx.QueryRow(`
-INSERT INTO settings(key, value) VALUES ($1, '1')
-ON CONFLICT (key) DO UPDATE
-SET value = (settings.value::bigint + 1)::text, updated_at = now()
-RETURNING value`, versionKey).Scan(&raw); err != nil {
+INSERT INTO settings(key, value) VALUES ($1, $2::bigint::text)
+ON CONFLICT (key) DO UPDATE SET value = (settings.value::bigint + 1)::text, updated_at = now()
+RETURNING value`, versionKey, time.Now().UnixMilli()).Scan(&raw); err != nil {
 		return 0, err
 	}
 	n, err := strconv.ParseInt(raw, 10, 64)

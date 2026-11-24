@@ -68,15 +68,32 @@ func TestHostGuardForwardedHostOnlyFromTrustedProxy(t *testing.T) {
 		}
 		return r
 	}
-	// A trusted proxy that rewrites Host to its upstream name is judged by X-Forwarded-Host.
-	if _, ok := hostGuardReached(s, req("10.0.0.1:5", "artex:8787", "artex.example.com")); !ok {
-		t.Error("allowed X-Forwarded-Host from a trusted proxy was refused")
+	// A trusted proxy passing the browser's name in Host and X-Forwarded-Host.
+	if _, ok := hostGuardReached(s, req("10.0.0.1:5", "artex.example.com", "artex.example.com")); !ok {
+		t.Error("allowed Host and X-Forwarded-Host from a trusted proxy were refused")
 	}
 	if _, ok := hostGuardReached(s, req("10.0.0.1:5", "127.0.0.1:8787", "evil.test")); ok {
 		t.Error("disallowed X-Forwarded-Host from a trusted proxy got through")
 	}
+	// A rebinding page adds X-Forwarded-Host itself and the proxy passes it on: Host still decides.
+	if _, ok := hostGuardReached(s, req("10.0.0.1:5", "evil.test", "localhost")); ok {
+		t.Error("a client-supplied X-Forwarded-Host replaced the Host check")
+	}
+	// Only the last value, the one the nearest proxy appended, is judged.
+	if _, ok := hostGuardReached(s, req("10.0.0.1:5", "127.0.0.1", "evil.test, artex.example.com")); !ok {
+		t.Error("the proxy-appended X-Forwarded-Host value was refused")
+	}
 	if _, ok := hostGuardReached(s, req("10.0.0.1:5", "127.0.0.1", "artex.example.com, evil.test")); ok {
-		t.Error("every X-Forwarded-Host value must be allowed")
+		t.Error("a disallowed last X-Forwarded-Host value got through")
+	}
+	// A proxy that rewrites Host to its upstream name needs that name listed.
+	if _, ok := hostGuardReached(s, req("10.0.0.1:5", "artex:8787", "artex.example.com")); ok {
+		t.Error("an unlisted upstream Host passed")
+	}
+	p2, _ := ParseAllowedHosts("artex.example.com,artex")
+	s2 := &Server{allowedHosts: p2, trustedProxies: s.trustedProxies}
+	if _, ok := hostGuardReached(s2, req("10.0.0.1:5", "artex:8787", "artex.example.com")); !ok {
+		t.Error("a listed upstream Host was refused")
 	}
 	// From an untrusted peer the header is ignored, both ways.
 	if _, ok := hostGuardReached(s, req("192.0.2.4:5", "evil.test", "artex.example.com")); ok {

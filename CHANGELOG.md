@@ -4,6 +4,13 @@ All notable changes to this project are documented in this file. The format is b
 
 ## [Unreleased]
 
+### Security (upgrade notes)
+
+- **Existing sessions end once on upgrade**: session tokens now carry a jti and must match the stored password version exactly, so tokens issued before the upgrade get 401 and the operator logs in again. Logout revokes every token the request presents, server-side, until the token's expiry; first-run setup and a password change after a lost version row move the version forward (to at least the current time in ms) instead of restarting at 1. Benchmark scripts that mint tokens from `jwt.key` need `ARTEX_PWD_VERSION`.
+- **Host allowlist (DNS-rebinding defence)**: the console answers only to `localhost`, `*.localhost`, IP literals and `ARTEX_ALLOWED_HOSTS`; any other `Host` gets `421`. A deployment reached by a DNS name must set `ARTEX_ALLOWED_HOSTS` before upgrading. Behind a proxy, `Host` is still checked and the last `X-Forwarded-Host` value from a trusted proxy must pass too.
+- **Login rate limit**: IPv6 clients are limited per /64. Past 100 failed logins a minute across all sources, sources without a recent successful login are paced to one attempt per 600 ms (queue up to 5 s, then 429); the password is still checked, so the operator's correct password gets in.
+- **Supply chain**: workflow actions are pinned by commit SHA, the release workflow's npm job has a read-only token and runs `npm ci --ignore-scripts`, and the image installs bbot from a hash-pinned requirements file and the Playwright toolchain from a committed lockfile (`docker/`).
+
 ### Added
 
 - **One executor uid per task (`-exec-uid-range LO-HI`)**: with a range configured, each task and chat session runs its agent shells, custom tools and file tools as a uid of its own while it is live, and its run directories belong to that uid alone (`<uid>:<uid>` 2770), so one hijacked task gets `EACCES` writing another live task's run directory or its `.artex-home`. The uid is released (its processes killed, its files given back to root) when the task ends or is deleted, or the conversation is deleted. `egress.sh` filters the whole range. Off by default; see SECURITY.md, "One executor uid per task".

@@ -53,28 +53,34 @@ func (v *revocations) merge(stored map[string]time.Time) {
 	}
 }
 
-// loadAuthState reads the password version and the revocation list. Either
-// read failing leaves pwdState unreadable, which rejects every session until
-// login reads both again: a lost revocation list must not revive tokens.
+// loadAuthState reads the revocation list, then the password version. The
+// list is merged before the version read can mark the state ready, so a
+// recovery from pwdUnreadable never has a moment where a logged-out token
+// passes. A failed list read leaves pwdState unreadable, which rejects every
+// session until login reads both again: a lost list must not revive tokens.
 func (s *Server) loadAuthState() {
-	s.loadPasswordVersion()
-	if s.m == nil || s.m.pg == nil || s.pwdState.Load() == pwdUnreadable {
+	if s.m == nil || s.m.pg == nil {
+		s.loadPasswordVersion()
 		return
 	}
 	var stored map[string]time.Time
 	var err error
 	for attempt := 1; attempt <= 3; attempt++ {
 		if stored, err = s.m.pg.RevokedTokens(s.revokedPrefix()); err == nil {
-			s.revoked.merge(stored)
-			return
+			break
 		}
 		log.Printf("[auth] revoked-token list attempt %d/3: %v", attempt, err)
 		if attempt < 3 {
 			time.Sleep(time.Duration(attempt) * 100 * time.Millisecond)
 		}
 	}
-	log.Printf("[auth] revoked-token list unreadable; rejecting sessions until login can read it: %v", err)
-	s.pwdState.Store(pwdUnreadable)
+	if err != nil {
+		log.Printf("[auth] revoked-token list unreadable; rejecting sessions until login can read it: %v", err)
+		s.pwdState.Store(pwdUnreadable)
+		return
+	}
+	s.revoked.merge(stored)
+	s.loadPasswordVersion()
 }
 
 // session returns the claims of token when it is a live session (sessionOK).

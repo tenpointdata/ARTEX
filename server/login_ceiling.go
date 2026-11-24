@@ -10,21 +10,27 @@ import (
 // a fixed guess rate. It is deliberately not a per-account lockout: there is
 // one account, and locking it would let anyone shut the admin out by failing
 // on purpose. Instead, while the ceiling is exceeded only sources that have
-// not logged in successfully recently are refused, so the operator's usual
-// address keeps working during a distributed attack, and a new address waits
-// at most one window.
+// logged in successfully recently pass freely; every other source is paced to
+// one attempt per ceilingWindow/ceilingMaxFailures across all of them (the
+// password is still checked, so a correct one gets in), and refused only when
+// that queue is longer than ceilingMaxQueue.
 const (
 	ceilingMaxFailures = 100         // failed logins allowed per window, all sources together
 	ceilingWindow      = time.Minute // the counting window
 	ceilingKnownTTL    = jwtTTL      // how long a successful source stays exempt
 	ceilingMaxKnown    = 1000        // cap on remembered sources
+	ceilingMaxQueue    = 5 * time.Second
 )
+
+// ceilingInterval is the global pace past the ceiling.
+const ceilingInterval = ceilingWindow / ceilingMaxFailures
 
 type failCeiling struct {
 	mu          sync.Mutex
 	now         func() time.Time
 	windowStart time.Time
 	failures    int
+	next        time.Time            // next free paced slot past the ceiling
 	known       map[string]time.Time // limitKey -> last successful login
 }
 
@@ -32,21 +38,31 @@ func newFailCeiling(now func() time.Time) *failCeiling {
 	return &failCeiling{now: now, known: map[string]time.Time{}}
 }
 
-// wait returns how long key must wait before trying, or 0. A nil ceiling never blocks.
-func (c *failCeiling) wait(key string) time.Duration {
+// admit decides whether key may attempt a login now. ok false means refuse
+// with Retry-After delay; ok true means attempt after sleeping delay (0 below
+// the ceiling and for known sources). A nil ceiling always admits.
+func (c *failCeiling) admit(key string) (delay time.Duration, ok bool) {
 	if c == nil {
-		return 0
+		return 0, true
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	now := c.roll()
 	if c.failures < ceilingMaxFailures {
-		return 0
+		return 0, true
 	}
-	if at, ok := c.known[key]; ok && now.Sub(at) < ceilingKnownTTL {
-		return 0
+	if at, known := c.known[key]; known && now.Sub(at) < ceilingKnownTTL {
+		return 0, true
 	}
-	return c.windowStart.Add(ceilingWindow).Sub(now)
+	slot := c.next
+	if slot.Before(now) {
+		slot = now
+	}
+	if wait := slot.Sub(now); wait > ceilingMaxQueue {
+		return wait - ceilingMaxQueue, false
+	}
+	c.next = slot.Add(ceilingInterval)
+	return slot.Sub(now), true
 }
 
 // fail records one failed login.
@@ -83,8 +99,12 @@ func (c *failCeiling) succeed(key string) {
 // roll starts a new window when the current one is over; the caller holds mu.
 func (c *failCeiling) roll() time.Time {
 	now := c.now()
+	// A new window starts from the previous one's overflow, not from zero,
+	// so a source refused at rollover cannot be crowded out by a burst that
+	// re-spends the whole window in milliseconds.
 	if now.Sub(c.windowStart) >= ceilingWindow {
-		c.windowStart, c.failures = now, 0
+		over := max(c.failures-ceilingMaxFailures, 0)
+		c.windowStart, c.failures = now, min(over, ceilingMaxFailures)
 	}
 	return now
 }

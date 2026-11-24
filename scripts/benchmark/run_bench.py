@@ -37,6 +37,7 @@ import json
 import math
 import os
 import pathlib
+import secrets
 import subprocess
 import sys
 import time
@@ -75,8 +76,12 @@ class Api:
         return self.req("POST", path, body)
 
 
-def mint_jwt(key_path: str) -> str:
-    """Mint a 7-day HS256 token from the server's jwt.key (sub=ARTEX)."""
+def mint_jwt(key_path: str, pwd_version: int = 0) -> str:
+    """Mint a 7-day HS256 session token from the server's jwt.key (sub=ARTEX).
+
+    The server accepts only tokens that carry a jti and whose pwd claim equals
+    auth.password_version exactly (set ARTEX_PWD_VERSION to that value; 0 only on
+    an instance where no password version is stored)."""
     key = pathlib.Path(key_path).read_bytes().strip()
 
     def b64(b: bytes) -> str:
@@ -84,7 +89,8 @@ def mint_jwt(key_path: str) -> str:
 
     header = b64(json.dumps({"alg": "HS256", "typ": "JWT"}).encode())
     now = int(time.time())
-    payload = b64(json.dumps({"sub": "ARTEX", "iat": now, "exp": now + 7 * 86400}).encode())
+    claims = {"pwd": pwd_version, "jti": secrets.token_hex(16), "sub": "ARTEX", "iat": now, "exp": now + 7 * 86400}
+    payload = b64(json.dumps(claims).encode())
     sig = b64(hmac.new(key, f"{header}.{payload}".encode(), hashlib.sha256).digest())
     return f"{header}.{payload}.{sig}"
 
@@ -510,7 +516,7 @@ def prepare(args) -> str:
             key_path = os.environ.get("ARTEX_JWT_KEY", "")
             if not key_path:
                 raise SystemExit("need ARTEX_TOKEN or ARTEX_JWT_KEY")
-            token = mint_jwt(key_path)
+            token = mint_jwt(key_path, int(os.environ.get("ARTEX_PWD_VERSION", "0")))
 
     # The judge is mandatory in image mode. Drost mode always has the
     # objective flag oracle, so a missing judge degrades to flag-only

@@ -726,8 +726,10 @@ server {
 addresses, and the names listed in `ARTEX_ALLOWED_HOSTS` (comma-separated; `*.example.com` matches
 every subdomain). Any other `Host` gets `421 Misdirected Request`, so a page on a foreign domain that
 re-points its DNS at your ARTEX cannot read the API. Behind a proxy, set
-`ARTEX_ALLOWED_HOSTS=your.domain.com`. From a peer in `ARTEX_TRUSTED_PROXIES`, `X-Forwarded-Host`
-(when the proxy sends it) is checked in place of `Host`.
+`ARTEX_ALLOWED_HOSTS=your.domain.com` and have the proxy pass the browser's name in `Host`
+(nginx: `proxy_set_header Host $host;`). `Host` is always checked; from a peer in
+`ARTEX_TRUSTED_PROXIES` the last `X-Forwarded-Host` value must pass as well. A proxy that rewrites
+`Host` to its upstream name (e.g. `artex:8787`) needs that name listed too.
 
 **Login rate limit behind a proxy**: login allows 10 attempts per minute per client IP (per /64
 for IPv6), and at most 100 failed logins per minute across all sources; past that bound only

@@ -96,7 +96,7 @@ Environment contract:
 | Variable / flag | Meaning |
 |---|---|
 | `ARTEX_BASE` / `--artex-url` | ARTEX base URL (default `http://localhost:8787`) |
-| `ARTEX_TOKEN` or `ARTEX_JWT_KEY` | API bearer token, or the server's jwt.key to mint one |
+| `ARTEX_TOKEN` or `ARTEX_JWT_KEY` | API bearer token, or the server's jwt.key to mint one (then also `ARTEX_PWD_VERSION`: the `auth.password_version` settings value, e.g. `docker compose exec postgres psql -U artex -tAc "select value from settings where key='auth.password_version'"`) |
 | `JUDGE_BASE_URL`, `JUDGE_MODEL`, `JUDGE_API_KEY` | OpenAI-compatible judge endpoint (independent of the subject) |
 | `--subject-model` | model of the task's active profile, for the self-judge guard |
 | `--llm-profiles` | comma-separated profile ids for the task chain, head first (e.g. `3,2`); stamped into the result |

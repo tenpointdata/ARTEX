@@ -87,17 +87,23 @@ func WithAllowedHosts(p HostPolicy) Option {
 	return func(s *Server) { s.allowedHosts = p }
 }
 
-// requestHosts are the names the browser used to reach us. From a trusted
-// proxy (the same rule as requestIsSecure) that is X-Forwarded-Host when the
-// proxy sets it, since the proxy may rewrite Host to its upstream name; every
-// listed value must pass. Otherwise it is Host.
+// requestHosts are the names that must pass. Host always does: a rebinding
+// page cannot choose it freely, but it can add an X-Forwarded-Host header to
+// its own same-origin fetch, so that header never replaces Host. From a trusted
+// proxy (the same rule as requestIsSecure) the last X-Forwarded-Host value, the
+// one the nearest proxy wrote, must pass as well. The proxy should set Host or
+// X-Forwarded-Host to the name the browser used (nginx: proxy_set_header Host
+// $host); a proxy that rewrites Host to its upstream name needs that name in
+// ARTEX_ALLOWED_HOSTS.
 func (s *Server) requestHosts(r *http.Request) []string {
+	hosts := []string{r.Host}
 	if xfh := r.Header.Values("X-Forwarded-Host"); len(xfh) > 0 {
 		if addr, err := netip.ParseAddr(peerIP(r)); err == nil && isTrusted(addr, s.trustedProxies) {
-			return strings.Split(strings.Join(xfh, ","), ",")
+			vals := strings.Split(xfh[len(xfh)-1], ",")
+			hosts = append(hosts, vals[len(vals)-1])
 		}
 	}
-	return []string{r.Host}
+	return hosts
 }
 
 // hostGuard refuses, with 421, a request whose Host is not allowed.
