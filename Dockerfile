@@ -29,6 +29,8 @@ RUN npm run build:static
 FROM --platform=$BUILDPLATFORM golang:1.26.11-bookworm@sha256:dc40a13b61304647ed7e5d581d246b86413dfc29d63c6d018310feb93cd98fc0 AS build
 WORKDIR /src
 COPY go.mod go.sum ./
+# go.mod replaces go-mitmproxy with the patched copy here (per-host upstream TLS).
+COPY third_party/ third_party/
 RUN go mod download
 COPY . .
 # Reuse the frontend built above; build.sh skips its own frontend step.

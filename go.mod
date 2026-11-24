@@ -81,3 +81,5 @@ require (
 )
 
 replace github.com/Autumn-27/norma => github.com/BaaRai/Norma v0.4.11
+
+replace github.com/lqqyt2423/go-mitmproxy => ./third_party/go-mitmproxy

@@ -274,6 +274,9 @@ type Traffic struct {
 	// gate is the loopback proxy every upstream dial goes through when upstream
 	// is nil, so the platform's egress checks apply to them (upstream_gate.go).
 	gate *upstreamGate
+	// trust decides which upstream hosts are captured without verifying their
+	// TLS certificate (upstream_trust.go). Nil verifies every host.
+	trust atomic.Pointer[UpstreamTrustFunc]
 	// rewriteRules is the compiled snapshot of the rewrite rules, replaced as a
 	// whole by SetRewriteRules and applied by the sink (rewrite_flow.go).
 	rewriteRules atomic.Pointer[rewrite.Set]
@@ -346,10 +349,11 @@ func Open(dir, addr string) (*Traffic, error) {
 
 	p, err := mproxy.NewProxy(&mproxy.Options{
 		Addr: addr,
-		// Upstream certificates are verified (system roots) unless the operator
-		// opts out; go-mitmproxy exposes only a global switch, not per-host.
-		SslInsecure: InsecureUpstream(),
-		CaRootPath:  filepath.Join(dir, "_ca"),
+		// Upstream certificates are verified (system roots) except for the
+		// hosts the trust policy exempts (upstream_trust.go). The vendored
+		// go-mitmproxy (third_party/) adds the per-host hook.
+		UpstreamInsecure: t.upstreamInsecure,
+		CaRootPath:       filepath.Join(dir, "_ca"),
 	})
 	if err != nil {
 		db.Close()
@@ -404,8 +408,9 @@ func restrictIndexFiles(index string) {
 }
 
 // InsecureUpstream reports whether the operator opted out of verifying upstream
-// TLS certificates (ARTEX_CAPTURE_INSECURE_UPSTREAM=1), needed to capture
-// pentest targets with self-signed certificates. Off by default.
+// TLS certificates for every host but the protected ones
+// (ARTEX_CAPTURE_INSECURE_UPSTREAM=1). Off by default: in-scope targets with
+// self-signed certificates need no opt-out (upstream_trust.go).
 func InsecureUpstream() bool {
 	switch strings.ToLower(strings.TrimSpace(os.Getenv("ARTEX_CAPTURE_INSECURE_UPSTREAM"))) {
 	case "1", "true", "yes", "on":

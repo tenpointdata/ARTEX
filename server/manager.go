@@ -495,6 +495,9 @@ func NewManager(dir, proxyAddr string) (*Manager, error) {
 			// The proxy's own upstream dials get the asset block rules and the
 			// metadata deny: the egress filter covers only the executor uid.
 			tr.SetUpstreamDialer(m.interceptor.DialSOCKS5)
+			// Upstream TLS is verified except for hosts an active task's allow
+			// rules name (self-signed targets); registries stay verified.
+			tr.SetUpstreamTrust(newUpstreamTLSScope(m.assets).trusts)
 			m.reloadRewriteRules() // in place before the proxy accepts a connection
 			m.reloadTamperHooks()  // opt-in behind ARTEX_TAMPER_HOOKS_ENABLED=1
 			if scfg, ok := traffic.SOCKS5ConfigFromEnv(); ok {
