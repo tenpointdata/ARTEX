@@ -41,7 +41,7 @@ import key for an imported finding.
 
 ## Scanner data in: imports
 
-`POST /api/integrations/imports?format=<f>[&task_id=N][&file_name=x]` with the raw file as the
+`POST /api/integrations/imports?format=<f>[&task_id=N][&asset_ids=1,2][&file_name=x]` with the raw file as the
 body (32 MiB cap). Formats: `nmap-xml`, `nuclei-jsonl`, `zap-json`, `burp-xml`, `sarif`
 (Semgrep and other SARIF 2.1.0 tools). `GET /api/integrations/imports` lists past imports.
 
@@ -58,6 +58,40 @@ body (32 MiB cap). Formats: `nmap-xml`, `nuclei-jsonl`, `zap-json`, `burp-xml`, 
   scanner's free text (titles, descriptions, matched values) is target-shaped, so it is kept only as
   quoted strings in the evidence under an untrusted-data header. Credentials in URLs are stripped and
   Burp request/response bodies are not imported.
+
+## Code-security lane: SAST and SCA in the same graph and report (E10)
+
+Code scanners feed the same records as runtime testing. Run Semgrep for SAST, and Trivy,
+osv-scanner, Grype or another SARIF-emitting tool for SCA (dependencies), and import the SARIF
+into the engagement's task:
+
+```sh
+semgrep scan --sarif -o semgrep.sarif ./src
+curl -H "Authorization: Bearer $TOKEN" --data-binary @semgrep.sarif \
+  "http://localhost:8787/api/integrations/imports?format=sarif&task_id=12&asset_ids=345&file_name=semgrep.sarif"
+```
+
+- **Lane.** Every imported finding has a lane: `runtime` (nmap, nuclei, ZAP, Burp), `sast` or
+  `sca`. A SARIF result is `sca` when its tool only scans dependencies (osv-scanner, grype, ...),
+  its rule id is an advisory id (CVE, GHSA, PYSEC, RUSTSEC, GO-, SNYK-, ...) or its file is a
+  manifest or lockfile; otherwise `sast`. A Trivy file can hold both. The lane, the repo-relative
+  path and the line are stored in `finding_import_sources` (migration 0023).
+- **Exploration graph.** With `task_id`, the import writes one exploration **fact** for the scan
+  run (format, tool, version, file hash, counts by lane; typed values only), and every new finding
+  becomes a **finding node** of the task that the fact `yields`, with `findings.node_id` set, the
+  same as a worker's finding. A task that is archived or being archived refuses the import (409).
+- **Asset graph.** `asset_ids` (at most 20 existing assets, and only with `task_id`) anchors the
+  import fact and the code findings to the runtime assets the scanned code serves, such as the
+  `http_service` of the application. A SAST finding and a runtime finding on the same application
+  then share the asset. Runtime findings use the anchors only when no imported asset matched
+  their host. An unknown id returns 400.
+- **Report.** `GET /api/report?task=N` lists code and runtime findings together, sorted by
+  severity. Each imported finding has a **Source** line (lane, tool, rule, `path:line`, import
+  id), and the summary breaks the findings down by lane.
+- **Goals.** Imported findings are leads, not results. `graph_overview.findings_total` does not
+  count them, `finding_list` marks them `imported: <lane>`, and `prove_goal` refuses them because
+  they have no verified traffic. To report a code finding as proven, reproduce it at runtime and
+  record that as a worker finding.
 
 The in-run agent tool `ingest_scan_output` (`agent/scan_ingest.go`) is separate: it writes facts
 for the planner during an exploration and creates no findings.
