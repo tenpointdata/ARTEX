@@ -11,7 +11,9 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { t } from "@/i18n";
+import { useCan } from "@/hooks/use-session";
 import { api } from "@/lib/api";
+import { errorText } from "@/lib/api-errors";
 import type { NoiseProfileName, NoiseStatus } from "@/lib/types";
 
 // Mirrors egress.Profiles in egress/egress.go; the jitter of one send is
@@ -44,6 +46,7 @@ const profiles: { value: NoiseProfileName; label: string; limits: string }[] = [
 // NoiseProfileCard sets the target noise profile and shows the per-host
 // counters of the current minute.
 export function NoiseProfileCard() {
+  const canAdmin = useCan("admin"); // PUT /api/settings
   const [status, setStatus] = React.useState<NoiseStatus | null>(null);
   const [loading, setLoading] = React.useState(false);
   const [saving, setSaving] = React.useState(false);
@@ -53,7 +56,7 @@ export function NoiseProfileCard() {
     api
       .noiseStatus()
       .then(setStatus)
-      .catch((e) => toast.error(t("Failed to load the noise counters: {error}", { error: (e as Error).message })))
+      .catch((e) => toast.error(t("Failed to load the noise counters: {error}", { error: errorText(e) })))
       .finally(() => setLoading(false));
   }, []);
   React.useEffect(() => {
@@ -70,7 +73,7 @@ export function NoiseProfileCard() {
         );
         refresh();
       })
-      .catch((e) => toast.error(t("Save failed: {error}", { error: (e as Error).message })))
+      .catch((e) => toast.error(t("Save failed: {error}", { error: errorText(e) })))
       .finally(() => setSaving(false));
   };
 
@@ -95,7 +98,7 @@ export function NoiseProfileCard() {
           </Label>
           <Select
             value={status?.profile ?? ""}
-            disabled={!status || saving}
+            disabled={!status || saving || !canAdmin}
             onValueChange={(v) => save(v as NoiseProfileName)}
           >
             <SelectTrigger id="noise-profile" className="w-48 shrink-0">

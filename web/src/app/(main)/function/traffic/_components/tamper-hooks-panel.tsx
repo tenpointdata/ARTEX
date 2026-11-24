@@ -19,16 +19,6 @@ import {
 import { toast } from "sonner";
 
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -50,7 +40,11 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { intlLocale, t } from "@/i18n";
+import { useCan } from "@/hooks/use-session";
 import { api } from "@/lib/api";
+import { errorText } from "@/lib/api-errors";
+
+import { DeleteHookDialog, RollbackHookDialog } from "./hook-confirm-dialogs";
 import {
   buildMatchers,
   DEFAULT_REQUEST_HOOK_SOURCE,
@@ -154,6 +148,7 @@ interface DryRunTarget {
 }
 
 export function TamperHooksPanel({ recentExchanges = [] }: { recentExchanges?: TrafficExchange[] }) {
+  const canOperate = useCan("operate"); // every hook mutation and dry-run needs operate
   const [hooks, setHooks] = React.useState<TamperHook[]>([]);
   const [enabledByEnv, setEnabledByEnv] = React.useState<boolean>(true);
   const [loading, setLoading] = React.useState(true);
@@ -202,7 +197,7 @@ export function TamperHooksPanel({ recentExchanges = [] }: { recentExchanges?: T
       setHooks(res.hooks ?? []);
       setEnabledByEnv(Boolean(res.enabled_by_env));
     } catch (e) {
-      setLoadError((e as Error).message);
+      setLoadError(errorText(e));
     } finally {
       setLoading(false);
     }
@@ -221,7 +216,7 @@ export function TamperHooksPanel({ recentExchanges = [] }: { recentExchanges?: T
         next ? t('Hook "{name}" enabled', { name: hook.name }) : t('Hook "{name}" disabled', { name: hook.name }),
       );
     } catch (e) {
-      toast.error((e as Error).message);
+      toast.error(errorText(e));
     } finally {
       setTogglingId(null);
     }
@@ -256,7 +251,7 @@ export function TamperHooksPanel({ recentExchanges = [] }: { recentExchanges?: T
       setEditor(null);
       await loadHooks();
     } catch (e) {
-      setFormError((e as Error).message);
+      setFormError(errorText(e));
     } finally {
       setSaving(false);
     }
@@ -271,7 +266,7 @@ export function TamperHooksPanel({ recentExchanges = [] }: { recentExchanges?: T
       setDeleteTarget(null);
       await loadHooks();
     } catch (e) {
-      toast.error((e as Error).message);
+      toast.error(errorText(e));
     } finally {
       setDeleting(false);
     }
@@ -286,7 +281,7 @@ export function TamperHooksPanel({ recentExchanges = [] }: { recentExchanges?: T
       const res = await api.trafficHookVersions(hook.id);
       setVersions(res.versions ?? []);
     } catch (e) {
-      toast.error((e as Error).message);
+      toast.error(errorText(e));
     } finally {
       setVersionsLoading(false);
     }
@@ -306,7 +301,7 @@ export function TamperHooksPanel({ recentExchanges = [] }: { recentExchanges?: T
       const res = await api.trafficHookVersions(updated.id);
       setVersions(res.versions ?? []);
     } catch (e) {
-      toast.error((e as Error).message);
+      toast.error(errorText(e));
     } finally {
       setRollingBack(false);
     }
@@ -362,7 +357,7 @@ export function TamperHooksPanel({ recentExchanges = [] }: { recentExchanges?: T
       if (warnings.length) setDryRunExchangeWarning(warnings.join(" "));
       toast.success(t("Loaded exchange {id}", { id: trimmed }));
     } catch (e) {
-      setDryRunError((e as Error).message);
+      setDryRunError(errorText(e));
     } finally {
       setDryRunLoadingExchange(false);
     }
@@ -399,7 +394,7 @@ export function TamperHooksPanel({ recentExchanges = [] }: { recentExchanges?: T
       const res = await api.dryRunTrafficHook(body);
       setDryRunResult(res);
     } catch (e) {
-      setDryRunError((e as Error).message);
+      setDryRunError(errorText(e));
     } finally {
       setDryRunRunning(false);
     }
@@ -435,17 +430,19 @@ export function TamperHooksPanel({ recentExchanges = [] }: { recentExchanges?: T
             <RefreshCwIcon className={`size-3.5 ${loading ? "animate-spin" : ""}`} />
             {t("Refresh")}
           </Button>
-          <Button
-            size="sm"
-            className="h-8"
-            onClick={() => {
-              setFormError(null);
-              setEditor(emptyEditor("request"));
-            }}
-          >
-            <PlusIcon className="size-3.5" />
-            {t("New hook")}
-          </Button>
+          {canOperate && (
+            <Button
+              size="sm"
+              className="h-8"
+              onClick={() => {
+                setFormError(null);
+                setEditor(emptyEditor("request"));
+              }}
+            >
+              <PlusIcon className="size-3.5" />
+              {t("New hook")}
+            </Button>
+          )}
         </div>
       </div>
 
@@ -493,7 +490,7 @@ export function TamperHooksPanel({ recentExchanges = [] }: { recentExchanges?: T
                   <TableCell>
                     <Switch
                       checked={hook.enabled}
-                      disabled={togglingId === hook.id}
+                      disabled={togglingId === hook.id || !canOperate}
                       aria-label={t("Toggle hook {name}", { name: hook.name })}
                       onCheckedChange={(checked) => void handleToggle(hook, checked)}
                     />
@@ -530,15 +527,17 @@ export function TamperHooksPanel({ recentExchanges = [] }: { recentExchanges?: T
                   </TableCell>
                   <TableCell className="text-right">
                     <div className="flex items-center justify-end gap-1">
-                      <Button
-                        variant="ghost"
-                        size="icon-xs"
-                        title={t("Dry-run")}
-                        aria-label={t("Dry-run")}
-                        onClick={() => openDryRunForHook(hook)}
-                      >
-                        <PlayIcon className="size-3.5" />
-                      </Button>
+                      {canOperate && (
+                        <Button
+                          variant="ghost"
+                          size="icon-xs"
+                          title={t("Dry-run")}
+                          aria-label={t("Dry-run")}
+                          onClick={() => openDryRunForHook(hook)}
+                        >
+                          <PlayIcon className="size-3.5" />
+                        </Button>
+                      )}
                       <Button
                         variant="ghost"
                         size="icon-xs"
@@ -548,28 +547,32 @@ export function TamperHooksPanel({ recentExchanges = [] }: { recentExchanges?: T
                       >
                         <HistoryIcon className="size-3.5" />
                       </Button>
-                      <Button
-                        variant="ghost"
-                        size="icon-xs"
-                        title={t("Edit")}
-                        aria-label={t("Edit")}
-                        onClick={() => {
-                          setFormError(null);
-                          setEditor(editorFromHook(hook));
-                        }}
-                      >
-                        <PencilIcon className="size-3.5" />
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="icon-xs"
-                        title={t("Delete")}
-                        aria-label={t("Delete")}
-                        className="text-destructive hover:text-destructive"
-                        onClick={() => setDeleteTarget(hook)}
-                      >
-                        <Trash2Icon className="size-3.5" />
-                      </Button>
+                      {canOperate && (
+                        <Button
+                          variant="ghost"
+                          size="icon-xs"
+                          title={t("Edit")}
+                          aria-label={t("Edit")}
+                          onClick={() => {
+                            setFormError(null);
+                            setEditor(editorFromHook(hook));
+                          }}
+                        >
+                          <PencilIcon className="size-3.5" />
+                        </Button>
+                      )}
+                      {canOperate && (
+                        <Button
+                          variant="ghost"
+                          size="icon-xs"
+                          title={t("Delete")}
+                          aria-label={t("Delete")}
+                          className="text-destructive hover:text-destructive"
+                          onClick={() => setDeleteTarget(hook)}
+                        >
+                          <Trash2Icon className="size-3.5" />
+                        </Button>
+                      )}
                     </div>
                   </TableCell>
                 </TableRow>
@@ -838,33 +841,12 @@ export function TamperHooksPanel({ recentExchanges = [] }: { recentExchanges?: T
         </DialogContent>
       </Dialog>
 
-      {/* Delete confirmation */}
-      <AlertDialog open={deleteTarget !== null} onOpenChange={(open) => !open && setDeleteTarget(null)}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>{t("Delete tampering hook?")}</AlertDialogTitle>
-            <AlertDialogDescription>
-              {t('This permanently removes "{name}" and its stored version history.', {
-                name: deleteTarget?.name ?? "",
-              })}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel disabled={deleting}>{t("Cancel")}</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={(e) => {
-                e.preventDefault();
-                void handleDelete();
-              }}
-              disabled={deleting}
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-            >
-              {deleting && <Loader2Icon className="size-3.5 animate-spin" />}
-              {t("Delete")}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      <DeleteHookDialog
+        target={deleteTarget}
+        deleting={deleting}
+        onClose={() => setDeleteTarget(null)}
+        onConfirm={() => void handleDelete()}
+      />
 
       {/* Versions Sheet */}
       <Sheet open={versionsHook !== null} onOpenChange={(open) => !open && setVersionsHook(null)}>
@@ -916,7 +898,7 @@ export function TamperHooksPanel({ recentExchanges = [] }: { recentExchanges?: T
                         <Code2Icon className="size-3.5" />
                         {isExpanded ? t("Hide source") : t("View source")}
                       </Button>
-                      {!isCurrent && (
+                      {canOperate && !isCurrent && (
                         <Button
                           variant="outline"
                           size="sm"
@@ -941,35 +923,13 @@ export function TamperHooksPanel({ recentExchanges = [] }: { recentExchanges?: T
         </SheetContent>
       </Sheet>
 
-      {/* Rollback confirmation */}
-      <AlertDialog open={rollbackTarget !== null} onOpenChange={(open) => !open && setRollbackTarget(null)}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>
-              {t("Rollback hook to v{version}?", { version: rollbackTarget?.version ?? 0 })}
-            </AlertDialogTitle>
-            <AlertDialogDescription>
-              {t('This restores the matchers and source from v{version} as a new version on "{name}".', {
-                version: rollbackTarget?.version ?? 0,
-                name: versionsHook?.name ?? "",
-              })}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel disabled={rollingBack}>{t("Cancel")}</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={(e) => {
-                e.preventDefault();
-                void handleRollback();
-              }}
-              disabled={rollingBack}
-            >
-              {rollingBack && <Loader2Icon className="size-3.5 animate-spin" />}
-              {t("Rollback")}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      <RollbackHookDialog
+        target={rollbackTarget}
+        hookName={versionsHook?.name ?? ""}
+        rollingBack={rollingBack}
+        onClose={() => setRollbackTarget(null)}
+        onConfirm={() => void handleRollback()}
+      />
 
       {/* Dry-run Sheet */}
       <Sheet open={dryRunTarget !== null} onOpenChange={(open) => !open && setDryRunTarget(null)}>

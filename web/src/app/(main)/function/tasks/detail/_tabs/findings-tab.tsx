@@ -11,13 +11,15 @@ import { StatusBadge } from "@/components/status-badge";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger } from "@/components/ui/select";
+import { useCan } from "@/hooks/use-session";
 import { intlLocale, t } from "@/i18n";
 import { api } from "@/lib/api";
+import { errorText } from "@/lib/api-errors";
+import { setVisibleInterval } from "@/lib/polling";
 import { useStoredSortPreference } from "@/lib/sort-preference";
 import { statusMeta } from "@/lib/status";
 import type { Finding, FindingStatus } from "@/lib/types";
 import { cn } from "@/lib/utils";
-import { setVisibleInterval } from "@/lib/polling";
 
 type FindingSortField = "time";
 
@@ -52,6 +54,7 @@ function Row({
   onStatus: (f: Finding, next: FindingStatus) => void;
 }) {
   const [open, setOpen] = React.useState(false);
+  const canReview = useCan("review");
   return (
     <div className="border-b last:border-b-0">
       <div className="flex w-full items-center gap-3 px-4 py-3 text-sm hover:bg-accent/40">
@@ -91,7 +94,7 @@ function Row({
             {f.assets.length > 2 && <span className="text-xs text-muted-foreground">+{f.assets.length - 2}</span>}
           </div>
         )}
-        {f.finding_id && !f.inherited ? (
+        {f.finding_id && !f.inherited && canReview ? (
           <Select value={f.status} onValueChange={(v) => onStatus(f, v as FindingStatus)}>
             <SelectTrigger size="sm" className="h-7 w-28 shrink-0 border-none px-1 shadow-none focus-visible:ring-0">
               <StatusBadge domain="finding" value={f.status} dot />
@@ -174,10 +177,10 @@ export function FindingsTab({ taskId }: { taskId: string }) {
     setFindings((cur) => cur.map((x) => (x.id === f.id ? { ...x, status: next } : x)));
     try {
       await api.setFindingStatus(f.finding_id, next);
-      toast.success(t("Marked as \"{status}\"", { status: statusMeta("finding", next).label }));
+      toast.success(t('Marked as "{status}"', { status: statusMeta("finding", next).label }));
     } catch (e) {
       setFindings((cur) => cur.map((x) => (x.id === f.id ? { ...x, status: prev } : x)));
-      toast.error(t("Update failed: {error}", { error: (e as Error).message }));
+      toast.error(t("Update failed: {error}", { error: errorText(e) }));
     }
   }, []);
 
@@ -221,7 +224,9 @@ export function FindingsTab({ taskId }: { taskId: string }) {
           <Row key={f.id} f={f} contextTaskId={taskId} onStatus={onStatus} />
         ))}
         {items.length === 0 && (
-          <p className="px-4 py-8 text-center text-sm text-muted-foreground">{t("No confirmed findings yet for this task or its directly linked tasks.")}</p>
+          <p className="px-4 py-8 text-center text-sm text-muted-foreground">
+            {t("No confirmed findings yet for this task or its directly linked tasks.")}
+          </p>
         )}
       </CardContent>
     </Card>

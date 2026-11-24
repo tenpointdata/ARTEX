@@ -22,10 +22,10 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 
+import { ApprovalExecutionFocus, useApprovalFocus, useApprovalHistory } from "@/components/approval-execution-focus";
 import { MentionTextarea } from "@/components/mention-textarea";
 import { SideQuestionButton, SideQuestionWorkspace } from "@/components/side-question-workspace";
 import { TodoPopover } from "@/components/todo-popover";
-import { ApprovalExecutionFocus, useApprovalFocus, useApprovalHistory } from "@/components/approval-execution-focus";
 import { Transcript } from "@/components/transcript";
 import {
   AlertDialog,
@@ -52,15 +52,24 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Spinner } from "@/components/ui/spinner";
+import { useCan } from "@/hooks/use-session";
 import { useSideQuestions } from "@/hooks/use-side-questions";
+import { intlLocale, t } from "@/i18n";
 import { mergeActivities } from "@/lib/activity-merge";
 import { api } from "@/lib/api";
+import { errorText } from "@/lib/api-errors";
 import { shouldSubmitOnKey, useChatSendMode } from "@/lib/chat-send-mode";
 import { getLocalStorageValue, removeLocalStorageValue, setLocalStorageValue } from "@/lib/local-storage.client";
 import { isBtwCommand } from "@/lib/side-questions";
 import type { Activity, Agent, ChatAttachment, Conversation, LLMProfile } from "@/lib/types";
 import { cn } from "@/lib/utils";
-import { intlLocale, t } from "@/i18n";
+
+import {
+  type AgentGroup,
+  AgentGroupHeader,
+  ConversationItem,
+  conversationIsPinned,
+} from "./_components/conversation-item";
 
 // fmtBytes renders a human file size for attachment chips (mirrors transcript.tsx).
 function fmtBytes(n: number): string {
@@ -100,19 +109,6 @@ const COLLAPSED_AGENTS_KEY = "artex.chat.collapsed-agents";
 // sidebar links to a bare /chat, so without this, coming back from another page
 // always lands on the empty draft view. A ?c= in the URL takes precedence.
 const LAST_CONVERSATION_KEY = "artex.chat.last-conversation";
-
-function conversationIsPinned(conversation: Conversation): boolean {
-  return conversation.pinned ?? Boolean(conversation.pinned_at);
-}
-
-// AgentGroup is one collapsible section of the left rail: all unpinned
-// conversations of a single agent, newest activity first.
-interface AgentGroup {
-  key: string;
-  name: string;
-  conversations: Conversation[];
-  runningCount: number;
-}
 
 // groupByAgent buckets conversations by agent, preserving the incoming order
 // both inside a group and across groups. The server already sorts by updated_at
@@ -406,7 +402,7 @@ function DraftChat({
       await api.sendConversationMessage(c.id, msg);
       onStarted(c);
     } catch (e) {
-      toast.error(t("Send failed: {error}", { error: (e as Error).message }));
+      toast.error(t("Send failed: {error}", { error: errorText(e) }));
       setSending(false);
     }
   }
@@ -424,7 +420,7 @@ function DraftChat({
       const r = await api.chatUpload("session", `conv-${c.id}`, files);
       onStarted(c, { input, attachments: r.attachments });
     } catch (e) {
-      toast.error(t("Upload failed: {error}", { error: (e as Error).message }));
+      toast.error(t("Upload failed: {error}", { error: errorText(e) }));
       setUploading(false);
     }
   }
@@ -507,6 +503,7 @@ function ChatView({
   onTitleMaybeChanged: () => void;
   onConvUpdated: () => void;
 }) {
+  const canOperate = useCan("operate"); // messages, send, stop and profile switching all need operate
   const approvalFocus = useApprovalFocus({ conversationId: conv.id });
   const [messages, setMessages] = React.useState<Activity[]>([]);
   const [running, setRunning] = React.useState(false);
@@ -531,7 +528,7 @@ function ChatView({
       await api.updateConversationProfile(conv.id, id);
       onConvUpdated();
     } catch (e) {
-      toast.error(t("Failed to switch LLM: {error}", { error: (e as Error).message }));
+      toast.error(t("Failed to switch LLM: {error}", { error: errorText(e) }));
     }
   }
 
@@ -560,6 +557,10 @@ function ChatView({
     setMessages([]);
     setHistoryLoaded(false);
     setRunning(false);
+    if (!canOperate) {
+      setHistoryLoaded(true); // GET messages needs operate: skip rather than show a 403
+      return;
+    }
     let live = true;
     api
       .conversationHistory(conv.id, 0, HISTORY_PAGE)
@@ -581,7 +582,7 @@ function ChatView({
     return () => {
       live = false;
     };
-  }, [conv.id]);
+  }, [conv.id, canOperate]);
 
   // A trigger or another tab may start a turn while this conversation is open.
   // A false list snapshot must not stop the tail before its final messages load.
@@ -591,7 +592,7 @@ function ChatView({
 
   // poll while a turn is running: pull new steps after the cursor.
   React.useEffect(() => {
-    if (!running) return;
+    if (!running || !canOperate) return;
     let live = true;
     let timer: ReturnType<typeof setTimeout>;
     const tick = async () => {
@@ -618,16 +619,25 @@ function ChatView({
       live = false;
       clearTimeout(timer);
     };
-  }, [running, conv.id, onTitleMaybeChanged]);
+  }, [running, canOperate, conv.id, onTitleMaybeChanged]);
 
-  const loadFocusPage = React.useCallback((before: number) => api.conversationHistory(conv.id, before, HISTORY_PAGE), [conv.id]);
+  const loadFocusPage = React.useCallback(
+    (before: number) => api.conversationHistory(conv.id, before, HISTORY_PAGE),
+    [conv.id],
+  );
   const mergeFocusPage = React.useCallback((page: { items: Activity[]; hasMore: boolean }) => {
     setMessages((prev) => mergeActivities(page.items, prev));
     earliestRef.current = page.items[0]?.seq ?? earliestRef.current;
     hasMoreRef.current = page.hasMore;
     setHasMore(page.hasMore);
   }, []);
-  const focusHistory = useApprovalHistory(approvalFocus.state?.source, historyLoaded, messages, loadFocusPage, mergeFocusPage);
+  const focusHistory = useApprovalHistory(
+    approvalFocus.state?.source,
+    historyLoaded,
+    messages,
+    loadFocusPage,
+    mergeFocusPage,
+  );
 
   // ---- transcript auto-scroll (open → bottom; stick to bottom unless scrolled up) ----
   const contentRef = React.useRef<HTMLDivElement | null>(null);
@@ -729,7 +739,7 @@ function ChatView({
       const r = await api.chatUpload("session", `conv-${conv.id}`, files);
       setAttachments((prev) => [...prev, ...r.attachments]);
     } catch (e) {
-      toast.error(t("Upload failed: {error}", { error: (e as Error).message }));
+      toast.error(t("Upload failed: {error}", { error: errorText(e) }));
     } finally {
       setUploading(false);
     }
@@ -749,7 +759,7 @@ function ChatView({
       // fetch avoids racing a separate post-send request against the poller.
       setRunning(true);
     } catch (e) {
-      toast.error(t("Send failed: {error}", { error: (e as Error).message }));
+      toast.error(t("Send failed: {error}", { error: errorText(e) }));
       setInput(msg); // restore so the user doesn't lose their text
       setAttachments(atts); // and their attachments
     } finally {
@@ -766,7 +776,7 @@ function ChatView({
     try {
       await api.stopConversation(conv.id);
     } catch (e) {
-      toast.error(t("Stop failed: {error}", { error: (e as Error).message }));
+      toast.error(t("Stop failed: {error}", { error: errorText(e) }));
     } finally {
       setStopping(false);
     }
@@ -814,258 +824,65 @@ function ChatView({
         <div className="min-w-0 max-w-full px-4 py-3" ref={contentRef}>
           {messages.length === 0 && !running ? (
             <div className="text-muted-foreground py-10 text-center text-sm">
-              {t('Start a conversation with "{name}"', { name: agent?.name ?? conv.agent_key })}
+              {canOperate
+                ? t('Start a conversation with "{name}"', { name: agent?.name ?? conv.agent_key })
+                : t("Conversation messages are only available to operators.")}
             </div>
           ) : (
             <>
               {hasMore && (
-                <div className="text-muted-foreground/70 pb-2 text-center text-[11px]">{t("Scroll up to load earlier messages…")}</div>
+                <div className="text-muted-foreground/70 pb-2 text-center text-[11px]">
+                  {t("Scroll up to load earlier messages…")}
+                </div>
               )}
-              <Transcript activity={messages} live={running} chat fetchDetail={fetchDetail} focusedSeq={focusHistory.ready ? approvalFocus.state?.source?.seq : undefined} />
+              <Transcript
+                activity={messages}
+                live={running}
+                chat
+                fetchDetail={fetchDetail}
+                focusedSeq={focusHistory.ready ? approvalFocus.state?.source?.seq : undefined}
+              />
             </>
           )}
         </div>
       </ScrollArea>
 
-      <Composer
-        value={input}
-        onChange={setInput}
-        onSend={send}
-        disabled={running || sending}
-        allowBtw
-        placeholder={
-          running
-            ? t("Agent is replying; type /btw to ask a side question…")
-            : t("Type a message, @ to reference records, Enter to send")
-        }
-        running={running}
-        onStop={stop}
-        stopDisabled={stopping}
-        attachments={attachments}
-        onPickFiles={pickFiles}
-        onRemoveAttachment={(path) => setAttachments((p) => p.filter((x) => x.path !== path))}
-        uploading={uploading}
-      />
-      <LLMProfileRow
-        profiles={profiles}
-        selected={currentProfileId}
-        onChange={changeProfile}
-        disabled={running || sending}
-        rightSlot={<TodoPopover seq={latestTodoSeq} fetchDetail={fetchDetail} />}
-      />
+      {canOperate && (
+        <>
+          <Composer
+            value={input}
+            onChange={setInput}
+            onSend={send}
+            disabled={running || sending}
+            allowBtw
+            placeholder={
+              running
+                ? t("Agent is replying; type /btw to ask a side question…")
+                : t("Type a message, @ to reference records, Enter to send")
+            }
+            running={running}
+            onStop={stop}
+            stopDisabled={stopping}
+            attachments={attachments}
+            onPickFiles={pickFiles}
+            onRemoveAttachment={(path) => setAttachments((p) => p.filter((x) => x.path !== path))}
+            uploading={uploading}
+          />
+          <LLMProfileRow
+            profiles={profiles}
+            selected={currentProfileId}
+            onChange={changeProfile}
+            disabled={running || sending}
+            rightSlot={<TodoPopover seq={latestTodoSeq} fetchDetail={fetchDetail} />}
+          />
+        </>
+      )}
     </SideQuestionWorkspace>
   );
 }
 
-// ConversationItem is one row in the left rail: title, agent subtitle, inline
-// rename, pin marker, and a compact action menu. Rows nested under an agent
-// group drop the agent subtitle (showAgent=false) — the header already says it.
-const ConversationItem = React.memo(function ConversationItem({
-  conv,
-  agent,
-  showAgent = true,
-  active,
-  renaming,
-  renameText,
-  onSelect,
-  onStartRename,
-  onRenameText,
-  onCommitRename,
-  onCancelRename,
-  onTogglePinned,
-  onDelete,
-  selectionMode,
-  selectedForDelete,
-  onSelectedForDeleteChange,
-}: {
-  conv: Conversation;
-  agent?: Agent;
-  showAgent?: boolean;
-  active: boolean;
-  renaming: boolean;
-  renameText: string;
-  onSelect: (id: number) => void;
-  onStartRename: (conversation: Conversation) => void;
-  onRenameText: (v: string) => void;
-  onCommitRename: (id: number, title: string) => void;
-  onCancelRename: () => void;
-  onTogglePinned: (conversation: Conversation) => void;
-  onDelete: (id: number) => void;
-  selectionMode: boolean;
-  selectedForDelete: boolean;
-  onSelectedForDeleteChange: (id: number, checked: boolean) => void;
-}) {
-  const [deleteOpen, setDeleteOpen] = React.useState(false);
-  const renameInputRef = React.useRef<HTMLInputElement>(null);
-  const cancelRenameRef = React.useRef(false);
-  const pinned = conversationIsPinned(conv);
-
-  React.useEffect(() => {
-    if (!renaming) return;
-    cancelRenameRef.current = false;
-    renameInputRef.current?.focus();
-    renameInputRef.current?.select();
-  }, [renaming]);
-
-  return (
-    <div
-      className={cn(
-        "group flex min-w-0 items-center gap-1 rounded-md pr-1 transition-colors",
-        active ? "bg-accent text-accent-foreground" : "hover:bg-accent/50",
-      )}
-    >
-      {selectionMode && (
-        <Checkbox
-          checked={selectedForDelete}
-          onCheckedChange={(checked) => onSelectedForDeleteChange(conv.id, checked === true)}
-          aria-label={t('Select conversation "{title}"', { title: conv.title || t("New conversation") })}
-          className="ml-1 shrink-0"
-        />
-      )}
-      {renaming ? (
-        <input
-          ref={renameInputRef}
-          value={renameText}
-          onChange={(e) => onRenameText(e.target.value)}
-          onBlur={() => {
-            if (!cancelRenameRef.current) onCommitRename(conv.id, renameText);
-          }}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") onCommitRename(conv.id, renameText);
-            if (e.key === "Escape") {
-              e.preventDefault();
-              cancelRenameRef.current = true;
-              onCancelRename();
-            }
-          }}
-          className="border-input bg-background min-w-0 flex-1 rounded-md border px-2 py-1 text-sm"
-        />
-      ) : (
-        <button
-          type="button"
-          onClick={() => onSelect(conv.id)}
-          onDoubleClick={() => onStartRename(conv)}
-          title={t("Double-click to rename")}
-          className="min-w-0 flex-1 rounded-md px-2 py-1.5 text-left"
-        >
-          <div className="flex min-w-0 items-center gap-1.5">
-            {pinned && <PinIcon className="text-primary size-3 shrink-0" aria-label={t("Pinned")} />}
-            <div className="truncate text-sm">{conv.title || t("New conversation")}</div>
-            {conv.running ? (
-              <Badge variant="secondary" className="shrink-0 gap-1" title={t("Agent is running")}>
-                <Spinner className="size-3" aria-hidden="true" />
-                {t("Running")}
-              </Badge>
-            ) : null}
-          </div>
-          <div className="text-muted-foreground flex min-w-0 items-center gap-1 text-[11px]">
-            {showAgent && (
-              <>
-                <Bot className="size-3 shrink-0" />
-                <span className="min-w-0 truncate">{agent?.name ?? conv.agent_key}</span>
-                <span className="shrink-0">·</span>
-              </>
-            )}
-            <span className="shrink-0">
-              {new Date(conv.created_at).toLocaleDateString(intlLocale, {
-                month: "numeric",
-                day: "numeric",
-                hour: "2-digit",
-                minute: "2-digit",
-              })}
-            </span>
-            <span className="shrink-0 opacity-60">#{conv.id}</span>
-          </div>
-        </button>
-      )}
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <Button
-            variant="ghost"
-            size="icon-sm"
-            className="text-muted-foreground shrink-0"
-            aria-label={t('Manage conversation "{title}"', { title: conv.title || t("New conversation") })}
-          >
-            <MoreHorizontalIcon />
-          </Button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="end">
-          <DropdownMenuGroup>
-            <DropdownMenuItem onSelect={() => onStartRename(conv)}>
-              <PencilIcon />
-              {t("Rename")}
-            </DropdownMenuItem>
-            <DropdownMenuItem onSelect={() => onTogglePinned(conv)}>
-              {pinned ? <PinOffIcon /> : <PinIcon />}
-              {pinned ? t("Unpin") : t("Pin")}
-            </DropdownMenuItem>
-          </DropdownMenuGroup>
-          <DropdownMenuSeparator />
-          <DropdownMenuGroup>
-            <DropdownMenuItem variant="destructive" onSelect={() => setDeleteOpen(true)}>
-              <Trash2Icon />
-              {t("Delete")}
-            </DropdownMenuItem>
-          </DropdownMenuGroup>
-        </DropdownMenuContent>
-      </DropdownMenu>
-      <AlertDialog open={deleteOpen} onOpenChange={setDeleteOpen}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>
-              {t('Delete conversation "{title}"?', { title: conv.title || t("New conversation") })}
-            </AlertDialogTitle>
-            <AlertDialogDescription>{t("This action cannot be undone.")}</AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>{t("Cancel")}</AlertDialogCancel>
-            <AlertDialogAction onClick={() => onDelete(conv.id)}>{t("Delete")}</AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-    </div>
-  );
-});
-
-// AgentGroupHeader is the sticky, clickable divider above one agent's rows:
-// collapse chevron, agent name, a running marker, and the row count.
-function AgentGroupHeader({
-  group,
-  collapsed,
-  hasActive,
-  onToggle,
-}: {
-  group: AgentGroup;
-  collapsed: boolean;
-  hasActive: boolean;
-  onToggle: (key: string) => void;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={() => onToggle(group.key)}
-      aria-expanded={!collapsed}
-      title={collapsed ? t('Expand "{name}"', { name: group.name }) : t('Collapse "{name}"', { name: group.name })}
-      className={cn(
-        "sticky top-0 z-10 flex min-w-0 items-center gap-1.5 rounded-md bg-card px-1.5 py-1 text-left font-medium text-[11px] transition-colors hover:bg-accent/50",
-        collapsed && hasActive ? "text-foreground" : "text-muted-foreground",
-      )}
-    >
-      <ChevronRightIcon className={cn("size-3 shrink-0 transition-transform", !collapsed && "rotate-90")} />
-      <Bot className="size-3 shrink-0" />
-      <span className="min-w-0 flex-1 truncate">{group.name}</span>
-      {collapsed && hasActive && (
-        <span className="size-1.5 shrink-0 rounded-full bg-primary" title={t("The current conversation is in this group")} />
-      )}
-      {group.runningCount > 0 && (
-        <Spinner className="size-3 shrink-0" aria-label={t("{count} conversations running", { count: group.runningCount })} />
-      )}
-      <span className="shrink-0 tabular-nums opacity-60">{group.conversations.length}</span>
-    </button>
-  );
-}
-
 export default function ChatPage() {
+  const canOperate = useCan("operate");
   const [agents, setAgents] = React.useState<Agent[]>([]);
   const [profiles, setProfiles] = React.useState<LLMProfile[]>([]);
   const [convs, setConvs] = React.useState<Conversation[]>([]);
@@ -1073,15 +890,18 @@ export default function ChatPage() {
   const [selectedId, setSelectedId] = React.useState<number | null>(null);
   const [sourceRequested, setSourceRequested] = React.useState(false);
   const [convsLoaded, setConvsLoaded] = React.useState(false);
-  const selectConversation = React.useCallback((id: number | null) => {
-    if (id !== selectedId) {
-      const url = new URL(window.location.href);
-      url.searchParams.delete("approval");
-      setSourceRequested(false);
-      window.history.replaceState(null, "", url);
-    }
-    setSelectedId(id);
-  }, [selectedId]);
+  const selectConversation = React.useCallback(
+    (id: number | null) => {
+      if (id !== selectedId) {
+        const url = new URL(window.location.href);
+        url.searchParams.delete("approval");
+        setSourceRequested(false);
+        window.history.replaceState(null, "", url);
+      }
+      setSelectedId(id);
+    },
+    [selectedId],
+  );
 
   const [renamingId, setRenamingId] = React.useState<number | null>(null);
   const [renameText, setRenameText] = React.useState("");
@@ -1108,7 +928,10 @@ export default function ChatPage() {
     const seq = ++conversationListSeq.current;
     try {
       const items = await api.conversations();
-      if (seq === conversationListSeq.current) { setConvs(items); setConvsLoaded(true); }
+      if (seq === conversationListSeq.current) {
+        setConvs(items);
+        setConvsLoaded(true);
+      }
     } catch {
       // Preserve the selected transcript and list on a transient poll failure.
     }
@@ -1247,7 +1070,9 @@ export default function ChatPage() {
       .sort((a, b) => a.name.localeCompare(b.name, intlLocale));
   }, [convs, chatAgents, agentByKey, agentFilter]);
   const conversationCountLabel =
-    agentFilter === null ? t("{count} total", { count: convs.length }) : `${filteredConversations.length} / ${convs.length}`;
+    agentFilter === null
+      ? t("{count} total", { count: convs.length })
+      : `${filteredConversations.length} / ${convs.length}`;
 
   function changeAgentFilter(key: string | null) {
     setAgentFilter(key);
@@ -1298,7 +1123,7 @@ export default function ChatPage() {
         });
         void reloadConvs();
       } catch (e) {
-        toast.error(t("Delete failed: {error}", { error: (e as Error).message }));
+        toast.error(t("Delete failed: {error}", { error: errorText(e) }));
       }
     },
     [reloadConvs],
@@ -1343,7 +1168,7 @@ export default function ChatPage() {
       if (failed.length === 0) setSelectionMode(false);
       void reloadConvs();
     } catch (error) {
-      toast.error(t("Bulk delete failed: {error}", { error: (error as Error).message }));
+      toast.error(t("Bulk delete failed: {error}", { error: errorText(error) }));
       void reloadConvs();
     } finally {
       setBulkDeleting(false);
@@ -1357,7 +1182,7 @@ export default function ChatPage() {
         await api.pinConversation(conversation.id, !pinned);
         void reloadConvs();
       } catch (e) {
-        const error = (e as Error).message;
+        const error = errorText(e);
         toast.error(pinned ? t("Failed to unpin: {error}", { error }) : t("Failed to pin: {error}", { error }));
       }
     },
@@ -1377,7 +1202,7 @@ export default function ChatPage() {
         await api.renameConversation(id, title);
         void reloadConvs();
       } catch (e) {
-        toast.error(t("Rename failed: {error}", { error: (e as Error).message }));
+        toast.error(t("Rename failed: {error}", { error: errorText(e) }));
       }
     },
     [reloadConvs],
@@ -1393,9 +1218,11 @@ export default function ChatPage() {
         {/* left: conversation list */}
         <div className="bg-card flex flex-col overflow-hidden rounded-lg border">
           <div className="flex flex-col gap-2 border-b p-2">
-            <Button size="sm" className="w-full" onClick={() => selectConversation(null)}>
-              <PlusIcon /> {t("New conversation")}
-            </Button>
+            {canOperate && (
+              <Button size="sm" className="w-full" onClick={() => selectConversation(null)}>
+                <PlusIcon /> {t("New conversation")}
+              </Button>
+            )}
             <Select
               value={agentFilter === null ? "all" : `agent:${agentFilter}`}
               onValueChange={(value) => changeAgentFilter(value === "all" ? null : value.slice(6))}
@@ -1417,7 +1244,7 @@ export default function ChatPage() {
               </SelectContent>
             </Select>
             {convs.length > 0 &&
-              (selectionMode ? (
+              (selectionMode && canOperate ? (
                 <div className="flex items-center gap-2 px-1">
                   <Checkbox
                     checked={conversationHeaderChecked}
@@ -1450,16 +1277,18 @@ export default function ChatPage() {
                   <span className="text-muted-foreground min-w-0 flex-1 text-xs tabular-nums">
                     {conversationCountLabel}
                   </span>
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    className="text-muted-foreground"
-                    onClick={() => setSelectionMode(true)}
-                    disabled={filteredConversations.length === 0}
-                  >
-                    <ListChecksIcon data-icon="inline-start" />
-                    {t("Select")}
-                  </Button>
+                  {canOperate && (
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="text-muted-foreground"
+                      onClick={() => setSelectionMode(true)}
+                      disabled={filteredConversations.length === 0}
+                    >
+                      <ListChecksIcon data-icon="inline-start" />
+                      {t("Select")}
+                    </Button>
+                  )}
                 </div>
               ))}
           </div>
@@ -1560,6 +1389,10 @@ export default function ChatPage() {
             <div role="status" className="p-6 text-sm text-muted-foreground">
               {convsLoaded ? t("The conversation has been deleted") : t("Loading the conversation…")}
             </div>
+          ) : !canOperate ? (
+            <div role="status" className="p-6 text-sm text-muted-foreground">
+              {t("Select a conversation to view it. Starting and reading conversations requires the operator role.")}
+            </div>
           ) : (
             <DraftChat
               agents={chatAgents}
@@ -1590,7 +1423,9 @@ export default function ChatPage() {
               {t("Delete {count} selected conversations?", { count: selectedConversationCount })}
             </AlertDialogTitle>
             <AlertDialogDescription>
-              {t("Conversation messages and execution records will be deleted with them. This action cannot be undone.")}
+              {t(
+                "Conversation messages and execution records will be deleted with them. This action cannot be undone.",
+              )}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

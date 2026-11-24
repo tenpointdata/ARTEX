@@ -2936,5 +2936,7 @@
   "Reports": "报告",
   "Engagements for {company}": "{company} 的测试项目",
   "Pick a company in the sidebar to see its engagements.": "在侧边栏选择一个公司以查看其测试项目。",
-  "No engagements for this company yet.": "该公司暂无测试项目。"
+  "No engagements for this company yet.": "该公司暂无测试项目。",
+  "Conversation messages are only available to operators.": "对话消息仅对操作员可见。",
+  "Select a conversation to view it. Starting and reading conversations requires the operator role.": "选择一个对话进行查看。发起和阅读对话需要操作员角色。"
 }

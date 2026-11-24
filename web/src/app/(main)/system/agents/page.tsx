@@ -39,7 +39,9 @@ import {
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { AgentEditor } from "@/components/agent-editor";
 import { t } from "@/i18n";
+import { useCan } from "@/hooks/use-session";
 import { api } from "@/lib/api";
+import { errorText } from "@/lib/api-errors";
 import type { Agent } from "@/lib/types";
 
 // AgentGridCard is one clickable tile opening the agent's editor drawer. Custom
@@ -53,13 +55,14 @@ function AgentGridCard({
   onOpen: () => void;
   onDeleted: () => void;
 }) {
+  const canAdmin = useCan("admin");
   async function del() {
     try {
       await api.deleteAgent(agent.key);
       toast.success(t('Agent "{name}" deleted', { name: agent.name }));
       onDeleted();
     } catch (e) {
-      toast.error(t("Delete failed: {error}", { error: (e as Error).message }));
+      toast.error(t("Delete failed: {error}", { error: errorText(e) }));
     }
   }
   return (
@@ -93,7 +96,7 @@ function AgentGridCard({
           <span className="rounded border px-1.5 py-0.5">{t("Tools {count}", { count: agent.tool_count ?? 0 })}</span>
         </div>
       </button>
-      {!agent.builtin && (
+      {canAdmin && !agent.builtin && (
         <AlertDialog>
           <AlertDialogTrigger asChild>
             <Button
@@ -141,7 +144,7 @@ function CreateAgentDialog({ onCreated }: { onCreated: (key: string) => void }) 
       setDescription("");
       onCreated(a.key);
     } catch (e) {
-      toast.error(t("Create failed: {error}", { error: (e as Error).message }));
+      toast.error(t("Create failed: {error}", { error: errorText(e) }));
     } finally {
       setBusy(false);
     }
@@ -223,6 +226,7 @@ export default function AgentsPage() {
     reload();
   }, [reload]);
 
+  const canAdmin = useCan("admin");
   const editing = agents.find((a) => a.key === editKey) ?? null;
 
   return (
@@ -234,12 +238,14 @@ export default function AgentsPage() {
             {t("Prompts/configs for built-in agents, plus creating and managing custom conversational agents")}
           </p>
         </div>
-        <CreateAgentDialog
-          onCreated={(key) => {
-            reload();
-            setEditKey(key);
-          }}
-        />
+        {canAdmin && (
+          <CreateAgentDialog
+            onCreated={(key) => {
+              reload();
+              setEditKey(key);
+            }}
+          />
+        )}
       </div>
 
       <Card>

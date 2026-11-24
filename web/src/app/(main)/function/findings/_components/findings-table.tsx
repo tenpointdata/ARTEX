@@ -14,6 +14,7 @@ import {
   Trash2Icon,
 } from "lucide-react";
 
+import { useCan } from "@/hooks/use-session";
 import { CopyButton } from "@/components/copy-button";
 import { Markdown } from "@/components/markdown";
 import { StatusBadge } from "@/components/status-badge";
@@ -211,6 +212,8 @@ export function FindingsTable({
   onDelete,
   selectAllLabel = t("Select all on this page"),
 }: FindingsTableProps) {
+  const canReview = useCan("review"); // status, report stage and edits (PATCH/bulk finding triage)
+  const canOperate = useCan("operate"); // retest, deepen, delete
   const selectableIds = items.map((finding) => finding.finding_id).filter((id): id is string => Boolean(id));
   const selectedCount = selectableIds.filter((id) => selectedIds.has(id)).length;
   let headerChecked: boolean | "indeterminate" = false;
@@ -321,7 +324,7 @@ export function FindingsTable({
                   )}
                 </TableCell>
                 <TableCell onClick={(e) => e.stopPropagation()}>
-                  {f.finding_id ? (
+                  {f.finding_id && canReview ? (
                     <Select value={f.status} onValueChange={(v) => onStatusChange(f, v as FindingStatus)}>
                       <SelectTrigger size="sm" className="h-7 w-full border-none px-1 shadow-none focus-visible:ring-0">
                         <StatusBadge domain="finding" value={f.status} dot />
@@ -339,7 +342,7 @@ export function FindingsTable({
                   )}
                 </TableCell>
                 <TableCell onClick={(e) => e.stopPropagation()}>
-                  {f.finding_id ? (
+                  {f.finding_id && canReview ? (
                     <Select
                       value={f.report_state ?? "none"}
                       onValueChange={(v) => onReportStateChange(f, v as FindingReportState)}
@@ -385,7 +388,7 @@ export function FindingsTable({
                         </Link>
                       </Button>
                     ) : null}
-                    {!retest && f.finding_id && !f.inherited ? (
+                    {canOperate && !retest && f.finding_id && !f.inherited ? (
                       <Button
                         size="sm"
                         variant="ghost"
@@ -396,13 +399,13 @@ export function FindingsTable({
                         {t("Retest")}
                       </Button>
                     ) : null}
-                    {f.finding_id && f.task_id && (
+                    {canOperate && f.finding_id && f.task_id && (
                       <Button size="sm" variant="ghost" onClick={() => onDeepen(f)}>
                         <FlaskConicalIcon data-icon="inline-start" />
                         {t("Deepen")}
                       </Button>
                     )}
-                    {f.finding_id && (
+                    {canOperate && f.finding_id && (
                       <AlertDialog>
                         <AlertDialogTrigger asChild>
                           <Button
@@ -441,7 +444,7 @@ export function FindingsTable({
                   <TableCell colSpan={COLUMN_COUNT} className="bg-muted/30 whitespace-normal">
                     <div className="flex flex-col gap-2 px-2 py-1">
                       {/* Inline edit: name/category/severity, editable and savable (standalone finding rows only). */}
-                      {f.finding_id && edit && (
+                      {f.finding_id && edit && canReview && (
                         <div className="flex flex-wrap items-end gap-3 rounded-md border bg-background px-3 py-2.5">
                           <div className="flex min-w-[12rem] flex-1 flex-col gap-1">
                             <Label className="text-xs text-muted-foreground">{t("Vulnerability")}</Label>

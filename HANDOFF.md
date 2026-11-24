@@ -93,6 +93,18 @@ switches between them and reads each one's findings and report; all 51 `/api` re
 username. Browser-tested as admin, reviewer and client_read against a real backend. Open: `c-92bb52`,
 `c-7c4715`, `c-601ec6`.
 
+**2026-11-24 — E5 web UI (`c-869050`, then `c-92bb52`)** — `/system/users`, task **Authorization** tab,
+Approval Records **Chain** tab; sidebar filtered by `useCan` (`web/src/hooks/use-session.tsx`); a 403 never
+logs out (`errorText`, `web/src/lib/api-errors.ts`). **c-92bb52:** every existing page hides or disables the
+mutating controls the role lacks, per `server/rbac_policy.go`: admin for guardrail and platform config,
+operate for task, chat, traffic, assets, workspace and skills actions (and for operate-only reads such as
+credentials, raw exchanges, workspace files and LLM records), review for approval decisions and finding
+triage. Allow/Deny is one gated `components/approval-decision-buttons.tsx`, and `rich()` is
+`web/src/lib/rich-text.tsx`. Every touched file over 600 lines shrank by extraction. Browser-probed
+(headless Chromium, real backend + Postgres 16) as reviewer and operator on 23 pages: no 403 on load, and
+no enabled mutating control the role lacks. Rows that were not seeded (MCP servers, channels, LLM
+profiles, pending approvals, traffic, files, skills) were checked in code only. Open: `c-4ee114` (seeded-row re-probe, biome on extracted files), `c-7c4715`, `c-601ec6`.
+
 **2026-11-24** — **E2 integrations** (backend `c-6def05`, UI `c-597eb6`, follow-ups `c-2d91eb`, all in review)
 are on branch `ej/20261124-150516-d78c96`. It merges the UI branch `ej/20261124-132955-7aef3f`, which carries
 the backend `ej/20261124-055326-6bcfa9`, so landing it lands all of E2. See `docs/integrations.md`.
@@ -189,14 +201,9 @@ Verified 2026-11-23 (card `c-dadc14`, done):
   broken on main), and `TestGateOffTaskIsUnchanged` still expected zero lookups with the gate off.
 - Docker egress: through the real `docker-compose.yml` (NET_ADMIN) on a slim image of the same
   runtime base, `[artex] egress: installed` is logged, `-m owner`/`-m addrtype` load on bookworm's
-  nf_tables iptables 1.8.9, and the executor is refused for 169.254.169.254, 100.100.100.200, the
-  gateway, host.docker.internal (root reaches the host service) and :8787 on every local address,
-  while a LAN router, another container and the internet stay reachable. The full image gives the
-  same results (2026-11-24, `c-a6891b`, below).
-- Web: `npm ci` and `npx tsc --noEmit` clean. `npm run lint` fails with 84 errors, all already on main
-  and none in the changed files (`c-834a5a`). Headless Chromium: setup, login, Sign out over the
-  HttpOnly SameSite=Strict cookie work and `document.cookie` is empty, **but a token copied before
-  logout stays valid for 7 days** (`c-a0af33`).
+  nf_tables iptables 1.8.9, and the executor is refused for metadata, the gateway, host.docker.internal
+  and :8787 while LAN, other containers and the internet stay reachable (full image too, `c-a6891b`).
+- Web: `npm run lint` has 84 pre-existing errors (`c-834a5a`); a token copied before logout stays valid 7 days (`c-a0af33`).
 - The stock compose cannot start on Docker Desktop for Mac: bind mounts ignore permissions, so the
   isolation self-test fails closed (also on main; `c-775dc2`). Use named volumes there.
 
@@ -231,9 +238,8 @@ body, through the versioned prompt API, and the starting bodies are restored aft
 **Agents' lane**
 1. *(unclaimed)* — **SEC: per-task uid follow-ups** (S each): `c-12df03` (single-uid start-up fails on a
    socket; MCP uid not egress-filtered), `c-e70e5c` (release ended tasks at start-up; per-key lock). The "Done when" is on each card.
-2. *(unclaimed)* — **E5 UI: hide role-lacking actions on existing pages** (M), card `c-92bb52`. Done = as
-   reviewer and operator, no visible control answers 403. Then `c-601ec6` (chain newest-first paging, S).
-   (`c-7c4715`, the client_read console, is built and in review on `ej/20261124-144554-67afc9`.)
+2. *(claimed: c-4ee114)* — **E5 UI: seeded-row role check + biome on extracted files** (S). Then `c-601ec6`
+   (chain newest-first paging, S). (`c-7c4715`, the client_read console, is in review on `ej/20261124-144554-67afc9`.)
 3. *(unclaimed)* — **SEC: gorilla/websocket bump, GO-2026-6278** (XS), card `c-c10f2c`; needs network.
    Done = govulncheck clean.
 4. *(unclaimed)* — **SEC: upstream-gate residuals** (M), card `c-5a6f96`: task-scoped rules on proxy

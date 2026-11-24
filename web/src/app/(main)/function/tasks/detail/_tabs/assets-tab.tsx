@@ -18,7 +18,6 @@ import {
 import { toast } from "sonner";
 
 import { AssetDslSearch } from "@/components/asset-dsl-search";
-import { ScopeTextEditor } from "@/components/scope-text-editor";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -33,18 +32,20 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardFooter } from "@/components/ui/card";
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Sheet, SheetContent, SheetDescription, SheetFooter, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Spinner } from "@/components/ui/spinner";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { useCan } from "@/hooks/use-session";
+import { t } from "@/i18n";
 import { api } from "@/lib/api";
-import { parseCompanyScopeText } from "@/lib/company-scope";
+import { errorText } from "@/lib/api-errors";
+import { setVisibleInterval } from "@/lib/polling";
 import { taskAssetSourceLabel } from "@/lib/task-assets";
 import type { Asset, NewAssetType } from "@/lib/types";
 import { cn } from "@/lib/utils";
-import { setVisibleInterval } from "@/lib/polling";
-import { t } from "@/i18n";
+
+import { AddTaskAssetsSheet } from "../_components/add-task-assets-sheet";
 
 const PAGE_SIZES = [25, 50, 100, 200];
 
@@ -272,90 +273,8 @@ function AssetCard({
   );
 }
 
-function AddTaskAssetsSheet({
-  onAttached,
-  onOpenChange,
-  open,
-  taskId,
-}: {
-  onAttached: () => void;
-  onOpenChange: (open: boolean) => void;
-  open: boolean;
-  taskId: string;
-}) {
-  const [scopeText, setScopeText] = React.useState("");
-  const [saving, setSaving] = React.useState(false);
-  const parsedScope = React.useMemo(() => parseCompanyScopeText(scopeText), [scopeText]);
-
-  React.useEffect(() => {
-    if (!open) return;
-    setScopeText("");
-  }, [open]);
-
-  const attach = async () => {
-    if (parsedScope.rules.length === 0 || parsedScope.errors.length > 0) return;
-    setSaving(true);
-    try {
-      const result = await api.registerTaskAssetScopes(taskId, parsedScope.rules);
-      const assetSummary = result.assets_linked + result.assets_existing;
-      toast.success(
-        t("Registered {scopes} scopes, linked {assets} domain/IP assets", {
-          scopes: result.requested,
-          assets: assetSummary,
-        }),
-      );
-      onAttached();
-      onOpenChange(false);
-    } catch (reason) {
-      toast.error(t("Failed to add: {error}", { error: String((reason as Error)?.message ?? reason) }));
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  return (
-    <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent className="w-full sm:max-w-xl">
-        <SheetHeader>
-          <SheetTitle>{t("Add test assets")}</SheetTitle>
-          <SheetDescription>
-            {t(
-              "Enter the test scope directly. Domains and IPs create or reuse global assets; CIDRs, ICP records, and keywords act as agent scope context.",
-            )}
-          </SheetDescription>
-        </SheetHeader>
-        <div className="flex min-h-0 flex-1 flex-col overflow-y-auto px-4">
-          <ScopeTextEditor
-            id="task-asset-scope"
-            value={scopeText}
-            onValueChange={setScopeText}
-            parsed={parsedScope}
-            label={t("Test assets and scope")}
-            description={t(
-              "One entry per line; domains, IPs, CIDRs, ICP records, and keywords are recognized automatically.",
-            )}
-          />
-        </div>
-        <SheetFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={saving}>
-            {t("Cancel")}
-          </Button>
-          <Button
-            onClick={() => void attach()}
-            disabled={saving || parsedScope.rules.length === 0 || parsedScope.errors.length > 0}
-          >
-            {saving ? <Spinner data-icon="inline-start" /> : <PlusIcon data-icon="inline-start" />}
-            {parsedScope.rules.length > 0
-              ? t("Register {count} entries", { count: parsedScope.rules.length })
-              : t("Register entries")}
-          </Button>
-        </SheetFooter>
-      </SheetContent>
-    </Sheet>
-  );
-}
-
 export function AssetsTab({ taskId }: { taskId: string }) {
+  const canOperate = useCan("operate");
   const [rows, setRows] = React.useState<Asset[]>([]);
   const [total, setTotal] = React.useState(0);
   const [counts, setCounts] = React.useState<Record<string, number>>({});
@@ -458,23 +377,24 @@ export function AssetsTab({ taskId }: { taskId: string }) {
       setRemoveTarget(null);
       refresh();
     } catch (reason) {
-      toast.error(t("Failed to remove: {error}", { error: String((reason as Error)?.message ?? reason) }));
+      toast.error(t("Failed to remove: {error}", { error: errorText(reason) }));
     } finally {
       setRemoving(false);
     }
   };
 
-  const removeButton = (asset: Asset) => (
-    <Button
-      variant="ghost"
-      size="icon-sm"
-      onClick={() => setRemoveTarget(asset)}
-      aria-label={t("Remove asset {label} from the task", { label: assetLabel(asset) })}
-      title={t("Remove from task")}
-    >
-      <Trash2Icon />
-    </Button>
-  );
+  const removeButton = (asset: Asset) =>
+    canOperate && (
+      <Button
+        variant="ghost"
+        size="icon-sm"
+        onClick={() => setRemoveTarget(asset)}
+        aria-label={t("Remove asset {label} from the task", { label: assetLabel(asset) })}
+        title={t("Remove from task")}
+      >
+        <Trash2Icon />
+      </Button>
+    );
 
   const commonCardProps = { loaded, onPage: setPage, onSize: setSize, page, size, total };
   const totalAll = TABS.reduce((sum, item) => sum + (counts[item.key] ?? 0), 0);
@@ -498,10 +418,12 @@ export function AssetsTab({ taskId }: { taskId: string }) {
             {t("This task is linked to {count} assets in total", { count: totalAll })}
           </p>
         </div>
-        <Button size="sm" onClick={() => setAddOpen(true)}>
-          <PlusIcon data-icon="inline-start" />
-          {t("Add test assets")}
-        </Button>
+        {canOperate && (
+          <Button size="sm" onClick={() => setAddOpen(true)}>
+            <PlusIcon data-icon="inline-start" />
+            {t("Add test assets")}
+          </Button>
+        )}
       </div>
 
       <Tabs

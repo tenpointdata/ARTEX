@@ -49,11 +49,15 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Spinner } from "@/components/ui/spinner";
 import { Textarea } from "@/components/ui/textarea";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { useCan } from "@/hooks/use-session";
 import { useSideQuestions } from "@/hooks/use-side-questions";
+import { intlLocale, t } from "@/i18n";
 import { api } from "@/lib/api";
+import { errorText } from "@/lib/api-errors";
 import { sseUrl } from "@/lib/sse";
 import { shouldSubmitOnKey, useChatSendMode } from "@/lib/chat-send-mode";
 import { MOCK } from "@/lib/mock/enabled";
+import { setVisibleInterval } from "@/lib/polling";
 import { isBtwCommand } from "@/lib/side-questions";
 import { taskAssetSourceLabel, taskAssetTypeLabel } from "@/lib/task-assets";
 import type {
@@ -70,8 +74,8 @@ import type {
   TokenTotal,
 } from "@/lib/types";
 import { cn } from "@/lib/utils";
-import { setVisibleInterval } from "@/lib/polling";
-import { intlLocale, t } from "@/i18n";
+
+import { SessionItem } from "../_components/session-item";
 
 // resolutionLabel names the LLM a session runs on. The badge shows this alone and
 // keeps the model id in its tooltip. Env-backed configs can arrive without a name,
@@ -172,30 +176,6 @@ function mergeBySeq(current: Activity[], incoming: Activity[]): Activity[] {
   for (const a of current) bySeq.set(a.seq, a);
   for (const a of incoming) bySeq.set(a.seq, a);
   return [...bySeq.values()].sort((p, q) => p.seq - q.seq);
-}
-
-// statusIcon maps a session status to its icon. Worker terminal states are
-// distinct & color-coded: done (green check circle) / stopped (amber slash circle) / error (red X circle) /
-// steps exhausted (violet). running = blue spinner, pending (open) = gray clock.
-function statusIcon(status: SessionStatus) {
-  switch (status) {
-    case "running": // executing
-      return <Loader2Icon className="size-3.5 animate-spin text-blue-500" />;
-    case "paused":
-      return <PauseIcon className="size-3.5 text-amber-500" />;
-    case "pending": // open to claim (open intent)
-      return <ClockIcon className="size-3.5 text-muted-foreground" />;
-    case "done": // completed
-      return <CircleCheckIcon className="size-3.5 text-emerald-500" />;
-    case "stopped": // cancelled/stopped (terminated by the planner)
-      return <CircleSlashIcon className="size-3.5 text-amber-500" />;
-    case "blocked": // error
-      return <CircleXIcon className="size-3.5 text-red-500" />;
-    case "exhausted": // steps exhausted (hit max_turns)
-      return <ZapOffIcon className="size-3.5 text-violet-500" />;
-    case "deleted": // soft-deleted by the user
-      return <CircleSlashIcon className="size-3.5 text-muted-foreground" />;
-  }
 }
 
 // fmtTokens renders a compact token count (1234 → 1.2k, 2_000_000 → 2M).
@@ -348,107 +328,6 @@ function intentToSession(n: TaskNode): Session {
   };
 }
 
-function SessionItem({
-  s,
-  active,
-  displayTitle,
-  hasPending,
-  unread,
-  onClick,
-  onCancel,
-  controlling,
-  deleted,
-}: {
-  s: Session;
-  active: boolean;
-  displayTitle: string;
-  hasPending?: boolean;
-  unread?: number;
-  onClick: () => void;
-  onCancel?: () => void;
-  controlling?: boolean;
-  deleted?: boolean;
-}) {
-  const icon = deleted ? (
-    <Trash2Icon className="size-3.5 text-destructive" />
-  ) : s.role === "worker" ? (
-    statusIcon(s.status)
-  ) : s.live ? (
-    <Loader2Icon className="size-3.5 animate-spin text-blue-500" />
-  ) : null;
-
-  const cancellable =
-    s.role === "worker" &&
-    !s.inherited &&
-    !deleted &&
-    // pending = open (unclaimed) intent; running and paused ones are also deletable.
-    (s.status === "running" || s.status === "paused" || s.status === "pending");
-  return (
-    <div
-      className={cn(
-        "group/session flex w-full items-center rounded-md transition-colors",
-        active ? "bg-accent text-accent-foreground" : "hover:bg-accent/50",
-      )}
-    >
-      <button
-        type="button"
-        onClick={onClick}
-        className="flex min-w-0 flex-1 items-center gap-1 px-2 py-1.5 text-left text-sm"
-      >
-        {icon ?? <span className="size-3.5 shrink-0" />}
-        {s.intent_id && (
-          <span className="shrink-0 rounded bg-muted px-1 py-0.5 font-mono text-[10px] tabular-nums text-muted-foreground">
-            #{s.intent_id}
-          </span>
-        )}
-        {s.inherited && s.source_task_id && (
-          <Badge variant="outline" className="shrink-0">
-            {t("Source #{id}", { id: s.source_task_id })}
-          </Badge>
-        )}
-        <span
-          className={cn("min-w-0 flex-1 truncate text-sm font-medium", deleted && "text-muted-foreground line-through")}
-        >
-          {displayTitle}
-        </span>
-        {deleted && (
-          <Badge variant="outline" className="shrink-0 border-destructive/40 text-destructive">
-            {t("Deleted")}
-          </Badge>
-        )}
-        {hasPending && <ShieldAlertIcon className="size-3.5 shrink-0 text-amber-500" />}
-        {!active && unread ? (
-          <span className="inline-flex min-w-4 items-center justify-center rounded-full bg-blue-500/15 px-1 text-[10px] font-medium tabular-nums text-blue-600 dark:text-blue-400">
-            {unread > 99 ? "99+" : unread}
-          </span>
-        ) : null}
-        {s.live && (
-          <span className="inline-flex items-center gap-1 rounded bg-blue-500/15 px-1.5 py-0.5 text-[10px] font-medium text-blue-600 dark:text-blue-400">
-            <span className="size-1 animate-pulse rounded-full bg-blue-500" />
-            {t("Live")}
-          </span>
-        )}
-      </button>
-      {cancellable && (
-        <div className="flex shrink-0 items-center gap-0.5 pr-1 opacity-100 sm:opacity-0 sm:transition-opacity sm:group-hover/session:opacity-100 sm:group-focus-within/session:opacity-100">
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon-xs"
-            onClick={onCancel}
-            disabled={controlling}
-            title={t("Delete this intent (reason required; soft or hard delete)")}
-            aria-label={t("Delete this intent (reason required; soft or hard delete)")}
-            className="text-destructive hover:text-destructive"
-          >
-            <Trash2Icon />
-          </Button>
-        </div>
-      )}
-    </div>
-  );
-}
-
 function truncateWorkerAssetLabel(value: string, maxChars = 30): string {
   const chars = Array.from(value.trim());
   if (chars.length <= maxChars) return chars.join("");
@@ -491,6 +370,7 @@ function WorkerAssetBadge({ assets }: { assets: IntentAsset[] }) {
 }
 
 export function SessionsTab({ taskId, taskPaused = false }: { taskId: string; taskPaused?: boolean }) {
+  const canOperate = useCan("operate"); // chat, worker control and new sessions are operate-level
   const approvalFocus = useApprovalFocus({ taskId });
   const [selectedSessionId, setActiveId] = React.useState(MAIN_ID);
   const focusSession = React.useMemo<Session | undefined>(() => {
@@ -565,7 +445,7 @@ export function SessionsTab({ taskId, taskPaused = false }: { taskId: string; ta
       const r = await api.chatUpload("task", taskId, Array.from(files));
       setAttachments((prev) => [...prev, ...r.attachments]);
     } catch (e) {
-      toast.error(t("Upload failed: {error}", { error: (e as Error).message }));
+      toast.error(t("Upload failed: {error}", { error: errorText(e) }));
     } finally {
       setUploading(false);
       if (fileInputRef.current) fileInputRef.current.value = "";
@@ -588,7 +468,7 @@ export function SessionsTab({ taskId, taskPaused = false }: { taskId: string; ta
       setListOpen(false);
       setInput("");
     } catch (e) {
-      toast.error(t("Failed to create session: {error}", { error: (e as Error).message }));
+      toast.error(t("Failed to create session: {error}", { error: errorText(e) }));
     } finally {
       setCreatingMain(false);
       setConfirmNewMain(false);
@@ -636,7 +516,11 @@ export function SessionsTab({ taskId, taskPaused = false }: { taskId: string; ta
         } else {
           // Soft delete: the intent is set to deleted with the reason recorded; nodes and output are kept.
           patchIntentState(session.intent_id, "deleted");
-          toast.success(t("Worker #{id} deleted (reason recorded; the planner will re-plan accordingly)", { id: session.intent_id }));
+          toast.success(
+            t("Worker #{id} deleted (reason recorded; the planner will re-plan accordingly)", {
+              id: session.intent_id,
+            }),
+          );
           setCancelReason("");
         }
       } catch (error) {
@@ -756,7 +640,7 @@ export function SessionsTab({ taskId, taskPaused = false }: { taskId: string; ta
         })
         .catch((e) => {
           if (reqTokenRef.current[key] !== token) return;
-          patchStore(key, (s) => ({ ...s, loading: false, error: (e as Error).message || t("Failed to load") }));
+          patchStore(key, (s) => ({ ...s, loading: false, error: errorText(e) || t("Failed to load") }));
         })
         .finally(() => loadingKeysRef.current.delete(key));
     },
@@ -1534,7 +1418,7 @@ export function SessionsTab({ taskId, taskPaused = false }: { taskId: string; ta
       .catch((e) => {
         setInput(text); // restore so the user doesn't lose their text / attachments
         setAttachments(atts);
-        toast.error(t("Send failed: {error}", { error: (e as Error).message || t("please retry later") }));
+        toast.error(t("Send failed: {error}", { error: errorText(e) || t("please retry later") }));
       })
       .finally(() => setSending(false));
   }
@@ -1690,7 +1574,7 @@ export function SessionsTab({ taskId, taskPaused = false }: { taskId: string; ta
                     <div className="flex items-center gap-1.5 px-2 py-1 text-xs font-medium text-muted-foreground">
                       <Meta.icon className="size-3.5" />
                       {Meta.label}
-                      {role === "mainagent" && (
+                      {role === "mainagent" && canOperate && (
                         <button
                           type="button"
                           onClick={() => setConfirmNewMain(true)}
@@ -1727,9 +1611,7 @@ export function SessionsTab({ taskId, taskPaused = false }: { taskId: string; ta
                           }}
                           controlling={controllingIntent === s.intent_id}
                           deleted={meta?.deleted}
-                          onCancel={() => {
-                            setCancelIntent(s);
-                          }}
+                          onCancel={canOperate ? () => setCancelIntent(s) : undefined}
                         />
                       );
                     })}
@@ -1944,13 +1826,15 @@ export function SessionsTab({ taskId, taskPaused = false }: { taskId: string; ta
                 ) : (
                   <div className="pl-9 text-xs text-muted-foreground">
                     {isMain
-                      ? t("No conversation yet. Message the main agent below to steer exploration or step into the flow.")
+                      ? t(
+                          "No conversation yet. Message the main agent below to steer exploration or step into the flow.",
+                        )
                       : t("No activity records.")}
                   </div>
                 )}
               </div>
             </ScrollArea>
-            {isMain ? (
+            {isMain && canOperate ? (
               <div className="border-t p-3">
                 {attachments.length > 0 && (
                   <div className="mb-2 flex flex-wrap gap-1.5">
@@ -2046,7 +1930,8 @@ export function SessionsTab({ taskId, taskPaused = false }: { taskId: string; ta
                   </InputGroupAddon>
                 </InputGroup>
               </div>
-            ) : active.role === "worker" &&
+            ) : canOperate &&
+              active.role === "worker" &&
               !active.inherited &&
               (active.status === "running" || active.status === "paused") ? (
               <div className="border-t p-3">
@@ -2162,19 +2047,17 @@ export function SessionsTab({ taskId, taskPaused = false }: { taskId: string; ta
             <AlertDialogHeader>
               <AlertDialogTitle>{t("Delete Worker #{id}?", { id: cancelIntent?.intent_id ?? "" })}</AlertDialogTitle>
               <AlertDialogDescription className="break-words whitespace-normal">
-                {deleteMode === "hard" ? (
-                  boldMarkup(
-                    t(
-                      "**Hard delete** physically removes this intent and the downstream nodes **supported solely by it** (cascading to the leaves to avoid orphaned data); shared nodes, goals, and the task's root facts are kept. **This action is irreversible.** The planner is notified of the deletion and re-plans accordingly.",
-                    ),
-                  )
-                ) : (
-                  boldMarkup(
-                    t(
-                      '**Soft delete** marks the intent as "deleted" and records the reason; the intent node, execution records, registered facts, and findings **are all kept**. The planner receives "intent deleted by user + reason" and re-plans accordingly.',
-                    ),
-                  )
-                )}
+                {deleteMode === "hard"
+                  ? boldMarkup(
+                      t(
+                        "**Hard delete** physically removes this intent and the downstream nodes **supported solely by it** (cascading to the leaves to avoid orphaned data); shared nodes, goals, and the task's root facts are kept. **This action is irreversible.** The planner is notified of the deletion and re-plans accordingly.",
+                      ),
+                    )
+                  : boldMarkup(
+                      t(
+                        '**Soft delete** marks the intent as "deleted" and records the reason; the intent node, execution records, registered facts, and findings **are all kept**. The planner receives "intent deleted by user + reason" and re-plans accordingly.',
+                      ),
+                    )}
               </AlertDialogDescription>
             </AlertDialogHeader>
             <div className="grid gap-3 py-1">

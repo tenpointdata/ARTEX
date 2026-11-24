@@ -61,6 +61,7 @@ import { cn } from "@/lib/utils";
 import { useActiveCompany } from "@/stores/company/company-store";
 
 import { AssetTree, assetPathOf } from "./_components/asset-tree";
+import { BulkTriageControls } from "./_components/bulk-triage-controls";
 import {
   FINDING_REPORT_STATES,
   FINDING_STATUSES,
@@ -78,6 +79,7 @@ import {
 } from "./_components/findings-table";
 import { ImportFilterChip, useImportFilter } from "./_components/import-filter";
 import { PushToTrackerSelect, useEnabledTrackers } from "./_components/push-to-tracker";
+import { errorText } from "@/lib/api-errors";
 
 const FINDING_LIST_PREFERENCE_KEY = "artex_finding_list_preferences";
 
@@ -212,6 +214,8 @@ function FindingsPageInner() {
 
   // Live retests span every client, so a client_read session (no "read") does not poll them.
   const canReadRetests = useCan("read");
+  const canReview = useCan("review");
+  const canOperate = useCan("operate"); // pushing to a ticket tracker is operate-level
   // One lightweight request covers all rows/views, avoiding per-row fetches of full retest history; wait for the previous round to finish before polling again.
   React.useEffect(() => {
     if (!canReadRetests) return;
@@ -226,8 +230,7 @@ function FindingsPageInner() {
         setActiveRetests(Object.fromEntries(rows.map((item) => [item.finding_id, item])));
         failed = false;
       } catch (error) {
-        if (!disposed && !failed)
-          toast.error(t("Failed to load retest status: {error}", { error: (error as Error).message }));
+        if (!disposed && !failed) toast.error(t("Failed to load retest status: {error}", { error: errorText(error) }));
         failed = true;
       } finally {
         if (!disposed) timer = setTimeout(() => void refreshRetests(), 3000);
@@ -365,7 +368,7 @@ function FindingsPageInner() {
       setExportOpen(false);
       toast.success(t("Export download started"));
     } catch (e) {
-      toast.error(t("Export failed: {error}", { error: (e as Error).message }));
+      toast.error(t("Export failed: {error}", { error: errorText(e) }));
     } finally {
       setExporting(false);
     }
@@ -473,7 +476,7 @@ function FindingsPageInner() {
     } catch (e) {
       if (request !== assetTreeRequest.current || activeFilterFingerprint.current !== requestFilter) return;
       setAssetTree((current) => ({ ...current, loading: false }));
-      toast.error(t("Failed to load the asset tree: {error}", { error: (e as Error).message }));
+      toast.error(t("Failed to load the asset tree: {error}", { error: errorText(e) }));
     }
   }, [
     company,
@@ -768,7 +771,7 @@ function FindingsPageInner() {
         refreshAfterMutation(f);
       } catch (e) {
         setFindings((cur) => cur.map((x) => (isSameFinding(x, f) ? { ...x, status: prev } : x)));
-        toast.error(t("Update failed: {error}", { error: (e as Error).message }));
+        toast.error(t("Update failed: {error}", { error: errorText(e) }));
       }
     },
     [refreshAfterMutation, setFindings, status, company],
@@ -796,7 +799,7 @@ function FindingsPageInner() {
         refreshAfterMutation(f);
       } catch (e) {
         setFindings((cur) => cur.map((x) => (isSameFinding(x, f) ? { ...x, report_state: prev } : x)));
-        toast.error(t("Update failed: {error}", { error: (e as Error).message }));
+        toast.error(t("Update failed: {error}", { error: errorText(e) }));
       }
     },
     [refreshAfterMutation, reportState, setFindings, company],
@@ -822,7 +825,7 @@ function FindingsPageInner() {
             // The list reload remains valid even if the aggregate refresh fails.
           });
       } catch (e) {
-        toast.error(t("Bulk update failed: {error}", { error: (e as Error).message }));
+        toast.error(t("Bulk update failed: {error}", { error: errorText(e) }));
       } finally {
         setBulkBusy(false);
       }
@@ -848,7 +851,7 @@ function FindingsPageInner() {
             // The list reload remains valid even if the aggregate refresh fails.
           });
       } catch (e) {
-        toast.error(t("Bulk update failed: {error}", { error: (e as Error).message }));
+        toast.error(t("Bulk update failed: {error}", { error: errorText(e) }));
       } finally {
         setBulkBusy(false);
       }
@@ -914,7 +917,7 @@ function FindingsPageInner() {
           });
         refreshAfterMutation(f);
       } catch (e) {
-        toast.error(t("Save failed: {error}", { error: (e as Error).message }));
+        toast.error(t("Save failed: {error}", { error: errorText(e) }));
       } finally {
         setSaving(false);
       }
@@ -947,7 +950,7 @@ function FindingsPageInner() {
           });
         refreshAfterMutation(f, true);
       } catch (e) {
-        toast.error(t("Delete failed: {error}", { error: (e as Error).message }));
+        toast.error(t("Delete failed: {error}", { error: errorText(e) }));
       }
     },
     [refreshAfterMutation, setFindings, company],
@@ -972,7 +975,7 @@ function FindingsPageInner() {
       setDeepenFinding(null);
       setDeepenDescription("");
     } catch (error) {
-      toast.error(t("Submit failed: {error}", { error: (error as Error).message }));
+      toast.error(t("Submit failed: {error}", { error: errorText(error) }));
     } finally {
       setDeepening(false);
     }
@@ -1212,52 +1215,17 @@ function FindingsPageInner() {
           </Select>
 
           <div className="ml-auto flex items-center gap-3">
-            {selectedIds.size > 0 && (
+            {selectedIds.size > 0 && (canReview || canOperate) && (
               <div className="flex items-center gap-2">
-                <span className="text-xs text-muted-foreground tabular-nums">
-                  {t("{count} selected", { count: selectedIds.size })}
-                </span>
-                <Select
-                  value=""
-                  onValueChange={(v) => {
-                    if (v) void applyBulkStatus(v as FindingStatus);
-                  }}
-                  disabled={bulkBusy}
-                >
-                  <SelectTrigger size="sm" className="w-40" aria-label={t("Set the status of the selected findings")}>
-                    <SelectValue placeholder={bulkBusy ? t("Updating…") : t("Set status")} />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {FINDING_STATUSES.map((st) => (
-                      <SelectItem key={st} value={st}>
-                        {statusMeta("finding", st).label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                <Select
-                  value=""
-                  onValueChange={(v) => {
-                    if (v) void applyBulkReportState(v as FindingReportState);
-                  }}
-                  disabled={bulkBusy}
-                >
-                  <SelectTrigger
-                    size="sm"
-                    className="w-44"
-                    aria-label={t("Set the report stage of the selected findings")}
-                  >
-                    <SelectValue placeholder={bulkBusy ? t("Updating…") : t("Set report stage")} />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {FINDING_REPORT_STATES.map((st) => (
-                      <SelectItem key={st} value={st}>
-                        {REPORT_STATE_META[st].label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                <PushToTrackerSelect findingIds={selectedIds} trackers={trackers} />
+                {canReview && (
+                  <BulkTriageControls
+                    count={selectedIds.size}
+                    busy={bulkBusy}
+                    onStatus={(st) => void applyBulkStatus(st)}
+                    onReportState={(st) => void applyBulkReportState(st)}
+                  />
+                )}
+                {canOperate && <PushToTrackerSelect findingIds={selectedIds} trackers={trackers} />}
               </div>
             )}
             <Button size="sm" variant="outline" onClick={openExport}>

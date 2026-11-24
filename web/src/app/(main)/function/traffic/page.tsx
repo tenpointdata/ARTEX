@@ -3,14 +3,11 @@
 import * as React from "react";
 
 import {
-  ArrowDownWideNarrowIcon,
-  ArrowUpNarrowWideIcon,
   ChevronLeftIcon,
   ChevronRightIcon,
   DownloadIcon,
   EraserIcon,
   FilterXIcon,
-  ListChecksIcon,
   Loader2Icon,
   RadioTowerIcon,
   SearchIcon,
@@ -23,29 +20,19 @@ import { toast } from "sonner";
 import { HttpCodeBlock } from "@/components/http-code-block";
 import { LinkTrafficDialog } from "@/components/link-traffic-dialog";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { SortableHead } from "@/components/ui/sortable-head";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { useCan } from "@/hooks/use-session";
 import { api } from "@/lib/api";
+import { errorText } from "@/lib/api-errors";
 import { setVisibleInterval } from "@/lib/polling";
 import { useStoredSortPreference } from "@/lib/sort-preference";
 import type { TrafficDetail, TrafficExchange, TrafficHARImportResult, TrafficHost, TrafficResp } from "@/lib/types";
@@ -53,9 +40,11 @@ import { cn } from "@/lib/utils";
 import { useActiveCompanyID } from "@/stores/company/company-store";
 import { intlLocale, t } from "@/i18n";
 
+import { HostPicker } from "./_components/host-picker";
 import { ReplayPanel } from "./_components/replay-panel";
 import { StreamMessagesPanel } from "./_components/stream-messages";
 import { TamperHooksPanel } from "./_components/tamper-hooks-panel";
+import { TrafficDeleteDialog } from "./_components/traffic-delete-dialog";
 
 function fmtTime(ts: string) {
   return new Date(ts).toLocaleString(intlLocale, {
@@ -110,7 +99,6 @@ function requestWithHost(raw: string, exchange: TrafficExchange): string {
 // single page, which would only ever list the methods on that page.
 const METHODS = ["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"];
 const PAGE_SIZES = [25, 50, 100, 200];
-type HostCountSortDirection = "asc" | "desc";
 
 // Server-sortable columns. The list is sent to the backend verbatim as `sort`,
 // which whitelists these same names, so keep them in sync with traffic.Page.
@@ -123,6 +111,8 @@ const SORT_STORAGE_KEY = "traffic-sort";
 const STATUS_BUCKETS = ["2xx", "3xx", "4xx", "5xx"];
 
 export default function TrafficPage() {
+  const canOperate = useCan("operate"); // raw exchanges, replay, HAR, delete-by-target
+  const canAdmin = useCan("admin"); // purge all
   const [viewTab, setViewTab] = React.useState<"exchanges" | "hooks">("exchanges");
   // The sidebar's company switcher narrows the list to that company's hosts.
   const companyId = useActiveCompanyID();
@@ -162,7 +152,6 @@ export default function TrafficPage() {
   const [hosts, setHosts] = React.useState<TrafficHost[]>([]); // target picker
   const [selectedHosts, setSelectedHosts] = React.useState<string[]>([]); // checked in picker
   const [pickerOpen, setPickerOpen] = React.useState(false);
-  const [hostCountSortDirection, setHostCountSortDirection] = React.useState<HostCountSortDirection>("desc");
 
   const [deleteMode, setDeleteMode] = React.useState<"filter" | "selected" | "all" | null>(null); // null = dialog closed
   const [deleting, setDeleting] = React.useState(false);
@@ -283,26 +272,6 @@ export default function TrafficPage() {
 
   // Delete traffic for the current host filter (substring) or the checked
   // hosts (exact batch), then refetch.
-  const allSelected = hosts.length > 0 && hosts.every((h) => selectedHosts.includes(h.host));
-  const sortedHosts = React.useMemo(
-    () =>
-      [...hosts].sort((a, b) => {
-        const countOrder = hostCountSortDirection === "asc" ? a.count - b.count : b.count - a.count;
-        return countOrder || a.host.localeCompare(b.host);
-      }),
-    [hosts, hostCountSortDirection],
-  );
-
-  // "Purge" for the unfiltered purge, "Delete" for the host-scoped ones — the dialog's
-  // title and its confirm button both follow from which is in play.
-  const purging = deleteMode === "all";
-  const deleteTitle = deleteMode
-    ? {
-        all: t("Purge all traffic records?"),
-        selected: t("Delete all traffic for the {count} selected targets?", { count: selectedHosts.length }),
-        filter: t("Delete all traffic for this target?"),
-      }[deleteMode]
-    : "";
 
   // `reclaimed` only comes back from the full purge; the host-scoped deletions
   // report the row count alone.
@@ -342,7 +311,7 @@ export default function TrafficPage() {
       })
       .catch((e) => {
         // Keep the confirmation open so the user can retry a failed deletion.
-        if (mode === "all") toast.error(t("Purge failed: {error}", { error: (e as Error).message }));
+        if (mode === "all") toast.error(t("Purge failed: {error}", { error: errorText(e) }));
       })
       .finally(() => setDeleting(false));
   };
@@ -415,7 +384,7 @@ export default function TrafficPage() {
       setPage(0);
       setReloadTick((n) => n + 1);
     } catch (e) {
-      const msg = t("HAR import failed: {error}", { error: (e as Error).message });
+      const msg = t("HAR import failed: {error}", { error: errorText(e) });
       setHarError(msg);
       toast.error(msg);
     } finally {
@@ -449,7 +418,7 @@ export default function TrafficPage() {
         toast.success(t("Exported {count} exchanges to HAR", { count: meta.exported }));
       }
     } catch (e) {
-      toast.error((e as Error).message);
+      toast.error(errorText(e));
     } finally {
       setHarExporting(false);
     }
@@ -484,33 +453,37 @@ export default function TrafficPage() {
           <span className="text-xs text-muted-foreground tabular-nums">
             {t("{count} records", { count: traffic?.count ?? 0 })}
           </span>
-          <input
-            ref={harInputRef}
-            type="file"
-            accept=".har,application/json"
-            className="hidden"
-            onChange={(e) => void handleHarFileChange(e)}
-          />
-          <Button
-            variant="outline"
-            size="sm"
-            className="h-8"
-            disabled={harImporting}
-            onClick={() => harInputRef.current?.click()}
-          >
-            {harImporting ? <Loader2Icon className="size-3.5 animate-spin" /> : <UploadIcon className="size-3.5" />}
-            {harImporting ? t("Importing HAR…") : t("Import HAR")}
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            className="h-8"
-            disabled={harExporting || !traffic?.count}
-            onClick={() => void handleHarExport()}
-          >
-            {harExporting ? <Loader2Icon className="size-3.5 animate-spin" /> : <DownloadIcon className="size-3.5" />}
-            {harExporting ? t("Exporting HAR…") : t("Export HAR")}
-          </Button>
+          {canOperate && (
+            <>
+              <input
+                ref={harInputRef}
+                type="file"
+                accept=".har,application/json"
+                className="hidden"
+                onChange={(e) => void handleHarFileChange(e)}
+              />
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-8"
+                disabled={harImporting}
+                onClick={() => harInputRef.current?.click()}
+              >
+                {harImporting ? <Loader2Icon className="size-3.5 animate-spin" /> : <UploadIcon className="size-3.5" />}
+                {harImporting ? t("Importing HAR…") : t("Import HAR")}
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-8"
+                disabled={harExporting || !traffic?.count}
+                onClick={() => void handleHarExport()}
+              >
+                {harExporting ? <Loader2Icon className="size-3.5 animate-spin" /> : <DownloadIcon className="size-3.5" />}
+                {harExporting ? t("Exporting HAR…") : t("Export HAR")}
+              </Button>
+            </>
+          )}
         </div>
       </div>
 
@@ -572,126 +545,47 @@ export default function TrafficPage() {
 
       {/* Toolbar */}
       <div className="flex flex-wrap items-center gap-2">
-        <Popover open={pickerOpen} onOpenChange={setPickerOpen}>
-          <PopoverTrigger asChild>
-            <Button variant="outline" size="sm" className="h-8">
-              <ListChecksIcon className="size-3.5" />
-              {selectedHosts.length > 0
-                ? t("Select targets ({count})", { count: selectedHosts.length })
-                : t("Select targets…")}
-            </Button>
-          </PopoverTrigger>
-          <PopoverContent
-            className="w-[calc(100vw-2rem)] p-0 data-open:animate-none data-closed:animate-none sm:w-80"
-            align="start"
-            collisionPadding={16}
-          >
-            <div className="flex items-center justify-between border-b px-3 py-2">
-              <span className="text-xs font-medium text-muted-foreground">{t("Batch delete by target")}</span>
-              <div className="flex items-center gap-1">
-                {hosts.length > 0 && (
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <Button
-                        variant="ghost"
-                        size="icon-xs"
-                        onClick={() => setHostCountSortDirection((current) => (current === "desc" ? "asc" : "desc"))}
-                        aria-label={
-                          hostCountSortDirection === "desc"
-                            ? t("Packet count is currently descending; click to switch to ascending")
-                            : t("Packet count is currently ascending; click to switch to descending")
-                        }
-                      >
-                        {hostCountSortDirection === "desc" ? <ArrowDownWideNarrowIcon /> : <ArrowUpNarrowWideIcon />}
-                      </Button>
-                    </TooltipTrigger>
-                    <TooltipContent>
-                      {hostCountSortDirection === "desc"
-                        ? t("By packet count, descending")
-                        : t("By packet count, ascending")}
-                    </TooltipContent>
-                  </Tooltip>
-                )}
-                {hosts.length > 0 && (
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="h-6 px-2 text-xs"
-                    onClick={() => setSelectedHosts(allSelected ? [] : hosts.map((h) => h.host))}
-                  >
-                    {allSelected ? t("Clear all") : t("Select all")}
-                  </Button>
-                )}
-              </div>
-            </div>
-            <div className="max-h-64 overflow-y-auto">
-              {hosts.length === 0 ? (
-                <div className="px-3 py-6 text-center text-xs text-muted-foreground">{t("No traffic records")}</div>
-              ) : (
-                sortedHosts.map((h, index) => (
-                  <label
-                    key={h.host}
-                    htmlFor={`traffic-host-${index}`}
-                    className="flex cursor-pointer items-center gap-2 px-3 py-1.5 text-xs hover:bg-accent"
-                  >
-                    <Checkbox
-                      id={`traffic-host-${index}`}
-                      checked={selectedHosts.includes(h.host)}
-                      onCheckedChange={() =>
-                        setSelectedHosts((prev) =>
-                          prev.includes(h.host) ? prev.filter((x) => x !== h.host) : [...prev, h.host],
-                        )
-                      }
-                    />
-                    <span className="truncate font-mono">{h.host}</span>
-                    <span className="ml-auto shrink-0 tabular-nums text-muted-foreground">{h.count}</span>
-                  </label>
-                ))
-              )}
-            </div>
-            <div className="border-t p-2">
-              <Button
-                variant="destructive"
-                size="sm"
-                className="w-full"
-                disabled={selectedHosts.length === 0}
-                onClick={() => {
-                  setDeleteMode("selected");
-                  setPickerOpen(false);
-                }}
-              >
-                {t("Delete selected ({count})", { count: selectedHosts.length })}
-              </Button>
-            </div>
-          </PopoverContent>
-        </Popover>
+        {canOperate && (
+          <HostPicker
+            hosts={hosts}
+            selectedHosts={selectedHosts}
+            setSelectedHosts={setSelectedHosts}
+            open={pickerOpen}
+            onOpenChange={setPickerOpen}
+            onDeleteSelected={() => setDeleteMode("selected")}
+          />
+        )}
         <div className="relative w-48">
           <Input placeholder="host…" value={host} onChange={(e) => setHost(e.target.value)} className="h-8" />
         </div>
-        <Button
-          variant="destructive"
-          size="sm"
-          className="h-8"
-          disabled={!hostQ || deleting}
-          title={hostQ ? undefined : t("Select a target on the left or enter a host first")}
-          onClick={() => setDeleteMode("filter")}
-        >
-          <Trash2Icon className="size-3.5" />
-          {t("Delete this target")}
-        </Button>
-        {/* Outline rather than a second destructive button: this one ignores every
-            filter, so it must not look one mis-click away from "Delete this target". */}
-        <Button
-          variant="outline"
-          size="sm"
-          className="h-8 text-destructive hover:bg-destructive/10 hover:text-destructive"
-          disabled={!traffic?.count || deleting}
-          title={traffic?.count ? t("Delete all traffic and compact storage") : t("No traffic records yet")}
-          onClick={() => setDeleteMode("all")}
-        >
-          <EraserIcon className="size-3.5" />
-          {t("Purge all")}
-        </Button>
+        {canOperate && (
+          <Button
+            variant="destructive"
+            size="sm"
+            className="h-8"
+            disabled={!hostQ || deleting}
+            title={hostQ ? undefined : t("Select a target on the left or enter a host first")}
+            onClick={() => setDeleteMode("filter")}
+          >
+            <Trash2Icon className="size-3.5" />
+            {t("Delete this target")}
+          </Button>
+        )}
+        {canAdmin && (
+          // Outline rather than a second destructive button: this one ignores every
+          // filter, so it must not look one mis-click away from "Delete this target".
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-8 text-destructive hover:bg-destructive/10 hover:text-destructive"
+            disabled={!traffic?.count || deleting}
+            title={traffic?.count ? t("Delete all traffic and compact storage") : t("No traffic records yet")}
+            onClick={() => setDeleteMode("all")}
+          >
+            <EraserIcon className="size-3.5" />
+            {t("Purge all")}
+          </Button>
+        )}
         <div className="relative max-w-sm flex-1">
           <SearchIcon className="absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" />
           <Input
@@ -825,19 +719,21 @@ export default function TrafficPage() {
         ) : null}
       </div>
 
-      <div className="flex flex-wrap items-center gap-2">
-        <span className="text-sm text-muted-foreground">
-          {t("{count} flows selected", { count: selectedFlows.size })}
-        </span>
-        <Button variant="outline" size="sm" disabled={selectedFlows.size === 0} onClick={() => setLinking(true)}>
-          {t("Link to finding")}
-        </Button>
-        {selectedFlows.size > 0 ? (
-          <Button variant="ghost" size="sm" onClick={() => setSelectedFlows(new Set())}>
-            {t("Clear selection")}
+      {canOperate && (
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-sm text-muted-foreground">
+            {t("{count} flows selected", { count: selectedFlows.size })}
+          </span>
+          <Button variant="outline" size="sm" disabled={selectedFlows.size === 0} onClick={() => setLinking(true)}>
+            {t("Link to finding")}
           </Button>
-        ) : null}
-      </div>
+          {selectedFlows.size > 0 ? (
+            <Button variant="ghost" size="sm" onClick={() => setSelectedFlows(new Set())}>
+              {t("Clear selection")}
+            </Button>
+          ) : null}
+        </div>
+      )}
       {/* History table */}
       <div className="flex h-[calc(100vh-15rem)] min-h-0 flex-col">
         <Card className="flex min-h-0 flex-1 flex-col overflow-hidden py-0">
@@ -845,22 +741,24 @@ export default function TrafficPage() {
             <Table>
               <TableHeader className="sticky top-0 z-10 bg-card">
                 <TableRow>
-                  <TableHead className="w-10">
-                    <Checkbox
-                      aria-label={t("Select this page's traffic")}
-                      checked={exchanges.length > 0 && exchanges.every((e) => selectedFlows.has(e.id))}
-                      onCheckedChange={(checked) =>
-                        setSelectedFlows((previous) => {
-                          const next = new Set(previous);
-                          for (const e of exchanges) {
-                            if (checked === true) next.add(e.id);
-                            else next.delete(e.id);
-                          }
-                          return next;
-                        })
-                      }
-                    />
-                  </TableHead>
+                  {canOperate && (
+                    <TableHead className="w-10">
+                      <Checkbox
+                        aria-label={t("Select this page's traffic")}
+                        checked={exchanges.length > 0 && exchanges.every((e) => selectedFlows.has(e.id))}
+                        onCheckedChange={(checked) =>
+                          setSelectedFlows((previous) => {
+                            const next = new Set(previous);
+                            for (const e of exchanges) {
+                              if (checked === true) next.add(e.id);
+                              else next.delete(e.id);
+                            }
+                            return next;
+                          })
+                        }
+                      />
+                    </TableHead>
+                  )}
                   <SortableHead
                     field="ts"
                     label={t("Time")}
@@ -896,24 +794,26 @@ export default function TrafficPage() {
                 {exchanges.map((e) => (
                   <TableRow
                     key={e.id}
-                    className={cn("cursor-pointer", selected?.id === e.id && "bg-accent hover:bg-accent")}
-                    onClick={() => setSelected(e)}
+                    className={cn(canOperate && "cursor-pointer", selected?.id === e.id && "bg-accent hover:bg-accent")}
+                    onClick={canOperate ? () => setSelected(e) : undefined}
                   >
-                    <TableCell>
-                      <Checkbox
-                        aria-label={t("Select traffic {id}", { id: e.id })}
-                        checked={selectedFlows.has(e.id)}
-                        onClick={(event) => event.stopPropagation()}
-                        onCheckedChange={(checked) =>
-                          setSelectedFlows((previous) => {
-                            const next = new Set(previous);
-                            if (checked === true) next.add(e.id);
-                            else next.delete(e.id);
-                            return next;
-                          })
-                        }
-                      />
-                    </TableCell>
+                    {canOperate && (
+                      <TableCell>
+                        <Checkbox
+                          aria-label={t("Select traffic {id}", { id: e.id })}
+                          checked={selectedFlows.has(e.id)}
+                          onClick={(event) => event.stopPropagation()}
+                          onCheckedChange={(checked) =>
+                            setSelectedFlows((previous) => {
+                              const next = new Set(previous);
+                              if (checked === true) next.add(e.id);
+                              else next.delete(e.id);
+                              return next;
+                            })
+                          }
+                        />
+                      </TableCell>
+                    )}
                     <TableCell className="text-xs text-muted-foreground tabular-nums">{fmtTime(e.ts)}</TableCell>
                     <TableCell className="font-mono text-xs">{e.host}</TableCell>
                     <TableCell>
@@ -943,7 +843,7 @@ export default function TrafficPage() {
                 ))}
                 {exchanges.length === 0 && (
                   <TableRow>
-                    <TableCell colSpan={8} className="py-12 text-center text-sm text-muted-foreground">
+                    <TableCell colSpan={canOperate ? 8 : 7} className="py-12 text-center text-sm text-muted-foreground">
                       {traffic === null ? t("Loading…") : t("No matching traffic.")}
                     </TableCell>
                   </TableRow>
@@ -1055,72 +955,15 @@ export default function TrafficPage() {
         </SheetContent>
       </Sheet>
 
-      <AlertDialog
-        open={deleteMode !== null}
-        onOpenChange={(o) => {
-          if (!o) setDeleteMode(null);
-        }}
-      >
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>{deleteTitle}</AlertDialogTitle>
-            <AlertDialogDescription>
-              {deleteMode === "all" && (
-                <>
-                  {t(
-                    "This will permanently delete all {count} traffic records (including raw requests/responses), ignoring the current filters. This action cannot be undone. Traffic evidence already bound to findings lives in a separate evidence store and is unaffected.",
-                    { count: traffic?.count ?? 0 },
-                  )}
-                  <br />
-                  <span className="text-muted-foreground">
-                    {t(
-                      "Purging also compacts storage, returning the index's disk space to the system; traffic recording pauses briefly during this time.",
-                    )}
-                  </span>
-                </>
-              )}
-              {deleteMode === "selected" && (
-                <>
-                  {t(
-                    "This will permanently delete all traffic records for {count} targets ({hosts}), including raw requests/responses. This action cannot be undone.",
-                    {
-                      count: selectedHosts.length,
-                      hosts: `${selectedHosts.slice(0, 3).join(", ")}${selectedHosts.length > 3 ? "…" : ""}`,
-                    },
-                  )}
-                </>
-              )}
-              {deleteMode === "filter" && (
-                <>
-                  {t(
-                    "This will permanently delete all traffic records for hosts containing {host} (including raw requests/responses). This action cannot be undone.",
-                    { host: hostQ },
-                  )}
-                </>
-              )}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel disabled={deleting}>{t("Cancel")}</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={(e) => {
-                e.preventDefault();
-                confirmDelete();
-              }}
-              disabled={deleting}
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-            >
-              {deleting
-                ? purging
-                  ? t("Purging…")
-                  : t("Deleting…")
-                : purging
-                  ? t("Confirm purge")
-                  : t("Confirm delete")}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      <TrafficDeleteDialog
+        mode={deleteMode}
+        deleting={deleting}
+        totalCount={traffic?.count ?? 0}
+        selectedHosts={selectedHosts}
+        hostQ={hostQ}
+        onCancel={() => setDeleteMode(null)}
+        onConfirm={confirmDelete}
+      />
         </TabsContent>
       </Tabs>
     </div>

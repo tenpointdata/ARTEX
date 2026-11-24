@@ -21,7 +21,9 @@ import {
 } from "@/components/ui/sheet";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { intlLocale, t } from "@/i18n";
+import { useCan } from "@/hooks/use-session";
 import { api } from "@/lib/api";
+import { errorText } from "@/lib/api-errors";
 import type { MCPServer, MCPTool, Agent } from "@/lib/types";
 
 type Transport = "stdio" | "http" | "sse";
@@ -183,7 +185,7 @@ export default function MCPPage() {
       if (!editing) setOpen(false);
       load();
     } catch (e) {
-      toast.error(t("Save failed: {error}", { error: (e as Error).message }));
+      toast.error(t("Save failed: {error}", { error: errorText(e) }));
     } finally {
       setSaving(false);
     }
@@ -198,11 +200,14 @@ export default function MCPPage() {
       toast.success(t("Found {count} tools", { count: found.length }));
       load();
     } catch (e) {
-      toast.error(t("Refresh failed: {error}", { error: (e as Error).message }));
+      toast.error(t("Refresh failed: {error}", { error: errorText(e) }));
     } finally {
       setRefreshing(false);
     }
   }
+
+  // MCP servers, their tool refresh, and per-agent visibility are admin configuration.
+  const canAdmin = useCan("admin");
 
   async function removeServer(s: MCPServer) {
     try {
@@ -211,7 +216,7 @@ export default function MCPPage() {
       setOpen(false);
       load();
     } catch (e) {
-      toast.error(t("Delete failed: {error}", { error: (e as Error).message }));
+      toast.error(t("Delete failed: {error}", { error: errorText(e) }));
     }
   }
 
@@ -220,7 +225,7 @@ export default function MCPPage() {
       await api.saveMcpServer({ ...s, enabled: !s.enabled });
       load();
     } catch (e) {
-      toast.error(t("Operation failed: {error}", { error: (e as Error).message }));
+      toast.error(t("Operation failed: {error}", { error: errorText(e) }));
     }
   }
 
@@ -235,13 +240,13 @@ export default function MCPPage() {
       );
       load();
     } catch (e) {
-      toast.error(t("Operation failed: {error}", { error: (e as Error).message }));
+      toast.error(t("Operation failed: {error}", { error: errorText(e) }));
     }
   }
 
   function renderForm() {
     return (
-      <div className="grid gap-4 py-4">
+      <fieldset disabled={!canAdmin} className="grid min-w-0 gap-4 py-4">
         <div className="grid gap-2">
           <Label>{t("Transport")}</Label>
           <div className="flex gap-2">
@@ -344,7 +349,7 @@ export default function MCPPage() {
             onChange={(e) => setF({ env: e.target.value })}
           />
         </div>
-      </div>
+      </fieldset>
     );
   }
 
@@ -353,9 +358,11 @@ export default function MCPPage() {
       <div className="flex flex-col gap-3 py-4">
         <div className="flex items-center justify-between">
           <span className="text-muted-foreground text-sm">{t("{count} tools", { count: tools.length })}</span>
-          <Button size="sm" variant="outline" disabled={refreshing} onClick={refreshTools}>
-            <RefreshCwIcon className={refreshing ? "animate-spin" : ""} /> {t("Refresh")}
-          </Button>
+          {canAdmin && (
+            <Button size="sm" variant="outline" disabled={refreshing} onClick={refreshTools}>
+              <RefreshCwIcon className={refreshing ? "animate-spin" : ""} /> {t("Refresh")}
+            </Button>
+          )}
         </div>
         {toolsLoading ? (
           <p className="text-muted-foreground text-sm">{t("Loading…")}</p>
@@ -387,6 +394,7 @@ export default function MCPPage() {
       </div>
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        {canAdmin && (
         <button
           type="button"
           onClick={openAdd}
@@ -395,6 +403,7 @@ export default function MCPPage() {
           <PlusIcon className="size-6" />
           <span className="text-sm">{t("Add MCP")}</span>
         </button>
+        )}
 
         {servers.map((s) => (
           <Card
@@ -424,18 +433,21 @@ export default function MCPPage() {
                 )}
                 <div className="ml-auto flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
                   <Switch
+                    disabled={!canAdmin}
                     checked={s.enabled}
                     onCheckedChange={() => toggleEnabled(s)}
                     aria-label={t("Enable")}
                   />
-                  <Button
-                    size="icon"
-                    variant="outline"
-                    aria-label={t("Delete")}
-                    onClick={() => removeServer(s)}
-                  >
-                    <Trash2Icon className="text-destructive" />
-                  </Button>
+                  {canAdmin && (
+                    <Button
+                      size="icon"
+                      variant="outline"
+                      aria-label={t("Delete")}
+                      onClick={() => removeServer(s)}
+                    >
+                      <Trash2Icon className="text-destructive" />
+                    </Button>
+                  )}
                 </div>
               </div>
             </CardHeader>
@@ -449,6 +461,7 @@ export default function MCPPage() {
                   {agents.map((a) => (
                     <label key={a.key} className="flex items-center gap-2 text-sm">
                       <Checkbox
+                        disabled={!canAdmin}
                         checked={(visibility[s.id] ?? []).includes(a.id)}
                         onCheckedChange={() => toggleVisibility(s.id, a.id, a.name)}
                       />
@@ -488,11 +501,13 @@ export default function MCPPage() {
               </TabsList>
               <TabsContent value="config" className="min-h-0 flex-1 overflow-y-auto">
                 {renderForm()}
-                <div className="flex gap-2 pt-2 pb-6">
-                  <Button onClick={saveForm} disabled={saving}>
-                    {t("Save")}
-                  </Button>
-                </div>
+                {canAdmin && (
+                  <div className="flex gap-2 pt-2 pb-6">
+                    <Button onClick={saveForm} disabled={saving}>
+                      {t("Save")}
+                    </Button>
+                  </div>
+                )}
               </TabsContent>
               <TabsContent value="tools" className="min-h-0 flex-1 overflow-y-auto">
                 {renderTools()}

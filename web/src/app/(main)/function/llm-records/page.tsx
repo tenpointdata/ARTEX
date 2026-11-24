@@ -1,17 +1,7 @@
 "use client";
 
 import * as React from "react";
-import {
-  RadioIcon,
-  SearchIcon,
-  ChevronLeftIcon,
-  ChevronRightIcon,
-  Loader2Icon,
-  XIcon,
-  Trash2Icon,
-  CopyIcon,
-  CheckIcon,
-} from "lucide-react";
+import { RadioIcon, SearchIcon, ChevronLeftIcon, ChevronRightIcon, Loader2Icon, XIcon, Trash2Icon } from "lucide-react";
 
 import {
   AlertDialog,
@@ -46,7 +36,12 @@ import {
 } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
 import { intlLocale, t } from "@/i18n";
+import { toast } from "sonner";
+
+import { CopyButton } from "./copy-button";
+import { useCan } from "@/hooks/use-session";
 import { api } from "@/lib/api";
+import { errorText } from "@/lib/api-errors";
 import type { LLMRecordItem, LLMRecordDetail, LLMTask } from "@/lib/types";
 
 function fmtTime(ts: string) {
@@ -77,50 +72,18 @@ function tryFormatJSON(s: string): string {
   }
 }
 
-// Small button that copies the text in the current pane. Shows a brief checkmark after copying. Disabled when text is empty/only placeholders.
-function CopyButton({ text }: { text: string }) {
-  const [copied, setCopied] = React.useState(false);
-  const timer = React.useRef<ReturnType<typeof setTimeout> | null>(null);
-  React.useEffect(() => () => { if (timer.current) clearTimeout(timer.current); }, []);
-
-  const disabled = !text;
-  const copy = async () => {
-    if (disabled) return;
-    try {
-      await navigator.clipboard.writeText(text);
-    } catch {
-      // navigator.clipboard is unavailable in non-secure contexts (e.g. http LAN); fall back to execCommand.
-      const ta = document.createElement("textarea");
-      ta.value = text;
-      ta.style.position = "fixed";
-      ta.style.opacity = "0";
-      document.body.appendChild(ta);
-      ta.select();
-      try { document.execCommand("copy"); } catch { /* ignore: stay silent if unsupported */ }
-      document.body.removeChild(ta);
-    }
-    setCopied(true);
-    if (timer.current) clearTimeout(timer.current);
-    timer.current = setTimeout(() => setCopied(false), 1500);
-  };
-
-  return (
-    <Button
-      variant="ghost"
-      size="icon"
-      className="size-5 shrink-0"
-      disabled={disabled}
-      title={copied ? t("Copied") : t("Copy content")}
-      onClick={copy}
-    >
-      {copied ? <CheckIcon className="size-3 text-emerald-600" /> : <CopyIcon className="size-3" />}
-    </Button>
-  );
-}
-
 const PAGE_SIZES = [25, 50, 100];
 
+// Raw LLM records need `operate` to read (they echo prompts and secrets).
 export default function LLMRecordsPage() {
+  if (!useCan("operate")) {
+    return <p className="p-6 text-muted-foreground text-sm">{t("Your role does not allow this.")}</p>;
+  }
+  return <LLMRecordsView />;
+}
+
+function LLMRecordsView() {
+  const canAdmin = useCan("admin"); // toggling recording / deleting records mutate /api/llm
   const [page, setPage] = React.useState(0);
   const [size, setSize] = React.useState(50);
   const [session, setSession] = React.useState("");
@@ -237,7 +200,7 @@ export default function LLMRecordsPage() {
         setPage(0);
         setReloadTick((t) => t + 1);
       })
-      .catch(() => {})
+      .catch((e) => toast.error(errorText(e)))
       .finally(() => setDeleting(false));
   };
 
@@ -309,17 +272,19 @@ export default function LLMRecordsPage() {
             )}
           </SelectContent>
         </Select>
-        <Button
-          variant="destructive"
-          size="sm"
-          className="h-8"
-          disabled={!pickedTask || deleting}
-          title={pickedTask ? undefined : t("Select a task above first")}
-          onClick={() => setDeleteOpen(true)}
-        >
-          <Trash2Icon className="size-3.5" />
-          {t("Delete task conversations")}
-        </Button>
+        {canAdmin && (
+          <Button
+            variant="destructive"
+            size="sm"
+            className="h-8"
+            disabled={!pickedTask || deleting}
+            title={pickedTask ? undefined : t("Select a task above first")}
+            onClick={() => setDeleteOpen(true)}
+          >
+            <Trash2Icon className="size-3.5" />
+            {t("Delete task conversations")}
+          </Button>
+        )}
         <Select value={String(size)} onValueChange={(v) => setSize(Number(v))}>
           <SelectTrigger size="sm" className="w-28">
             <SelectValue />
@@ -340,7 +305,7 @@ export default function LLMRecordsPage() {
             size="sm"
             checked={recEnabled}
             onCheckedChange={toggleRecording}
-            disabled={recBusy}
+            disabled={recBusy || !canAdmin}
           />
           <label
             htmlFor="llm-rec-toggle"
