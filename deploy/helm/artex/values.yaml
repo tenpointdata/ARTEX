@@ -73,13 +73,18 @@ egress:
   # NetworkPolicy cannot express that: it applies to the whole pod, and the root server
   # process in the same pod needs PostgreSQL. So the deny is in the uid-scoped iptables
   # filter. true = ARTEX_EGRESS_DENY_HOSTS gets the PostgreSQL host (the bundled Service
-  # is headless, so this is the database pod's own IP) and the control API Service,
-  # resolved once at pod start. The control node's recording proxy stays reachable.
+  # is headless, so this is the database pod's own IP), the control API Service, and the
+  # API port on the control pod's own IP (headless <release>-control-pods). The names are
+  # re-resolved every refreshSeconds, so a rescheduled pod is denied at its new IP. The
+  # control node's recording proxy stays reachable.
   denyClusterServices: true
+  # Seconds between re-resolutions of the deny/allow names (ARTEX_EGRESS_REFRESH). A moved
+  # pod can be reached for at most about this long plus the cluster DNS cache TTL;
+  # clusterCIDRs leaves no such window. 0 resolves once at pod start.
+  refreshSeconds: 10
   # Strict mode: the cluster's pod and Service CIDRs (for example ["10.244.0.0/16",
-  # "10.96.0.0/12"]). Denied for agent processes on every ARTEX pod, which closes the
-  # gaps the name-based deny leaves (a rescheduled database pod's new IP, the control
-  # pod's own IP); the recording proxy Service is allowed by name. In-cluster lab
+  # "10.96.0.0/12"]). Denied for agent processes on every ARTEX pod: every in-cluster
+  # address, with no re-resolution window; the recording proxy Service is allowed by name. In-cluster lab
   # targets in these ranges then need egress.allow.
   clusterCIDRs: []
   denyHosts: ""             # extra ARTEX_EGRESS_DENY_HOSTS names (space/comma separated)

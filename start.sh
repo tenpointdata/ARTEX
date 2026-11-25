@@ -24,6 +24,10 @@ MAX_DELAY=60
 if [ -f ./egress.sh ]; then
 	. ./egress.sh
 	egress_apply "$@" || echo "[artex] egress: WARNING: filter setup failed" >&2
+	# Re-resolves ARTEX_EGRESS_DENY_HOSTS/ALLOW_HOSTS in the background so a pod that
+	# moves (a rescheduled database) is denied at its new address; stopped on exit.
+	egress_refresh_start
+	[ -n "$egress_refresh_pid" ] && trap 'kill "$egress_refresh_pid" 2>/dev/null' EXIT
 fi
 
 # The binary this script was started with. A crash relaunch refuses a binary that

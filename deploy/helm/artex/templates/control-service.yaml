@@ -36,3 +36,24 @@ spec:
       targetPort: 8788
   selector:
     {{- include "artex.selector" (dict "ctx" . "component" "control") | nindent 4 }}
+{{- if .Values.egress.denyClusterServices }}
+---
+# Headless: resolves to the control pod's own IP, so the agents' egress deny covers
+# the API port on the pod address as well as on the Service (egress.denyClusterServices).
+# Not-ready addresses are published so a restarted control pod is denied at once.
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "artex.fullname" . }}-control-pods
+  labels:
+    {{- include "artex.labels" . | nindent 4 }}
+spec:
+  clusterIP: None
+  publishNotReadyAddresses: true
+  ports:
+    - name: http
+      port: 8787
+      targetPort: http
+  selector:
+    {{- include "artex.selector" (dict "ctx" . "component" "control") | nindent 4 }}
+{{- end }}

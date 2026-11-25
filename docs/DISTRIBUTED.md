@@ -221,12 +221,15 @@ These are known and carded on the ARTEX board:
 - **`egress.Share` floors in-flight limits at 1 per node.** With N nodes, up to
   N requests to one host can be in flight at once. The request rate is divided
   exactly.
-- **Agent egress inside a cluster is denied by name, resolved once.** The chart
+- **Agent egress inside a cluster is denied by name, re-resolved.** The chart
   default (`egress.denyClusterServices`) denies agent processes the PostgreSQL
-  host and the control API Service, resolved at pod start. A database pod
-  rescheduled later gets a new IP that running pods do not deny; the control
-  pod's own IP is not denied. `egress.clusterCIDRs` closes both (see the chart
-  README). Outside Kubernetes, use `ARTEX_EGRESS_DENY` / `ARTEX_EGRESS_DENY_HOSTS`.
+  host, the control API Service and the API port on the control pod IP. Each
+  pod re-resolves the names every `egress.refreshSeconds` (10 s) and rewrites
+  its chain when an answer changes, so a rescheduled database pod is denied
+  at its new IP without a restart. Until then (at most about the interval plus
+  the DNS cache TTL) the new IP is reachable; `egress.clusterCIDRs` leaves no
+  such window (see the chart README). Outside Kubernetes, use
+  `ARTEX_EGRESS_DENY` / `ARTEX_EGRESS_DENY_HOSTS`.
 - **Settings follow by revision.** Traffic capture, the global egress proxy and
   web search reach worker nodes through `settings.agent_settings_revision`
   (bumped by `PUT /api/settings`, polled every 2 s). A change written straight

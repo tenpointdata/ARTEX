@@ -61,6 +61,7 @@ app.kubernetes.io/component: {{ .component }}
 {{- if .Values.egress.denyClusterServices }}
 {{- $l = append $l (include "artex.pgHost" .) -}}
 {{- $l = append $l (printf "%s-control" (include "artex.fullname" .)) -}}
+{{- $l = append $l (printf "%s-control-pods:8787" (include "artex.fullname" .)) -}}
 {{- end }}
 {{- with .Values.egress.denyHosts }}{{ $l = append $l . }}{{ end -}}
 {{- join " " $l -}}

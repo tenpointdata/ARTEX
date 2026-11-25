@@ -39,6 +39,9 @@ data:
   {{- with include "artex.egressDenyHosts" . }}
   ARTEX_EGRESS_DENY_HOSTS: {{ . | quote }}
   {{- end }}
+  {{- if or (include "artex.egressDenyHosts" .) (include "artex.egressAllowHosts" .) }}
+  ARTEX_EGRESS_REFRESH: {{ .Values.egress.refreshSeconds | toString | quote }}
+  {{- end }}
   {{- with include "artex.egressAllowHosts" . }}
   ARTEX_EGRESS_ALLOW_HOSTS: {{ . | quote }}
   {{- end }}
