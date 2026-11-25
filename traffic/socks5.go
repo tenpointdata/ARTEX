@@ -369,7 +369,7 @@ func (s *socks5Server) handleConn(client net.Conn) {
 		return
 	}
 	paced := cred.paced
-	scope, ok := s.connScope(cred)
+	scope, ok := s.connScope(cred, client.RemoteAddr())
 
 	cmd, atyp, host, port, rep := readSOCKS5Request(client, s.cfg.EnableUDP)
 	if rep == socks5RepSuccess && !ok {
@@ -469,16 +469,21 @@ type socks5Cred struct {
 	token string
 }
 
-// connScope resolves the run scope a credential names. ok is false when it
-// names a scope the registry does not hold; a nil ScopeFunc means no scope.
-func (s *socks5Server) connScope(cred socks5Cred) (ScopeFunc, bool) {
+// connScope resolves the run scope a credential names, locally or through the
+// remote resolver (scope_remote.go). ok is false when it names a scope neither
+// holds, or names none from a non-loopback client while
+// RequireScopeForRemoteClients is on; a nil ScopeFunc means no scope.
+func (s *socks5Server) connScope(cred socks5Cred, client net.Addr) (ScopeFunc, bool) {
 	if cred.token == "" {
+		if s.t != nil && s.t.remote.requireScope() && (client == nil || !s.t.loopbackClient(client.String())) {
+			return nil, false
+		}
 		return nil, true
 	}
 	if s.t == nil {
 		return nil, false
 	}
-	return s.t.scopes.lookup(cred.token)
+	return s.t.resolveScope(cred.token)
 }
 
 // baseContext is the context of a connection's policy checks and dials:

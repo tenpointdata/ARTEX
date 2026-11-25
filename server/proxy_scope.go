@@ -32,6 +32,15 @@ func conversationScopeKey(id int64) string {
 // With capture off it is ProxyAddr: the global proxy, which records nothing
 // and carries no scope.
 func (m *Manager) ScopedProxyAddr(ctx context.Context) string {
+	if m.traffic == nil && m.remoteProxy != nil && m.TrafficEnabled() {
+		// Worker node: only a task scope may use the control node's proxy.
+		if scope, ok := intercept.TargetScopeFromContext(ctx); ok && scope.TaskID != "" {
+			if t, loaded := m.Task(scope.TaskID); loaded {
+				return m.TaskProxyAddr(t)
+			}
+		}
+		return m.remoteProxy.Ended()
+	}
 	if m.traffic == nil || !m.TrafficEnabled() {
 		return m.ProxyAddr()
 	}

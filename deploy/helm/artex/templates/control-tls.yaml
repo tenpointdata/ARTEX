@@ -1,0 +1,61 @@
+{{- /*
+TLS for the control API (UI and the worker nodes' node RPC). Workers pin the CA
+in ca.crt (ARTEX_CONTROL_CA). source=generate makes a CA and a server
+certificate once and keeps them across upgrades through `lookup`; under
+`helm template`/GitOps (no cluster access) they would be regenerated on every
+render, so use source=secret or certManager there.
+*/ -}}
+{{- include "artex.validateControlTLS" . }}
+{{- if .Values.controlTLS.enabled }}
+{{- $t := .Values.controlTLS }}
+{{- $name := include "artex.controlTLSSecret" . }}
+{{- $dns := include "artex.controlTLSDNSNames" . | fromJsonArray }}
+{{- if eq $t.source "generate" }}
+{{- $existing := lookup "v1" "Secret" .Release.Namespace $name }}
+{{- $old := dict }}
+{{- if and $existing $existing.data }}{{ $old = $existing.data }}{{ end }}
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "artex.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/resource-policy: keep
+type: kubernetes.io/tls
+data:
+  {{- if and (hasKey $old "tls.crt") (hasKey $old "tls.key") (hasKey $old "ca.crt") }}
+  tls.crt: {{ index $old "tls.crt" }}
+  tls.key: {{ index $old "tls.key" }}
+  ca.crt: {{ index $old "ca.crt" }}
+  {{- else }}
+  {{- $ca := genCA (printf "%s control CA" (include "artex.fullname" .)) (int $t.generate.validityDays) }}
+  {{- $cert := genSignedCert (printf "%s-control" (include "artex.fullname" .)) (list "127.0.0.1") $dns (int $t.generate.validityDays) $ca }}
+  tls.crt: {{ $cert.Cert | b64enc }}
+  tls.key: {{ $cert.Key | b64enc }}
+  ca.crt: {{ $ca.Cert | b64enc }}
+  {{- end }}
+{{- else if eq $t.source "certManager" }}
+{{- $cm := $t.certManager }}
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: {{ include "artex.fullname" . }}-control
+  labels:
+    {{- include "artex.labels" . | nindent 4 }}
+spec:
+  secretName: {{ $name }}
+  commonName: {{ printf "%s-control" (include "artex.fullname" .) | quote }}
+  dnsNames: {{ toYaml $dns | nindent 4 }}
+  ipAddresses: ["127.0.0.1"]
+  duration: {{ $cm.duration }}
+  renewBefore: {{ $cm.renewBefore }}
+  usages: [server auth, digital signature, key encipherment]
+  privateKey:
+    rotationPolicy: Always
+  issuerRef:
+    name: {{ $cm.issuerRef.name }}
+    kind: {{ $cm.issuerRef.kind }}
+    group: {{ $cm.issuerRef.group }}
+{{- end }}
+{{- end }}
