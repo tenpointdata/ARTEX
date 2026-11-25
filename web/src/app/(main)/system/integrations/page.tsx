@@ -22,6 +22,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Switch } from "@/components/ui/switch";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { useCan } from "@/hooks/use-session";
 import { t } from "@/i18n";
 import { evidenceEnabled, summarizeSync, trackerDestination } from "@/lib/integrations";
 import { integrationsApi } from "@/lib/integrations-api";
@@ -37,6 +38,8 @@ export default function IntegrationsPage() {
   const [meta, setMeta] = React.useState<TicketTrackerMeta | null>(null);
   const [trackers, setTrackers] = React.useState<TicketTracker[]>([]);
   const [loaded, setLoaded] = React.useState(false);
+  const canAdmin = useCan("admin"); // tracker create, edit, enable and delete
+  const canOperate = useCan("operate"); // sync
   const [sheetOpen, setSheetOpen] = React.useState(false);
   const [editing, setEditing] = React.useState<TicketTracker | null>(null);
   const [deleteTarget, setDeleteTarget] = React.useState<TicketTracker | null>(null);
@@ -119,9 +122,11 @@ export default function IntegrationsPage() {
             <FileUpIcon /> {t("Scanner imports")}
           </Link>
         </Button>
-        <Button size="sm" onClick={() => openEdit(null)}>
-          <PlusIcon /> {t("Add tracker")}
-        </Button>
+        {canAdmin && (
+          <Button size="sm" onClick={() => openEdit(null)}>
+            <PlusIcon /> {t("Add tracker")}
+          </Button>
+        )}
       </div>
 
       <Card className="gap-0 py-0">
@@ -148,9 +153,13 @@ export default function IntegrationsPage() {
               {trackers.map((tr) => (
                 <TableRow key={tr.id}>
                   <TableCell className="font-medium">
-                    <button type="button" className="hover:underline" onClick={() => openEdit(tr)}>
-                      {tr.name}
-                    </button>
+                    {canAdmin ? (
+                      <button type="button" className="hover:underline" onClick={() => openEdit(tr)}>
+                        {tr.name}
+                      </button>
+                    ) : (
+                      tr.name
+                    )}
                   </TableCell>
                   <TableCell>
                     <Badge variant="outline">{trackerKindLabel(tr.kind)}</Badge>
@@ -160,31 +169,38 @@ export default function IntegrationsPage() {
                   <TableCell>
                     <Switch
                       checked={tr.enabled}
+                      disabled={!canAdmin}
                       onCheckedChange={() => void toggleEnabled(tr)}
                       aria-label={t("Enable {name}", { name: tr.name })}
                     />
                   </TableCell>
                   <TableCell className="text-right">
                     <div className="flex justify-end gap-1">
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        disabled={!tr.enabled || busyId === tr.id}
-                        onClick={() => void sync(tr)}
-                      >
-                        <RefreshCwIcon className={busyId === tr.id ? "animate-spin" : ""} /> {t("Sync")}
-                      </Button>
-                      <Button size="icon-sm" variant="ghost" aria-label={t("Edit")} onClick={() => openEdit(tr)}>
-                        <PencilIcon />
-                      </Button>
-                      <Button
-                        size="icon-sm"
-                        variant="ghost"
-                        aria-label={t("Delete")}
-                        onClick={() => setDeleteTarget(tr)}
-                      >
-                        <Trash2Icon className="text-destructive" />
-                      </Button>
+                      {canOperate && (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          disabled={!tr.enabled || busyId === tr.id}
+                          onClick={() => void sync(tr)}
+                        >
+                          <RefreshCwIcon className={busyId === tr.id ? "animate-spin" : ""} /> {t("Sync")}
+                        </Button>
+                      )}
+                      {canAdmin && (
+                        <>
+                          <Button size="icon-sm" variant="ghost" aria-label={t("Edit")} onClick={() => openEdit(tr)}>
+                            <PencilIcon />
+                          </Button>
+                          <Button
+                            size="icon-sm"
+                            variant="ghost"
+                            aria-label={t("Delete")}
+                            onClick={() => setDeleteTarget(tr)}
+                          >
+                            <Trash2Icon className="text-destructive" />
+                          </Button>
+                        </>
+                      )}
                     </div>
                   </TableCell>
                 </TableRow>

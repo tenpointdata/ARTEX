@@ -14,8 +14,10 @@ import type { TicketPushResult, TicketTracker } from "@/lib/types";
 // useEnabledTrackers loads the trackers a finding can be pushed to. Failures stay
 // quiet: without trackers the push control is simply not shown.
 export function useEnabledTrackers(): TicketTracker[] {
+  const canRead = useCan("read"); // GET /api/integrations/trackers needs read (not client_read)
   const [trackers, setTrackers] = React.useState<TicketTracker[]>([]);
   React.useEffect(() => {
+    if (!canRead) return;
     let alive = true;
     integrationsApi
       .trackers()
@@ -26,7 +28,7 @@ export function useEnabledTrackers(): TicketTracker[] {
     return () => {
       alive = false;
     };
-  }, []);
+  }, [canRead]);
   return trackers;
 }
 

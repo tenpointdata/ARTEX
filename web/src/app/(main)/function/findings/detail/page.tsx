@@ -73,6 +73,7 @@ function FindingDetailInner() {
   const [tab, setTab] = React.useState("overview");
   const canReview = useCan("review"); // severity, status and report stage are PATCH triage
   const canOperate = useCan("operate"); // retest and evidence link/edit need operate
+  const canRead = useCan("read"); // tracker tickets (GET /api/integrations/*) need read, not client_read
 
   const load = React.useCallback(() => {
     if (!id) {
@@ -245,7 +246,7 @@ function FindingDetailInner() {
                   </CardContent>
                 </Card>
               )}
-              <FindingIntegrationsPanel key={`integrations-${id}`} findingId={id} />
+              {canRead && <FindingIntegrationsPanel key={`integrations-${id}`} findingId={id} />}
               <FindingTrafficPanel
                 key={`traffic-${id}`}
                 findingId={id}
