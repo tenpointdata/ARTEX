@@ -358,6 +358,9 @@ Card ids in brackets:
 
 ## Known issues and gotchas
 
+- **`scripts/*.sh` must run on macOS's stock bash 3.2**: no `mapfile`/`readarray`, `declare -A`,
+  or `${x,,}`. A bash-4 builtin fails with "command not found" and the step silently passes (the gofmt
+  check was skipped on every Mac run until c-c81e74 replaced `mapfile` with a read loop).
 - **bbot `portscan` (masscan) cannot run as the executor**: it needs raw sockets and fails setup with
   `No such file or directory: 'sudo'`. This is by design (see Decisions, c-18c9c6); use `nmap -sT`.
 - **`next dev` writes `web/AGENTS.md`** (Next 16 agent rules) on start. Delete it before committing; it
