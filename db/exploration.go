@@ -1276,6 +1276,19 @@ WHERE exploration_id=$1 AND kind='goal' AND state='open')`, s.expID).Scan(&exist
 	return exists, err
 }
 
+// HasRoundOtherThan reports whether this exploration persisted any planner
+// round marker (activity worker='planner', kind='round') whose summary differs
+// from exclude. Round markers are only written by real planning rounds, the
+// final judgment round, and (with exclude's summary) the round-0 goal
+// decomposition, so a true result proves the task got past its first-run
+// decomposition. Callers must flush the activity outbox first.
+func (s *ExplorationStore) HasRoundOtherThan(exclude string) (bool, error) {
+	var exists bool
+	err := s.db.QueryRow(`SELECT EXISTS(SELECT 1 FROM activity
+WHERE exploration_id=$1 AND worker='planner' AND kind='round' AND COALESCE(summary,'')<>$2)`, s.expID, exclude).Scan(&exists)
+	return exists, err
+}
+
 // OpenGoalFingerprint returns a stable fingerprint of the open-goal set: the
 // sorted goal ids joined by commas, "" when none. Planner quiet-mode (#79) uses
 // it to tell "the goal set changed since the last planning round" apart from

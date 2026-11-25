@@ -77,11 +77,8 @@ func (s *Server) resumeAdmissionMode(t *Task) string {
 	if lifecycle.QueueMode == "bootstrap" {
 		return "bootstrap"
 	}
-	if lifecycle.FirstRunAt == 0 {
-		goals, err := t.Store.ListByKind(db.KindGoal, 1)
-		if err == nil && len(goals) == 0 {
-			return "bootstrap"
-		}
+	if needsGoalBootstrap(t) {
+		return "bootstrap"
 	}
 	return "resume"
 }

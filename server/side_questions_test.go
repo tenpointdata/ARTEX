@@ -145,7 +145,8 @@ func newSideHTTPFixture(t *testing.T) *sideHTTPFixture {
 		db.SkipPGUnavailable(t, err)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	s := &Server{m: m, engine: NewEngine(m), ctx: ctx, jwtKey: []byte("btw-test-signing-key-only"), chatBusy: map[string]bool{}}
+	s := &Server{m: m, engine: NewEngine(m), ctx: ctx, jwtKey: []byte("btw-test-signing-key-only"), chatBusy: map[string]bool{},
+		taskAgents: map[string]*taskAgentBundle{}}
 	s.initSideQuestions()
 	p := &sideHTTPProvider{started: make(chan llm.CompletionRequest, 16), release: make(chan struct{})}
 	cfg := agent.Config{Format: llm.FormatOpenAI, BaseURL: "http://fixture.invalid", Model: "fixture", Stream: true}
@@ -498,6 +499,11 @@ func TestSideRestoredWorkerRuntimePublishesNewCheckpoint(t *testing.T) {
 	id, _ := strconv.ParseInt(task.ID, 10, 64)
 	t.Cleanup(func() { _ = f.m.pg.DeleteTask(id) })
 	if err := f.m.pg.SetPaused(id, true); err != nil {
+		t.Fatal(err)
+	}
+	// A finished decomposition: without a goal, restore would treat the task as
+	// interrupted during round 0 and re-decompose instead of starting its loops.
+	if _, err := task.Store.AddNode(db.KindGoal, map[string]any{"text": "context"}, 0, "open", "system", nil); err != nil {
 		t.Fatal(err)
 	}
 	iid, err := task.Store.AddNode(db.KindIntent, map[string]any{"summary": "restored worker"}, 1, "paused", "planner", nil)

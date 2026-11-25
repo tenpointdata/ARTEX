@@ -1,6 +1,6 @@
 # HANDOFF.md — ARTEX
 
-**Last updated:** 2026-11-24 18:23 MST, by claude-code: c-d73308 (E8 follow-up) built, in review: an optional per-profile LLM sampling pin. Earlier hand-offs are under Deltas and in `ej handoff log`.
+**Last updated:** 2026-11-24 19:20 MST, by claude-code: c-3d7433 built, in review: a restart during round-0 goal decomposition now re-decomposes instead of settling `done` with no goals. Earlier hand-offs are under Deltas and in `ej handoff log`.
 
 > Single entry point for whoever picks this up next (any agent or human), with no access to the
 > originating conversation. Read this first, then the sections of the code it points at.
@@ -58,6 +58,14 @@ See `docs/ARCHITECTURE.md` for the code-level map. Summary:
 - `docs/` — `ARCHITECTURE.md`, `OPS.md`, traffic docs, `RSI.md` (self-improvement governance contract).
 
 ## Current state
+
+**2026-11-24 — restart during round-0 decomposition (`c-3d7433`; in review).** Startup
+(`restoreTaskRuntimes` -> `restoreRunMode`, `server/server.go`) sends an unpaused, non-terminal, non-queued task
+through `startAdmittedTask(t, "bootstrap")` when `needsGoalBootstrap` (`server/goals.go`) holds: no goal nodes
+**and** no persisted planner `round` activity other than the round-0 marker (`db.ExplorationStore.HasRoundOtherThan`).
+`resumeAdmissionMode` uses the same test in place of its old `first_run_at == 0` check, which was only stamped
+for tasks with a timeout. A task that is goalless by choice (goals met, or all deleted after planning) keeps a plain
+`Run`. A partial goal set left by a restart is still not detected: `c-19089f`.
 
 **2026-11-24 — LLM sampling pin (`c-d73308`, E8; in review).** Migration 0028 adds nullable
 `llm_profiles.sampling_seed`/`sampling_temperature`; `agent/sampling.go` splices them into the wire body
@@ -412,6 +420,15 @@ Card ids in brackets:
   `ARTEX_SECRET_KEY`) loses stored secrets.
 
 ## Decisions
+
+- **2026-11-24 c-3d7433 (restart mid round 0):** "never decomposed" is told apart from "goalless by design" by the
+  activity log, with no migration: a finished decomposition always writes at least one goal (the raw-goal fallback), and
+  `Run` then plans against it, which writes a `Planning round N` marker. So zero goals plus no round marker besides
+  round 0 means the decomposition was lost. The one case it gets wrong is a human deleting every goal in the seconds
+  before the first planning round; that task gets decomposed again, which is harmless. Paused tasks are not
+  bootstrapped at restore (that path would un-pause them); resuming them derives bootstrap. Test fixtures that call
+  `restoreTaskRuntimes` on a bare `&Server{}` need `taskAgents` set, because leftover goal-less tasks in a shared test
+  DB now go through decomposition.
 
 - **2026-11-24 c-f729e8 (approvals triage):** approval keys are A/D (separate verdict set from findings' C/F/D/A/I/P;
   the meaning of a key depends on the queue). They act only on an open pending request, never on a selection or with
