@@ -498,7 +498,23 @@ export interface FindingAsset {
   label: string;
 }
 
+// FindingLane is where a finding came from: runtime (live probing, ARTEX workers and
+// runtime scanners), sast (static code analysis) or sca (dependency analysis).
+export type FindingLane = "runtime" | "sast" | "sca";
+
+// FindingSource is present only on scanner-imported findings; absent = ARTEX's own
+// workers, which count as the runtime lane.
+export interface FindingSource {
+  lane: FindingLane;
+  tool: string;
+  rule_id?: string;
+  location?: string; // code path for sast/sca findings
+  line?: number;
+  import_id?: number;
+}
+
 export interface Finding {
+  source?: FindingSource;
   traffic_count?: number;
   evidence_version?: number;
   report_evidence_version?: number;
@@ -605,6 +621,8 @@ export interface FindingQuery {
   company?: string;
   // scanner import id: only the findings that import created. Empty = no import filter.
   importId?: string;
+  // lane filter: runtime = worker findings plus runtime-scanner imports. Empty = every lane.
+  lane?: FindingLane | "";
 }
 
 // ---- Findings by asset (asset view) ----
@@ -2005,6 +2023,9 @@ export interface ScanImport {
   file_name: string;
   file_sha256: string;
   task_id?: number;
+  fact_node_id?: number; // the task's exploration-graph fact node that records this import
+  anchor_asset_ids?: number[]; // assets the import's findings were anchored to
+  lane_counts?: Partial<Record<FindingLane, number>>; // findings this import created, per lane
   imported_by: string;
   records: number;
   assets: number;
@@ -2027,6 +2048,9 @@ export interface FindingImportSource {
   finding_id: number;
   import_id?: number;
   tool: string;
+  lane?: FindingLane;
+  location?: string;
+  line?: number;
   rule_id: string;
   dedup_key: string;
   record: string;

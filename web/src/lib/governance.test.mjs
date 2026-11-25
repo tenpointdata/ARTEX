@@ -1,5 +1,3 @@
-import assert from "node:assert/strict";
-import test from "node:test";
 import {
   authorizationStatus,
   can,
@@ -11,6 +9,8 @@ import {
   parseScopeText,
   toLocalInput,
 } from "./governance.ts";
+import assert from "node:assert/strict";
+import test from "node:test";
 
 test("can reads the session's permission set", () => {
   const reviewer = { permissions: ["client_read", "read", "review"] };
@@ -33,7 +33,9 @@ test("scope text round-trips and guesses kinds", () => {
   assert.equal(guessScopeKind("203.0.113.7"), "ip");
   assert.equal(guessScopeKind("2001:db8::1"), "ip");
   assert.equal(guessScopeKind("example.com"), "domain");
-  const scope = parseScopeText("example.com\nhost:api.example.com, 10.0.0.0/8\n\n2001:db8::1\nexample.com\nDOMAIN:x.org");
+  const scope = parseScopeText(
+    "example.com\nhost:api.example.com, 10.0.0.0/8\n\n2001:db8::1\nexample.com\nDOMAIN:x.org",
+  );
   assert.deepEqual(scope, [
     { kind: "domain", value: "example.com" },
     { kind: "host", value: "api.example.com" },

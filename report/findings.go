@@ -78,6 +78,7 @@ func FindingsMarkdown(fs []*db.DBFinding, generatedAt time.Time) string {
 			fmt.Fprintf(&b, "- **Task**: %s\n", desc)
 		}
 		fmt.Fprintf(&b, "- **Found at**: %s\n", f.CreatedAt.Format("2006-01-02 15:04:05"))
+		b.WriteString(SourceOf(f).bullet())
 		q := qualityFromDBFinding(f)
 		b.WriteString(qualityBullets(q, false))
 		if s := strings.TrimSpace(f.Summary); s != "" {
@@ -109,6 +110,7 @@ func SingleFindingMarkdown(f *db.DBFinding, generatedAt time.Time) string {
 	}
 	fmt.Fprintf(&b, "- **Found at**: %s\n", f.CreatedAt.Format("2006-01-02 15:04:05"))
 	fmt.Fprintf(&b, "- **Generated at**: %s\n", generatedAt.Format("2006-01-02 15:04:05"))
+	b.WriteString(SourceOf(f).bullet())
 	q := qualityFromDBFinding(f)
 	b.WriteString(qualityBullets(q, false))
 	if s := strings.TrimSpace(f.Summary); s != "" {
@@ -207,8 +209,14 @@ func FindingsCSV(fs []*db.DBFinding) []byte {
 	var buf bytes.Buffer
 	buf.WriteString("\xEF\xBB\xBF") // UTF-8 BOM
 	w := csv.NewWriter(&buf)
-	_ = w.Write([]string{"ID", "Name", "Class", "Severity", "Status", "Report Stage", "Task", "Found At", "Summary", "Traffic Evidence Count", "Traffic Evidence IDs"})
+	_ = w.Write([]string{"ID", "Name", "Class", "Severity", "Status", "Report Stage", "Task", "Found At", "Summary", "Traffic Evidence Count", "Traffic Evidence IDs",
+		"Lane", "Source Tool", "Source Rule", "Source Location", "Import ID"})
 	for _, f := range items {
+		src := SourceOf(f)
+		importID := ""
+		if src.ImportID > 0 {
+			importID = fmt.Sprint(src.ImportID)
+		}
 		_ = w.Write([]string{
 			fmt.Sprintf("%d", f.ID),
 			csvCell(findingTitle(f)),
@@ -221,6 +229,11 @@ func FindingsCSV(fs []*db.DBFinding) []byte {
 			csvCell(strings.TrimSpace(f.Summary)),
 			fmt.Sprint(len(f.TrafficBindings)),
 			csvCell(findingTrafficIDs(f)),
+			src.LaneKey(),
+			csvCell(src.Tool),
+			csvCell(src.RuleID),
+			csvCell(src.codeLocation()),
+			importID,
 		})
 	}
 	w.Flush()
