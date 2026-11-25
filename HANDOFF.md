@@ -59,6 +59,10 @@ See `docs/ARCHITECTURE.md` for the code-level map. Summary:
 
 ## Current state
 
+**2026-11-24 — LLM sampling pin (`c-d73308`, E8; in review).** Migration 0025 adds nullable
+`llm_profiles.sampling_seed`/`sampling_temperature`; `agent/sampling.go` splices them into the wire body
+(seed on openai/ollama only; temperature only where the caller set none). Suite stamps `llm_sampling`.
+
 **2026-11-24 — Real-cluster install kit (`c-620510`, E7; blocked on a human).** On `ej/20261124-173856-b39c78`. `deploy/lab/values-multihost.yaml` (renders/lints), runbook
 `deploy/lab/README.md` "Real cluster", and `scripts/k8s-install-checks.sh NS [RELEASE]`, which prints the check
 table. Not run on any cluster.
@@ -350,7 +354,7 @@ Card ids in brackets:
   and a public Sigstore log entry. Dependabot `github-actions` PRs start only once the new `dependabot.yml`
   is on main (origin/main's has no `github-actions` entry).
 - **E8 follow-ups** [`c-f1518c`] first live run, [`c-75c593`] bench
-  image from a clean clone, [`c-d73308`] optional provider sampling seed per LLM profile.
+  image from a clean clone, [`c-d73308`] per-profile sampling pin (built, in review).
 - **E10** [`c-72dd9d`] Code-security lane: built 2026-11-24, in review (see Current state). Follow-ups:
   [`c-d059ae`] lane in UI and exports (built, in review on `ej/20261124-170322-736db7`);
   [`c-7651e5`] stat cards + fact-node link; [`c-c978e3`] SAST-guided runtime verification;
@@ -614,8 +618,8 @@ Card ids in brackets:
   nothing. This branch merges PR #13's branch (`ej/20261124-075745-5a4987`), which this work needs.
 - **2026-11-24** — E8: the A/B suite runs one task at a time on a dedicated instance and refuses a busy one,
   because the server reads the active prompt live and a swap would reach a concurrent task. `--seed` fixes the
-  schedule, not the LLM, because ARTEX has no sampling-seed control; replicates control variance instead
-  (`c-d73308`). Gate rates are counted over ground-truth entries, not over detected findings, so arms with
+  schedule; an LLM profile may pin a seed (openai/ollama) and a default temperature (`c-d73308`), stamped
+  as `llm_sampling`; replicates still control variance. Gate rates are counted over ground-truth entries, not over detected findings, so arms with
   different detection counts stay comparable. A failed run is counted but left out of the denominators. A judge
   failure aborts the suite. Arms may vary only the editable goals/planner/worker body; the `RSI.md` immutable
   surfaces stay outside the prompt API by construction.

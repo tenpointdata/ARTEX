@@ -1219,6 +1219,15 @@ export interface LLMProfile {
   custom_headers_set?: boolean;
   // This profile's retry overrides (connect / empty response / same-provider safety window). Empty / all zeros = follow the global policy.
   retry?: LLMRetryOverride;
+  // Optional sampling pin for reproducible A/B runs; an absent field is not pinned.
+  sampling?: LLMSampling;
+}
+
+// Sampling pin of one profile (db.Sampling): seed is sent on openai/ollama only;
+// temperature applies when the calling code sets none.
+export interface LLMSampling {
+  seed?: number;
+  temperature?: number;
 }
 
 // ---- LLM retry policy ----

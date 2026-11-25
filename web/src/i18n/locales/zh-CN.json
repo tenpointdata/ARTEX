@@ -2955,5 +2955,14 @@
   "Clear the anchor assets": "清除锚定资产",
   "Failed to load assets: {error}": "加载资产失败：{error}",
   "No assets": "暂无资产",
-  "Showing the first {count} of {total} assets": "显示 {total} 个资产中的前 {count} 个"
+  "Showing the first {count} of {total} assets": "显示 {total} 个资产中的前 {count} 个",
+  "Sampling seed must be a whole number": "采样种子必须是整数",
+  "Sampling temperature must be between 0 and 2": "采样温度必须在 0 到 2 之间",
+  "Sampling pin (optional, for A/B runs)": "采样固定（可选，用于 A/B 对比）",
+  "Seed": "种子",
+  "Seed (empty = not pinned)": "种子（留空 = 不固定）",
+  "Seed: openai / ollama only": "种子：仅 openai / ollama",
+  "Temperature": "温度",
+  "Temperature 0–2 (empty = not pinned)": "温度 0–2（留空 = 不固定）",
+  "Pins sampling so replicates of an evaluation suite vary less; the suite stamps both values. The seed is sent only on the openai and ollama formats. The temperature applies when the calling code sets none of its own.": "固定采样参数，使评测套件的各次重复波动更小；套件会记录这两个值。种子仅在 openai 和 ollama 格式下发送。仅当调用代码自身未设置温度时才使用该温度。"
 }

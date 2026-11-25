@@ -32,6 +32,13 @@ import type { LLMPoolMember, LLMPoolStatus, LLMProfile, LLMRetryOverride } from 
 import { cn } from "@/lib/utils";
 
 import { ProfileRetryFields, RetryPolicyPanel, ZERO_OVERRIDE } from "./_components/retry";
+import {
+  draftFromSampling,
+  EMPTY_SAMPLING_DRAFT,
+  ProfileSamplingFields,
+  samplingFromDraft,
+  type SamplingDraft,
+} from "./_components/sampling";
 import { setVisibleInterval } from "@/lib/polling";
 
 // Renders a translated string, turning <b>…</b> spans into bold elements, so a sentence with emphasis stays one key.
@@ -357,6 +364,7 @@ function ProfileSheet({
   const [customHeaders, setCustomHeaders] = React.useState("");
   const [clearCustomHeaders, setClearCustomHeaders] = React.useState(false);
   const [retry, setRetry] = React.useState<LLMRetryOverride>(ZERO_OVERRIDE); // retry override for this profile; all 0 = follow the global
+  const [sampling, setSampling] = React.useState<SamplingDraft>(EMPTY_SAMPLING_DRAFT); // optional A/B seed/temperature pin
   const [testing, setTesting] = React.useState(false);
   const [saving, setSaving] = React.useState(false);
   const [models, setModels] = React.useState<string[]>([]);
@@ -392,6 +400,7 @@ function ProfileSheet({
     setCustomHeaders("");
     setClearCustomHeaders(false);
     setRetry(profile?.retry ?? ZERO_OVERRIDE);
+    setSampling(draftFromSampling(profile?.sampling));
     setApiKey("");
     setKeyHint(profile?.api_key_hint ?? "");
     setModels([]);
@@ -469,6 +478,11 @@ function ProfileSheet({
       return;
     }
     if (saving) return;
+    const pin = samplingFromDraft(format, sampling);
+    if ("error" in pin) {
+      toast.error(pin.error);
+      return;
+    }
     setSaving(true);
     try {
       const { id } = await api.saveLLMProfile({
@@ -496,6 +510,7 @@ function ProfileSheet({
         custom_headers: format === "bedrock-gateway" ? customHeaders : "",
         clear_custom_headers: clearCustomHeaders,
         retry,
+        sampling: pin.value,
       });
       if (isNew) toast.success(t('Created: {name} (use "Set as active" on its card to enable it)', { name: name.trim() }));
       else
@@ -905,6 +920,8 @@ function ProfileSheet({
               </Select>
             </div>
           </div>
+
+          <ProfileSamplingFields format={format} value={sampling} onChange={setSampling} />
 
           <ProfileRetryFields value={retry} onChange={setRetry} />
         </div>

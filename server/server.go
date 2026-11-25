@@ -461,6 +461,7 @@ func (s *Server) loadLLMConfig() (agent.Config, bool) {
 	cfg.SessionHeaderKey = p.SessionHeaderKey
 	cfg.UserAgent = p.UserAgent
 	cfg.CustomHeaders = p.CustomHeaders
+	cfg.Sampling = p.Sampling
 	s.applyProfileRetry(&cfg, p)
 	// Ollama profiles run keyless (local server); the other formats need a key.
 	if cfg.APIKey == "" && cfg.NeedsAPIKey() {
@@ -489,6 +490,7 @@ func (s *Server) saveLLMConfig(cfg agent.Config) error {
 	var sessionHeaderKey string
 	var userAgent string
 	var retry db.RetryOverride
+	var sampling db.Sampling
 	clearCustomHeaders := format != "bedrock-gateway"
 	if profs, _ := s.m.pg.ListProfiles(); profs != nil {
 		for _, p := range profs {
@@ -503,6 +505,7 @@ func (s *Server) saveLLMConfig(cfg agent.Config) error {
 				sessionHeaderKey = p.SessionHeaderKey
 				userAgent = p.UserAgent
 				retry = p.Retry
+				sampling = p.Sampling
 				break
 			}
 		}
@@ -514,6 +517,7 @@ func (s *Server) saveLLMConfig(cfg agent.Config) error {
 		Priority: priority, PoolExclude: poolExclude, Streaming: streaming,
 		MaxTokens: maxTokens, MaxTokensField: maxTokensField, SessionHeaderKey: sessionHeaderKey, UserAgent: userAgent,
 		Retry: retry, CustomHeaders: cfg.CustomHeaders, ClearCustomHeaders: clearCustomHeaders,
+		Sampling: sampling,
 	})
 	if err != nil {
 		return err
@@ -648,6 +652,7 @@ func (s *Server) loadProfileConfig(id int64) (agent.Config, bool) {
 	cfg.SessionHeaderKey = p.SessionHeaderKey
 	cfg.UserAgent = p.UserAgent
 	cfg.CustomHeaders = p.CustomHeaders
+	cfg.Sampling = p.Sampling
 	s.applyProfileRetry(&cfg, p)
 	if cfg.APIKey == "" && cfg.NeedsAPIKey() {
 		return cfg, false

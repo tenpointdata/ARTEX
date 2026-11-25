@@ -680,6 +680,9 @@ type LLMProfileDTO struct {
 	// window). Per item attempts: 0=inherit the global policy | -1=disable that retry
 	// layer | >0=count; interval_ms: 0=default exponential backoff | >0=use that fixed millisecond interval. All zero = fully follow the global policy, i.e. the historical behavior.
 	Retry db.RetryOverride `json:"retry"`
+	// Optional sampling pin for reproducible A/B runs: seed (openai/ollama only)
+	// and a default temperature; an absent field is not pinned.
+	Sampling db.Sampling `json:"sampling"`
 }
 
 func llmProfileDTO(p *db.LLMProfile) LLMProfileDTO {
@@ -707,6 +710,7 @@ func llmProfileDTO(p *db.LLMProfile) LLMProfileDTO {
 		UserAgent:        p.UserAgent,
 		CustomHeadersSet: p.CustomHeaders != "",
 		Retry:            p.Retry,
+		Sampling:         p.Sampling,
 	}
 }
 

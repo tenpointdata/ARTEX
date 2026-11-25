@@ -2955,5 +2955,14 @@
   "Clear the anchor assets": "Bağlantı varlıklarını temizle",
   "Failed to load assets: {error}": "Varlıklar yüklenemedi: {error}",
   "No assets": "Varlık yok",
-  "Showing the first {count} of {total} assets": "{total} varlığın ilk {count} tanesi gösteriliyor"
+  "Showing the first {count} of {total} assets": "{total} varlığın ilk {count} tanesi gösteriliyor",
+  "Sampling seed must be a whole number": "Örnekleme tohumu bir tam sayı olmalıdır",
+  "Sampling temperature must be between 0 and 2": "Örnekleme sıcaklığı 0 ile 2 arasında olmalıdır",
+  "Sampling pin (optional, for A/B runs)": "Örnekleme sabitleme (isteğe bağlı, A/B çalıştırmaları için)",
+  "Seed": "Tohum",
+  "Seed (empty = not pinned)": "Tohum (boş = sabitlenmez)",
+  "Seed: openai / ollama only": "Tohum: yalnızca openai / ollama",
+  "Temperature": "Sıcaklık",
+  "Temperature 0–2 (empty = not pinned)": "Sıcaklık 0–2 (boş = sabitlenmez)",
+  "Pins sampling so replicates of an evaluation suite vary less; the suite stamps both values. The seed is sent only on the openai and ollama formats. The temperature applies when the calling code sets none of its own.": "Değerlendirme paketinin tekrarları daha az değişsin diye örneklemeyi sabitler; paket iki değeri de damgalar. Tohum yalnızca openai ve ollama biçimlerinde gönderilir. Sıcaklık, çağıran kod kendi sıcaklığını belirlemediğinde uygulanır."
 }
