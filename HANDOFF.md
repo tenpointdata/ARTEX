@@ -1,6 +1,6 @@
 # HANDOFF.md — ARTEX
 
-**Last updated:** 2026-11-24 17:30 MST, by claude-code: c-597b06 (E7, in review): stale worker_nodes rows no longer pile up under Kubernetes. Earlier hand-offs are under Deltas and in `ej handoff log`.
+**Last updated:** 2026-11-24 17:39 MST, by claude-code: c-d4946f (E7, in review): the cluster egress deny now follows moved pods. Earlier hand-offs are under Deltas and in `ej handoff log`.
 
 > Single entry point for whoever picks this up next (any agent or human), with no access to the
 > originating conversation. Read this first, then the sections of the code it points at.
@@ -215,32 +215,32 @@ body, through the versioned prompt API, and the starting bodies are restored aft
 ## Triage (next handful)
 
 **Agents' lane**
-0. *(unclaimed)* — **E7: worker nodes miss other runtime control-node state** (M), card `c-6bcdd3`: LLM profiles,
+1. *(unclaimed)* — **E7: worker nodes miss other runtime control-node state** (M), card `c-6bcdd3`: LLM profiles,
    MCP servers, custom tools and similar are rebuilt only at start. Done = each one is followed or listed in
    DISTRIBUTED.md Limits.
-1. *(unclaimed)* — **SEC: per-task uid follow-ups** (S each): `c-12df03` (single-uid start-up fails on a
+2. *(unclaimed)* — **SEC: per-task uid follow-ups** (S each): `c-12df03` (single-uid start-up fails on a
    socket; MCP uid not egress-filtered), `c-e70e5c` (release ended tasks at start-up; per-key lock). The "Done when" is on each card.
-2. *(unclaimed)* — **E5 UI: hide role-lacking actions on existing pages** (M), card `c-92bb52`. Done = as
+3. *(unclaimed)* — **E5 UI: hide role-lacking actions on existing pages** (M), card `c-92bb52`. Done = as
    reviewer and operator, no visible control answers 403. Then `c-601ec6` (chain newest-first paging, S).
    (`c-7c4715`, the client_read console, is built and in review on `ej/20261124-144554-67afc9`.)
-3. *(unclaimed)* — **SEC: gorilla/websocket bump, GO-2026-6278** (XS), card `c-c10f2c`; needs network.
+4. *(unclaimed)* — **SEC: gorilla/websocket bump, GO-2026-6278** (XS), card `c-c10f2c`; needs network.
    Done = govulncheck clean.
-4. *(unclaimed)* — **SEC: upstream-gate residuals** (M), card `c-5a6f96`: task-scoped rules on proxy
+5. *(unclaimed)* — **SEC: upstream-gate residuals** (M), card `c-5a6f96`: task-scoped rules on proxy
    dials, go-mitmproxy keep-alive host pinning, and the global-egress-proxy bypass. Done = a test or a decision for each.
-5. *(unclaimed)* — **SEC: logout revocation** (S), card `c-a0af33`. Done = a token replayed after
+6. *(unclaimed)* — **SEC: logout revocation** (S), card `c-a0af33`. Done = a token replayed after
    logout or a password change gets 401, by a test.
-6. *(unclaimed)* — **SEC: Docker Desktop named volumes** (S), card `c-775dc2`. Done = `docker compose up`
+7. *(unclaimed)* — **SEC: Docker Desktop named volumes** (S), card `c-775dc2`. Done = `docker compose up`
    starts on a Mac with the isolation self-test passing; Linux bind-mount path documented.
-7. *(unclaimed)* — **E1 Client-grade reporting & deliverables** (M). Turn `report/` into
+8. *(unclaimed)* — **E1 Client-grade reporting & deliverables** (M). Turn `report/` into
    CVSS/EPSS-scored, remediation-bearing, standards-mapped deliverables (OWASP ASVS/WSTG, MITRE
    ATT&CK). Done = a report export with per-finding CVSS vector + remediation + framework tags,
    covered by tests. Card `c-8f9cca`.
-8. *(unclaimed)* — **E2 UI: gate integrations controls by role** (S), card `c-119206`. Done = as reviewer
+9. *(unclaimed)* — **E2 UI: gate integrations controls by role** (S), card `c-119206`. Done = as reviewer
    and as client_read, no E2 control the server refuses is shown, and the finding detail has no 403.
 
-9. *(unclaimed)* — **E2×E5 tracker RBAC** (S), card `c-5c4009`. Done = tracker create/update/delete
+10. *(unclaimed)* — **E2×E5 tracker RBAC** (S), card `c-5c4009`. Done = tracker create/update/delete
    need admin (like notify channels), push/sync stay operator; RBAC tests pass.
-10. *(unclaimed)* — **Findings stat cards honour lane/import filters; fact-node deep link** (S), card
+11. *(unclaimed)* — **Findings stat cards honour lane/import filters; fact-node deep link** (S), card
    `c-7651e5`. Done = stat cards match the filtered list under `lane=`/`import_id=` (db test); the
    Past imports fact node opens the task graph on that node.
 
@@ -639,8 +639,10 @@ Card ids in brackets:
 ## Deltas
 
 <!-- composite:deltas · newest first; Composite rewrites this block on every merge (ej handoff merge / merge_handoff) -->
-- **2026-11-24 17:30 MST** · claude-code · `ej/20261124-172040-ead433` `dd269fd`→`0450525` (1 commit) · `h-8ce710` — c-597b06 (E7, in review): stale worker_nodes rows no longer pile up under Kubernetes. db.NodeRetention = 20 × NodeTTL (15 min); ListNodes hides rows silent longer than that and every node heartbeat runs PruneNodes (db/worker_nodes.go, server/node.go). New test db/worker_nodes_test.go (live + recently dead listed, stale hidden then deleted) passes on Postgres 18; existing two-node server tests pass. docs/DISTRIBUTED.md gains a "Node registry" bullet. Moved the E3 and E4 Current state detail to docs/handoff/ to keep HANDOFF.md under 60 KB. **Next:** Land this branch with E7. Optionally confirm on the kind install (c-8cfbfe) that after a few rollouts GET /api/settings/nodes shows only live + recently dead pods once 15 min pass. **Decided:** Retention is a fixed 20 × NodeTTL (15 min) rather than a setting: long enough to see a crashed pod on the nodes page, short enough that rollouts do not accumulate. Both hide in the query (correct even if pruning fails) and delete from the heartbeat (no separate sweeper; any running node cleans up).
+- **2026-11-24 17:39 MST** · claude-code · `ej/20261124-172839-c17308` `9c6a6a7`→`4d5d6e4` (1 commit) · `h-2932ac` — c-d4946f (E7, in review): the cluster egress deny now follows moved pods. egress.sh re-resolves ARTEX_EGRESS_DENY_HOSTS/ALLOW_HOSTS every ARTEX_EGRESS_REFRESH s (chart egress.refreshSeconds, default 10) in a loop start.sh starts. When an answer changes it rewrites ARTEX_EGRESS in one iptables-restore --noflush commit (also used at start). A name that stops resolving keeps its last addresses; NAME:PORT denies one TCP port. Chart: new headless <release>-control-pods (API port on the control pod IP); the PostgreSQL Service publishes not-ready addresses. Verified live on kind (own namespace, removed): after deleting artex-postgresql-0 (.13 → .14) and the control pod (.12 → .15), k8s-egress-probe.sh showed the executor refused at the new IPs, with 0 restarts. scripts/verify.sh passed. The branch merges the unlanded c-8cfbfe branch ej/20261124-155353-b1c60a. **Next:** Land ej/20261124-172839-c17308; it carries c-8cfbfe. Optionally test on a socket-LB CNI such as Cilium KPR, where denying the control pod IP may also refuse the proxy Service (gotcha in docs/handoff/2026-11-24-e7-kind-install-egress.md). **Decided:** The re-resolve loop is in egress.sh rather than the Go server, so one code path writes the executor rules for Docker and Kubernetes. Rebuilds are atomic through iptables-restore --noflush. Unresolvable names keep their last addresses (fail closed). CIDR auto-detection was rejected: a pod has no portable source for the pod and Service CIDRs. Strict clusterCIDRs stays opt-in.
 - _Older hand-offs, a line each; `ej handoff log` has them whole:_
+- **2026-11-24 17:39 MST** · claude-code · `h-50b1c4` — c-81193b (now in review): the finding detail hides controls the role is refused. **Next:** Land this branch (it carries c-119206).
+- **2026-11-24 17:30 MST** · claude-code · `h-8ce710` — c-597b06 (E7, in review): stale worker_nodes rows no longer pile up under Kubernetes. **Next:** Land this branch with E7.
 - **2026-11-24 17:28 MST** · claude-code · `h-1cba84` — c-45c921 (now in review), on a branch that merges the unlanded E9 branch (ej/20261124-145257-79147f), so landing it lands E9 too. **Next:** Land ej/20261124-170157-3aeba5; it carries E9.
 - **2026-11-24 17:26 MST** · claude-code · `h-1e1166` — c-c18f43 (mechanism landed on this branch; renumbering stays open per landing): scripts/check-migration-versions.sh (+ self-test, verify.sh step, PR-only CI job migration-versions) fails a migration not numbered above main's newest, duplicates, and edited/rem… **Next:** As each branch lands, renumber its migration above main's newest (Known issues lists them: 0017_finding_classification, 0021_lesson_scope_scrub, 0023_finding_import_links, 0023_change_notify, one of…
 - **2026-11-24 17:21 MST** · claude-code · `h-c66079` — c-cea6ac (now in review): explained and fixed why c-4c8fd6 task 2 was `done` mid-decomposition. **Next:** Land ej/20261124-170856-f6245f.
@@ -653,8 +655,6 @@ Card ids in brackets:
 - **2026-11-24 16:40 MST** · claude-code · `h-97338f` — c-548e8b (E7, now in review): worker nodes reach the control API (node RPC) over TLS with the CA pinned by default. **Next:** Land this branch (it carries E7 and c-3b781a). **Issues:** opened #c-677166.
 - **2026-11-24 16:40 MST** · claude-code · `h-55d7e2` — c-990198 (now in review): Cost & efficiency wall time now includes the first call's latency. **Next:** Land ej/c-990198-wall-time in place of (or after) ej/20261124-145313-129188; it lands E6 + c-f4a69d with it.
 - **2026-11-24 16:33 MST** · claude-code · `h-a38b70` — c-2af578 (card, now in review; follow-up card c-1229ff opened): the Docker image no longer runs `bbot --install-all-deps`. **Next:** c-1229ff: make the pinned tools and bbot.yml visible to executor-run scans (per-run HOME).
-- **2026-11-24 16:33 MST** · claude-code · `h-0857b6` — c-29ff19 (E7 follow-up, in review): worker transcripts are shared through PostgreSQL, so any node resumes any intent. **Next:** Land after E7 (ej/20261124-150525-1a95b3) and after the branches carrying 0023/0024; a database that applied 0025 refuses older pending migrations.
-- **2026-11-24 16:17 MST** · claude-code · `h-11f65f` — c-3b781a (E7 follow-up, now in review): a finding recorded by a worker-node intent now binds the control node's captured request/response. **Next:** Land this branch (it carries E7). **Issues:** opened #c-548e8b, #c-7ad4da.
 <!-- /composite:deltas -->
 
 _(written by `merge_handoff`)_
