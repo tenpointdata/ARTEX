@@ -61,8 +61,7 @@ See `docs/ARCHITECTURE.md` for the code-level map. Summary:
 
 **2026-11-24 — E7 kind install (`c-8cfbfe`) + cluster egress deny re-resolved (`c-d4946f`); in review on
 `ej/20261124-172839-c17308`, which merges the c-8cfbfe branch.** `egress.sh` re-resolves the deny/allow names
-every `egress.refreshSeconds` (10 s) and swaps the chain atomically; verified live on kind (PostgreSQL and
-control pod reschedules denied without restarts). Detail: `docs/handoff/2026-11-24-e7-kind-install-egress.md`.
+every 10 s and swaps the chain atomically; verified live on kind. Detail: `docs/handoff/2026-11-24-e7-kind-install-egress.md`.
 
 **2026-11-24 — Stale `worker_nodes` rows pruned (`c-597b06`, E7; in review).** Under Kubernetes the
 node id is the pod name, so each rollout left dead rows. `db.NodeRetention` (20 × NodeTTL = 15 min):
