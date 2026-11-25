@@ -301,6 +301,9 @@ first on the E7 branch and again, all passing, on that work merged with `main`
 (#46), which includes the default `controlTLS` (generated CA). Workers reached
 `https://artex-control:8787` with `ARTEX_CONTROL_CA` pinned and logged no
 plain-HTTP warning.
+The real-cluster run (separate hosts, real CNI, storage, LLM key and Ingress
+TLS) is still to do: `deploy/lab/README.md` "Real cluster" has the values
+file and `scripts/k8s-install-checks.sh`, which prints this table.
 
 | Check | Result |
 |---|---|

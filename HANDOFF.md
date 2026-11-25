@@ -81,6 +81,10 @@ while either read fails, and on a settings change drops the task agents and hold
 Distributed workers + Helm, browser MCP relay, finding wake-ups, proxy scope default, drain ack, LLM profile
 reload, TLS to the control API. Detail moved to `docs/handoff/2026-11-24-e7-distributed.md`.
 
+**2026-11-24 — Real-cluster install kit (`c-620510`, E7; blocked on a human).** On `ej/20261124-173856-b39c78`. `deploy/lab/values-multihost.yaml` (renders/lints), runbook
+`deploy/lab/README.md` "Real cluster", and `scripts/k8s-install-checks.sh NS [RELEASE]`, which prints the check
+table. Not run on any cluster.
+
 **2026-11-24 — E7 kind install (`c-8cfbfe`) + cluster egress deny re-resolved (`c-d4946f`); in review on
 `ej/20261124-172839-c17308`, which merges the c-8cfbfe branch.** `egress.sh` re-resolves the deny/allow names
 every 10 s and swaps the chain atomically; verified live on kind. Detail: `docs/handoff/2026-11-24-e7-kind-install-egress.md`.
@@ -208,7 +212,8 @@ image, E8 eval suite) moved to `docs/handoff/2026-11-24-current-state-archive.md
   notify) suit how operators work.
 
 - **E7 on a real multi-machine cluster with a real model** (card `c-620510`): separate hosts, a real CNI
-  with `networkPolicy.enabled`, an LLM key and an Ingress with TLS. Redo the table in docs/DISTRIBUTED.md.
+  with `networkPolicy.enabled`, an LLM key and an Ingress with TLS. Follow `deploy/lab/README.md` "Real cluster";
+  `scripts/k8s-install-checks.sh` prints the table to paste into docs/DISTRIBUTED.md.
 
 **Blocked**
 - **E2 browser e2e as a CI job** (S), card `c-1198a2`: blocked on c-cc25b6's SHA-pinned ci.yml landing. Done = a
