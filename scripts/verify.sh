@@ -99,8 +99,11 @@ if want_go; then
 
   check_gofmt() {
     local -a files=()
-    local out
-    mapfile -t files < <(git ls-files '*.go')
+    local out f
+    # Read loop, not mapfile: macOS ships bash 3.2, which has no mapfile.
+    while IFS= read -r f; do
+      files+=("$f")
+    done < <(git ls-files '*.go')
     if [ "${#files[@]}" -eq 0 ]; then
       return 0
     fi
