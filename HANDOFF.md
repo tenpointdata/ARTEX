@@ -59,7 +59,7 @@ See `docs/ARCHITECTURE.md` for the code-level map. Summary:
 
 ## Current state
 
-**2026-11-24 — LLM sampling pin (`c-d73308`, E8; in review).** Migration 0025 adds nullable
+**2026-11-24 — LLM sampling pin (`c-d73308`, E8; in review).** Migration 0026 (0025 is taken by the in-flight session-transcripts branch) adds nullable
 `llm_profiles.sampling_seed`/`sampling_temperature`; `agent/sampling.go` splices them into the wire body
 (seed on openai/ollama only; temperature only where the caller set none). Suite stamps `llm_sampling`.
 
