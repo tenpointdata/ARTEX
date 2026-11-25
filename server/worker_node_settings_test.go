@@ -4,8 +4,6 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
-
-	"github.com/Autumn-27/artex/db"
 )
 
 // A worker node builds its own agents from the settings rows, so a capture
@@ -30,7 +28,9 @@ func TestWorkerNodeFollowsAgentSettings(t *testing.T) {
 	t.Cleanup(func() { _ = wm.Close() })
 	ws := &Server{m: wm, node: NodeConfig{Role: RoleWorker, NodeID: "node-s"}}
 	var f agentSettingsFollower
-	ws.followAgentSettings(&f)
+	if block := ws.followAgentSettings(&f); block != "" {
+		t.Fatalf("first poll blocked: %q", block)
+	}
 	if wm.TrafficEnabled() {
 		t.Fatal("capture on before any change")
 	}
@@ -50,20 +50,42 @@ func TestWorkerNodeFollowsAgentSettings(t *testing.T) {
 		t.Fatal("worker node kept capture off after the control node turned it on")
 	}
 
-	// An unchanged revision reads one row and changes nothing, even when a row
-	// is edited behind the API's back.
+	// A row edited behind the API's back (no revision, no announcement) is
+	// followed too: the values are compared, so a lost signal cannot leave a
+	// worker's agents on the old egress path.
 	if err := control.pg.SetBool(settingTrafficCapture, false); err != nil {
 		t.Fatal(err)
 	}
-	ws.followAgentSettings(&f)
-	if !wm.TrafficEnabled() {
-		t.Fatal("reloaded without a revision bump")
+	if block := ws.followAgentSettings(&f); block == "" {
+		t.Fatal("claims not held for the poll that changed the egress settings")
 	}
-	if _, err := control.pg.BumpSettingsRevision(db.AgentSettingsRevisionKey); err != nil {
-		t.Fatal(err)
-	}
-	ws.followAgentSettings(&f)
 	if wm.TrafficEnabled() {
 		t.Fatal("worker node did not follow capture off")
+	}
+	if block := ws.followAgentSettings(&f); block != "" {
+		t.Fatalf("claims still blocked with nothing changed: %q", block)
+	}
+}
+
+// Fail closed: while the settings cannot be read, claims are blocked and the
+// values the node runs on are kept.
+func TestWorkerNodeBlocksClaimsWhileAgentSettingsUnreadable(t *testing.T) {
+	skipWithoutDSN(t)
+	wm, err := NewManager(t.TempDir(), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ws := &Server{m: wm, node: NodeConfig{Role: RoleWorker, NodeID: "node-u"}}
+	var f agentSettingsFollower
+	if block := ws.followAgentSettings(&f); block != "" {
+		t.Fatalf("first poll blocked: %q", block)
+	}
+	was := wm.TrafficEnabled()
+	_ = wm.Close() // every read now fails
+	if block := ws.followAgentSettings(&f); block == "" {
+		t.Fatal("claims allowed while the agent settings are unreadable")
+	}
+	if wm.TrafficEnabled() != was {
+		t.Fatal("an unreadable read changed the applied settings")
 	}
 }

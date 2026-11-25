@@ -11,7 +11,7 @@ import (
 )
 
 // The LLM recording switch is held in memory, so a worker node must follow it
-// through the agent settings revision: otherwise turning recording on at the
+// with the agent settings it compares every poll: otherwise turning recording on at the
 // control node leaves the worker's LLM calls unrecorded (c-6bcdd3).
 func TestWorkerNodeFollowsLLMRecordSwitch(t *testing.T) {
 	skipWithoutDSN(t)
@@ -47,12 +47,6 @@ func TestWorkerNodeFollowsLLMRecordSwitch(t *testing.T) {
 		t.Fatal("worker node kept LLM recording off after the control node turned it on")
 	}
 
-	// A worker node never bumps the revision itself.
-	before, _ := control.pg.SettingsRevision(db.AgentSettingsRevisionKey)
-	ws.bumpAgentSettingsRevision()
-	if after, _ := control.pg.SettingsRevision(db.AgentSettingsRevisionKey); after != before {
-		t.Fatalf("a worker node bumped the agent settings revision %d -> %d", before, after)
-	}
 }
 
 // An agent's saved settings (max turns, run seconds, web search) are read when
@@ -124,5 +118,12 @@ func TestWorkerNodeFollowsAgentConfigSave(t *testing.T) {
 	}
 	if got := ws.agentMaxTurns("worker"); got != want {
 		t.Fatalf("worker node reads max_turns %d, want %d", got, want)
+	}
+
+	// A worker node never bumps the revision itself (it would follow its own bump).
+	before, _ := pg.SettingsRevision(db.AgentConfigRevisionKey)
+	ws.bumpAgentConfigRevision()
+	if after, _ := pg.SettingsRevision(db.AgentConfigRevisionKey); after != before {
+		t.Fatalf("a worker node bumped the agent config revision %d -> %d", before, after)
 	}
 }

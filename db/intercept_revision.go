@@ -12,18 +12,18 @@ import (
 // not a secret setting, so it is stored as plain decimal text.
 const InterceptRulesRevisionKey = "intercept_rules_revision"
 
-// AgentSettingsRevisionKey is the settings key of the agent settings revision:
-// bumped whenever a settings change rebuilds the agents (traffic capture, the
-// global egress proxy, web search), so worker nodes, which build their own
-// agents from the same rows, reload and rebuild too.
-const AgentSettingsRevisionKey = "agent_settings_revision"
-
 // LLMConfigRevisionKey is the settings key of the LLM configuration revision:
 // bumped whenever an API change drops the LLM provider caches (an LLM profile
 // saved, activated or deleted, the active config replaced, the retry policy or
 // the failover switches changed, an agent's profile binding changed), so worker
 // nodes drop theirs and re-apply the active profile from the database.
 const LLMConfigRevisionKey = "llm_config_revision"
+
+// AgentConfigRevisionKey is the settings key of the agent config revision:
+// bumped whenever an agent's saved settings change (PUT /api/agents/{key}/config:
+// max turns, run seconds, web search), which are read when a task's agents are
+// built, so worker nodes drop the task agents they built from the old row.
+const AgentConfigRevisionKey = "agent_config_revision"
 
 // InterceptRulesRevision returns the current intercept rules revision; 0 when
 // it has never been bumped. A stored value that is not a decimal integer is an

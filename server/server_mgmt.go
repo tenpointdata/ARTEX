@@ -536,7 +536,7 @@ func (s *Server) pgSaveAgentConfig(w http.ResponseWriter, r *http.Request) {
 	// Task bundles capture operational Agent settings (turn/time budgets, tools,
 	// web search). Rebuild them even when no global profile is configured.
 	s.invalidateTaskAgents()
-	s.bumpAgentSettingsRevision() // worker nodes drop their task bundles too
+	s.bumpAgentConfigRevision() // worker nodes drop their task agents too
 	// rebuild the live agents so the new max_turns/run_seconds/binding apply without a restart.
 	s.cfgMu.Lock()
 	cfg, on := s.llmCfg, s.llmOn
