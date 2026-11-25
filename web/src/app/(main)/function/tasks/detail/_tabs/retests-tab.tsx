@@ -84,8 +84,13 @@ export function RetestsTab({ taskId }: { taskId: string }) {
       <div className="grid items-start gap-4 lg:grid-cols-[minmax(16rem,22rem)_minmax(0,1fr)]">
         <Card className="min-w-0">
           <CardHeader>
-            <CardTitle>{t("Select a vulnerability")}{data ? ` · ${data.total}` : ""}</CardTitle>
-            <CardDescription>{t("View retest history for this task's vulnerabilities, or start a new retest.")}</CardDescription>
+            <CardTitle>
+              {t("Select a vulnerability")}
+              {data ? ` · ${data.total}` : ""}
+            </CardTitle>
+            <CardDescription>
+              {t("View retest history for this task's vulnerabilities, or start a new retest.")}
+            </CardDescription>
           </CardHeader>
           <CardContent className="flex max-h-[32rem] flex-col overflow-y-auto">
             {!loaded && !error ? <Skeleton className="h-24 w-full" /> : null}
@@ -111,7 +116,9 @@ export function RetestsTab({ taskId }: { taskId: string }) {
               <Empty>
                 <EmptyHeader>
                   <EmptyTitle>{t("No vulnerabilities to retest")}</EmptyTitle>
-                  <EmptyDescription>{t("Once this task discovers vulnerabilities, you can manually start a retest here.")}</EmptyDescription>
+                  <EmptyDescription>
+                    {t("Once this task discovers vulnerabilities, you can manually start a retest here.")}
+                  </EmptyDescription>
                 </EmptyHeader>
               </Empty>
             ) : null}

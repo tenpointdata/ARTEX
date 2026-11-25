@@ -2,7 +2,7 @@ package db
 
 import "testing"
 
-// TestProfileSamplingRoundTrip pins the sampling-pin columns (migration 0027)
+// TestProfileSamplingRoundTrip pins the sampling-pin columns (migration 0028)
 // through both read column lists and the keep-key update branch, and checks
 // that clearing the pin stores NULL again (not a zero seed).
 func TestProfileSamplingRoundTrip(t *testing.T) {

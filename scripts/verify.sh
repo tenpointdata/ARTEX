@@ -99,8 +99,11 @@ if want_go; then
 
   check_gofmt() {
     local -a files=()
-    local out
-    mapfile -t files < <(git ls-files '*.go')
+    local out f
+    # Read loop, not mapfile: macOS ships bash 3.2, which has no mapfile.
+    while IFS= read -r f; do
+      files+=("$f")
+    done < <(git ls-files '*.go')
     if [ "${#files[@]}" -eq 0 ]; then
       return 0
     fi
@@ -145,6 +148,7 @@ if want_web; then
   run_step "web traffic stream tests" bash -c 'cd web && npm run test:traffic-stream'
   run_step "web governance tests" bash -c 'cd web && npm run test:governance'
   run_step "web sse tests" bash -c 'cd web && npm run test:sse'
+  run_step "web triage tests" bash -c 'cd web && npm run test:triage'
   run_step "web i18n check" bash -c 'cd web && npm run test:i18n'
   run_step "web integrations tests" bash -c 'cd web && npm run test:integrations'
   if [ "$FULL" -eq 1 ]; then

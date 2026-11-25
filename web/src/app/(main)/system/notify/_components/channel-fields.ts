@@ -39,7 +39,9 @@ export const CHANNEL_FIELDS: Record<string, FieldDef[]> = {
       key: "secret",
       label: t("Signing secret"),
       kind: "password",
-      help: t("Fill in when the robot's security settings use 'Sign'; leave empty for 'Custom keywords' or when no security setting is enabled"),
+      help: t(
+        "Fill in when the robot's security settings use 'Sign'; leave empty for 'Custom keywords' or when no security setting is enabled",
+      ),
     },
   ],
   feishu: [
@@ -49,7 +51,12 @@ export const CHANNEL_FIELDS: Record<string, FieldDef[]> = {
       kind: "text",
       placeholder: "https://open.feishu.cn/open-apis/bot/v2/hook/...",
     },
-    { key: "secret", label: t("Signature verification secret"), kind: "password", help: t("Fill in when the robot enables 'Signature verification'; otherwise leave empty") },
+    {
+      key: "secret",
+      label: t("Signature verification secret"),
+      kind: "password",
+      help: t("Fill in when the robot enables 'Signature verification'; otherwise leave empty"),
+    },
   ],
   wecom: [
     {
@@ -72,7 +79,12 @@ export const CHANNEL_FIELDS: Record<string, FieldDef[]> = {
         { value: "GET", label: t("GET (no body)") },
       ],
     },
-    { key: "headers", label: t("Custom headers"), kind: "kv", help: t("One KEY=VALUE per line, e.g. Authorization=Bearer xxx") },
+    {
+      key: "headers",
+      label: t("Custom headers"),
+      kind: "kv",
+      help: t("One KEY=VALUE per line, e.g. Authorization=Bearer xxx"),
+    },
     {
       key: "body_template",
       label: t("Body template"),
@@ -106,7 +118,12 @@ export const CHANNEL_FIELDS: Record<string, FieldDef[]> = {
     { key: "password", label: t("Password / auth code"), kind: "password" },
     { key: "from", label: t("From"), kind: "text", placeholder: "artex@example.com" },
     { key: "to", label: t("Recipients"), kind: "list", help: t("Separate multiple addresses with commas") },
-    { key: "tls", label: t("Implicit TLS"), kind: "switch", help: t("On for port 465; keep off for 587 (STARTTLS is automatic)") },
+    {
+      key: "tls",
+      label: t("Implicit TLS"),
+      kind: "switch",
+      help: t("On for port 465; keep off for 587 (STARTTLS is automatic)"),
+    },
   ],
 };
 

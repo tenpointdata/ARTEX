@@ -13,11 +13,11 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger } from "@/components/ui/select";
 import { intlLocale, t } from "@/i18n";
 import { api } from "@/lib/api";
+import { setVisibleInterval } from "@/lib/polling";
 import { useStoredSortPreference } from "@/lib/sort-preference";
 import { statusMeta } from "@/lib/status";
 import type { Finding, FindingStatus } from "@/lib/types";
 import { cn } from "@/lib/utils";
-import { setVisibleInterval } from "@/lib/polling";
 
 type FindingSortField = "time";
 
@@ -174,7 +174,7 @@ export function FindingsTab({ taskId }: { taskId: string }) {
     setFindings((cur) => cur.map((x) => (x.id === f.id ? { ...x, status: next } : x)));
     try {
       await api.setFindingStatus(f.finding_id, next);
-      toast.success(t("Marked as \"{status}\"", { status: statusMeta("finding", next).label }));
+      toast.success(t('Marked as "{status}"', { status: statusMeta("finding", next).label }));
     } catch (e) {
       setFindings((cur) => cur.map((x) => (x.id === f.id ? { ...x, status: prev } : x)));
       toast.error(t("Update failed: {error}", { error: (e as Error).message }));
@@ -221,7 +221,9 @@ export function FindingsTab({ taskId }: { taskId: string }) {
           <Row key={f.id} f={f} contextTaskId={taskId} onStatus={onStatus} />
         ))}
         {items.length === 0 && (
-          <p className="px-4 py-8 text-center text-sm text-muted-foreground">{t("No confirmed findings yet for this task or its directly linked tasks.")}</p>
+          <p className="px-4 py-8 text-center text-sm text-muted-foreground">
+            {t("No confirmed findings yet for this task or its directly linked tasks.")}
+          </p>
         )}
       </CardContent>
     </Card>

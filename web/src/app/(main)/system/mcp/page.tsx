@@ -1,28 +1,23 @@
 "use client";
 
 import * as React from "react";
-import { toast } from "sonner";
-import { PlusIcon, RefreshCwIcon, ServerIcon, Trash2Icon } from "lucide-react";
 
+import { PlusIcon, RefreshCwIcon, ServerIcon, Trash2Icon } from "lucide-react";
+import { toast } from "sonner";
+
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
-import { Badge } from "@/components/ui/badge";
+import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Switch } from "@/components/ui/switch";
-import { Checkbox } from "@/components/ui/checkbox";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import {
-  Sheet,
-  SheetContent,
-  SheetHeader,
-  SheetTitle,
-  SheetDescription,
-} from "@/components/ui/sheet";
-import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Textarea } from "@/components/ui/textarea";
 import { intlLocale, t } from "@/i18n";
 import { api } from "@/lib/api";
-import type { MCPServer, MCPTool, Agent } from "@/lib/types";
+import type { Agent, MCPServer, MCPTool } from "@/lib/types";
 
 type Transport = "stdio" | "http" | "sse";
 type FormState = {
@@ -61,19 +56,28 @@ export default function MCPPage() {
   const [refreshing, setRefreshing] = React.useState(false);
 
   const load = React.useCallback(() => {
-    api.agents().then(setAgents).catch(() => {});
+    api
+      .agents()
+      .then(setAgents)
+      .catch(() => {
+        // best effort: the agent list is optional here
+      });
     api
       .mcpServers()
       .then((ss) => {
         setServers(ss);
-        ss.forEach((s) =>
-          api
+        ss.forEach((s) => {
+          void api
             .resourceVisibility("mcp", s.id)
             .then((ids) => setVisibility((v) => ({ ...v, [s.id]: ids })))
-            .catch(() => {}),
-        );
+            .catch(() => {
+              // best effort: visibility stays unset for this server
+            });
+        });
       })
-      .catch(() => {});
+      .catch(() => {
+        // best effort: keep the current server list
+      });
   }, []);
   React.useEffect(() => {
     load();
@@ -124,7 +128,7 @@ export default function MCPPage() {
     });
     setTab("config");
     setOpen(true);
-    loadTools(s.id);
+    void loadTools(s.id);
   }
 
   async function loadTools(id: number) {
@@ -230,8 +234,8 @@ export default function MCPPage() {
       await api.toggleVisibility(agentId, "mcp", serverId, !on);
       toast.success(
         on
-          ? t("Revoked visibility from \"{agent}\"", { agent: agentName })
-          : t("Granted visibility to \"{agent}\"", { agent: agentName }),
+          ? t('Revoked visibility from "{agent}"', { agent: agentName })
+          : t('Granted visibility to "{agent}"', { agent: agentName }),
       );
       load();
     } catch (e) {
@@ -310,8 +314,9 @@ export default function MCPPage() {
               value={form.url}
               onChange={(e) => setF({ url: e.target.value })}
             />
-            <label className="flex items-center gap-2 text-sm">
+            <label htmlFor="m-insecure" className="flex items-center gap-2 text-sm">
               <Checkbox
+                id="m-insecure"
                 checked={form.insecure}
                 onCheckedChange={(v) => setF({ insecure: v === true })}
               />
@@ -337,9 +342,7 @@ export default function MCPPage() {
           <Textarea
             id="m-env"
             className="font-mono"
-            placeholder={
-              form.transport !== "stdio" ? "Authorization=Bearer xxxx" : "API_KEY=xxxx\nFOO=bar"
-            }
+            placeholder={form.transport !== "stdio" ? "Authorization=Bearer xxxx" : "API_KEY=xxxx\nFOO=bar"}
             value={form.env}
             onChange={(e) => setF({ env: e.target.value })}
           />
@@ -367,9 +370,7 @@ export default function MCPPage() {
               <div key={tool.name} className="py-2.5">
                 <code className="font-mono text-sm">{tool.name}</code>
                 {tool.description && (
-                  <p className="text-muted-foreground mt-0.5 text-xs leading-relaxed">
-                    {tool.description}
-                  </p>
+                  <p className="text-muted-foreground mt-0.5 text-xs leading-relaxed">{tool.description}</p>
                 )}
               </div>
             ))}
@@ -410,30 +411,34 @@ export default function MCPPage() {
                   {s.transport}
                 </Badge>
                 {s.last_connect_ok === false ? (
-                  <Badge variant="destructive" className="max-w-55 truncate font-normal" title={s.last_connect_err ?? t("connect failed")}>
-                    {t("down: {error}", { error: s.last_connect_err ? s.last_connect_err.slice(0, 60) : t("connect failed") })}
+                  <Badge
+                    variant="destructive"
+                    className="max-w-55 truncate font-normal"
+                    title={s.last_connect_err ?? t("connect failed")}
+                  >
+                    {t("down: {error}", {
+                      error: s.last_connect_err ? s.last_connect_err.slice(0, 60) : t("connect failed"),
+                    })}
                   </Badge>
                 ) : s.last_connect_ok === true ? (
                   <Badge variant="secondary" className="font-normal">
-                    {t("ok {time}", { time: s.last_connect_at ? new Date(s.last_connect_at).toLocaleTimeString(intlLocale) : "" })}
+                    {t("ok {time}", {
+                      time: s.last_connect_at ? new Date(s.last_connect_at).toLocaleTimeString(intlLocale) : "",
+                    })}
                   </Badge>
                 ) : (
                   <Badge variant="outline" className="text-muted-foreground font-normal">
                     {t("not connected yet")}
                   </Badge>
                 )}
-                <div className="ml-auto flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
-                  <Switch
-                    checked={s.enabled}
-                    onCheckedChange={() => toggleEnabled(s)}
-                    aria-label={t("Enable")}
-                  />
-                  <Button
-                    size="icon"
-                    variant="outline"
-                    aria-label={t("Delete")}
-                    onClick={() => removeServer(s)}
-                  >
+                {/* biome-ignore lint/a11y/noStaticElementInteractions: click shield so the controls do not open the card; not itself interactive. */}
+                <div
+                  className="ml-auto flex items-center gap-2"
+                  role="presentation"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <Switch checked={s.enabled} onCheckedChange={() => toggleEnabled(s)} aria-label={t("Enable")} />
+                  <Button size="icon" variant="outline" aria-label={t("Delete")} onClick={() => removeServer(s)}>
                     <Trash2Icon className="text-destructive" />
                   </Button>
                 </div>
@@ -441,14 +446,18 @@ export default function MCPPage() {
             </CardHeader>
             <CardContent className="grid gap-3">
               <p className="text-muted-foreground text-sm">
-                {s.tools && s.tools.length > 0 ? t("{count} tools", { count: s.tools.length }) : t("No tools discovered yet")}
+                {s.tools && s.tools.length > 0
+                  ? t("{count} tools", { count: s.tools.length })
+                  : t("No tools discovered yet")}
               </p>
-              <div className="grid gap-2" onClick={(e) => e.stopPropagation()}>
+              {/* biome-ignore lint/a11y/noStaticElementInteractions: click shield so the checkboxes do not open the card; not itself interactive. */}
+              <div className="grid gap-2" role="presentation" onClick={(e) => e.stopPropagation()}>
                 <span className="text-muted-foreground text-xs">{t("Visibility (granted per agent)")}</span>
                 <div className="flex flex-wrap gap-x-4 gap-y-2">
                   {agents.map((a) => (
-                    <label key={a.key} className="flex items-center gap-2 text-sm">
+                    <label key={a.key} htmlFor={`m-vis-${s.id}-${a.id}`} className="flex items-center gap-2 text-sm">
                       <Checkbox
+                        id={`m-vis-${s.id}-${a.id}`}
                         checked={(visibility[s.id] ?? []).includes(a.id)}
                         onCheckedChange={() => toggleVisibility(s.id, a.id, a.name)}
                       />
@@ -463,15 +472,10 @@ export default function MCPPage() {
       </div>
 
       <Sheet open={open} onOpenChange={setOpen}>
-        <SheetContent
-          side="right"
-          className="w-full data-[side=right]:sm:max-w-lg"
-        >
+        <SheetContent side="right" className="w-full data-[side=right]:sm:max-w-lg">
           <SheetHeader>
             <SheetTitle>{editing ? editing.name : t("Add MCP server")}</SheetTitle>
-            <SheetDescription>
-              {t("stdio (local process) or http (remote Streamable HTTP)")}
-            </SheetDescription>
+            <SheetDescription>{t("stdio (local process) or http (remote Streamable HTTP)")}</SheetDescription>
           </SheetHeader>
 
           {editing ? (

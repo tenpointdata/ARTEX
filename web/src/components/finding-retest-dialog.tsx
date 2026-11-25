@@ -17,9 +17,9 @@ import {
 import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Spinner } from "@/components/ui/spinner";
 import { Textarea } from "@/components/ui/textarea";
+import { t } from "@/i18n";
 import { api } from "@/lib/api";
 import type { FindingRetest } from "@/lib/types";
-import { t } from "@/i18n";
 
 interface FindingRetestDialogProps {
   findingId: string;
@@ -43,7 +43,11 @@ export function FindingRetestDialog({ findingId, findingName, onClose, onStarted
       const result = await api.startFindingRetest(findingId, notes.trim());
       onStarted?.(result.retest);
       onClose();
-      toast.success(result.created ? t("Retest started; click 'Retesting' to view the session") : t("This vulnerability is already being retested; view the existing session"));
+      toast.success(
+        result.created
+          ? t("Retest started; click 'Retesting' to view the session")
+          : t("This vulnerability is already being retested; view the existing session"),
+      );
     } catch (e) {
       toast.error(t("Failed to start retest: {error}", { error: (e as Error).message }));
     } finally {
@@ -59,7 +63,9 @@ export function FindingRetestDialog({ findingId, findingName, onClose, onStarted
           <DialogTitle>{t("Retest vulnerability #{id}", { id: findingId })}</DialogTitle>
           <DialogDescription className="break-words">
             {findingName ? <span className="mb-2 block">{findingName}</span> : null}
-            {t('Retest Agent reads the original evidence and test constraints, then runs targeted verification in a separate session. When the retest completes successfully and confirms the fix, the vulnerability status automatically becomes "Fixed"; other verdicts keep the current status.')}
+            {t(
+              'Retest Agent reads the original evidence and test constraints, then runs targeted verification in a separate session. When the retest completes successfully and confirms the fix, the vulnerability status automatically becomes "Fixed"; other verdicts keep the current status.',
+            )}
           </DialogDescription>
         </DialogHeader>
         <FieldGroup>
@@ -74,7 +80,9 @@ export function FindingRetestDialog({ findingId, findingName, onClose, onStarted
               onChange={(e) => setNotes(e.target.value)}
               placeholder={t("e.g. verify the original endpoint with the original test account; fix version is v2.")}
             />
-            <FieldDescription>{t("Add the fix version, test conditions, or limitations of this run.")}</FieldDescription>
+            <FieldDescription>
+              {t("Add the fix version, test conditions, or limitations of this run.")}
+            </FieldDescription>
           </Field>
         </FieldGroup>
         <DialogFooter>

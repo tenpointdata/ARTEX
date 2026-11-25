@@ -12,6 +12,8 @@
 #
 # Env: ARTEX_E2E_API_PORT (28787), ARTEX_E2E_UI_PORT (25173), ARTEX_E2E_PG_PORT (56432),
 # ARTEX_E2E_KEEP=1 keeps the work dir (logs, screenshots) for inspection.
+# ARTEX_E2E_SCENARIO picks another scenario file in scripts/e2e (default integrations-e2e.js),
+# e.g. triage-e2e.js; the scenario gets the database as ARTEX_E2E_DSN.
 #
 # The backend runs with ARTEX_ALLOW_UNSANDBOXED=1 (agents are never started here: no
 # task runs) and ARTEX_NOTIFY_ALLOW_LOCAL=1 so the tracker client may reach the
@@ -106,4 +108,4 @@ fi
 
 log "running the scenario"
 ARTEX_E2E_URL="http://127.0.0.1:$UI_PORT" ARTEX_E2E_PASSWORD="$PASSWORD" ARTEX_E2E_SHOTS="$WORK/shots" \
-  node "$ROOT/scripts/e2e/integrations-e2e.js"
+  ARTEX_E2E_DSN="$DSN" node "$ROOT/scripts/e2e/${ARTEX_E2E_SCENARIO:-integrations-e2e.js}"
