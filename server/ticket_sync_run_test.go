@@ -248,3 +248,45 @@ func TestTicketSyncCapAndCursor(t *testing.T) {
 		}
 	}
 }
+
+// TestTicketSyncDefaultCapLoopsToCompletion: with more links than the default
+// cap, calling sync while "more" (what the UI's Sync button does) visits every
+// link of the tracker exactly once, in ceil(n/cap) calls.
+func TestTicketSyncDefaultCapLoopsToCompletion(t *testing.T) {
+	_, srv := newGatedGitHub(t)
+	f := newSyncFixture(t, srv.URL)
+	ids := []int64{f.fid}
+	for i := 0; len(ids) < ticketSyncBatchDefault+50; i++ {
+		id, err := f.pg.AddFinding(0, 0, "TEST", fmt.Sprintf("loop %d", i), "low", "s", "", "test", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _, _ = f.pg.Exec(`DELETE FROM findings WHERE id=$1`, id) })
+		ids = append(ids, id)
+	}
+	f.push(t, ids...)
+
+	seen := map[string]int{}
+	calls := 0
+	for more := true; more; calls++ {
+		if calls > 5 {
+			t.Fatalf("sync did not finish its pass after %d calls", calls)
+		}
+		code, out := f.sync(t, "")
+		if code != 200 || len(out.Results) > ticketSyncBatchDefault {
+			t.Fatalf("call %d: %d, %d results", calls, code, len(out.Results))
+		}
+		for _, r := range out.Results {
+			seen[r.ExternalID]++
+		}
+		more = out.More
+	}
+	if calls != 2 || len(seen) != len(ids) {
+		t.Fatalf("calls=%d distinct=%d, want 2 and %d", calls, len(seen), len(ids))
+	}
+	for id, n := range seen {
+		if n != 1 {
+			t.Fatalf("link %s visited %d times in one pass", id, n)
+		}
+	}
+}
