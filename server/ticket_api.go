@@ -1,8 +1,10 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -205,17 +207,29 @@ func (s *Server) updateTracker(w http.ResponseWriter, r *http.Request) {
 		}
 		t.Config, _ = json.Marshal(merged)
 	}
-	if _, err := pg.SaveTicketTracker(r.Context(), t); err != nil {
-		writeErr(w, 500, err.Error())
-		return
-	}
-	if destChanged {
+	save := func(ctx context.Context) error {
+		if _, err := pg.SaveTicketTracker(ctx, t); err != nil {
+			return err
+		}
+		if !destChanged {
+			return nil
+		}
 		// The stored ticket ids belong to the old destination: never read or
 		// write them in the new one. The next push creates fresh tickets.
-		if _, err := pg.DeleteFindingTicketsByTracker(r.Context(), t.ID); err != nil {
-			writeErr(w, 500, err.Error())
-			return
-		}
+		_, err := pg.DeleteFindingTicketsByTracker(ctx, t.ID)
+		s.ticketCursors.set(t.ID, db.TicketSyncCursor{})
+		return err
+	}
+	var err error
+	if destChanged {
+		// Under the sync lock: a sync still running against the old
+		// destination would otherwise write its links back after the delete.
+		err = withTrackerLock(r.Context(), pg, t.ID, save)
+	} else {
+		err = save(r.Context())
+	}
+	if !writeTrackerLockErr(w, err) {
+		return
 	}
 	saved, err := pg.TicketTrackerByID(r.Context(), t.ID)
 	if err != nil {
@@ -289,42 +303,73 @@ func (s *Server) pushTickets(w http.ResponseWriter, r *http.Request) {
 		Error     string            `json:"error,omitempty"`
 	}
 	out := make([]item, 0, len(req.FindingIDs))
-	for _, id := range req.FindingIDs {
-		it := item{FindingID: id}
-		f, err := pg.GetFinding(id)
-		if err != nil {
-			it.Error = "load finding: " + err.Error()
-		} else if f == nil {
-			it.Error = "finding not found"
-		} else if it.Ticket, it.Created, err = sy.push(r.Context(), f); err != nil {
-			it.Error = err.Error()
+	err := withTrackerLock(r.Context(), pg, sy.tracker.ID, func(ctx context.Context) error {
+		for _, id := range req.FindingIDs {
+			it := item{FindingID: id}
+			f, err := pg.GetFinding(id)
+			if err != nil {
+				it.Error = "load finding: " + err.Error()
+			} else if f == nil {
+				it.Error = "finding not found"
+			} else if it.Ticket, it.Created, err = sy.push(ctx, f); err != nil {
+				it.Error = err.Error()
+			}
+			out = append(out, it)
 		}
-		out = append(out, it)
+		return nil
+	})
+	if !writeTrackerLockErr(w, err) {
+		return
 	}
 	writeJSON(w, 200, map[string]any{"results": out})
 }
 
-// syncTickets: POST /api/integrations/trackers/{id}/sync reconciles every
-// ticket of the tracker in both directions.
+// writeTrackerLockErr answers a failed withTrackerLock call (409 when another
+// push or sync holds the tracker) and reports whether the caller may go on.
+func writeTrackerLockErr(w http.ResponseWriter, err error) bool {
+	switch {
+	case err == nil:
+		return true
+	case errors.Is(err, errTicketSyncBusy):
+		writeErr(w, 409, err.Error())
+	default:
+		writeErr(w, 500, err.Error())
+	}
+	return false
+}
+
+// syncTickets: POST /api/integrations/trackers/{id}/sync[?limit=N] reconciles
+// the tracker's tickets in both directions, at most limit links per call
+// (default ticketSyncBatchDefault, max ticketSyncBatchMax), oldest sync first.
+// "more" says the pass has links left; calling again continues it.
 func (s *Server) syncTickets(w http.ResponseWriter, r *http.Request) {
 	pg := s.pg(w)
 	if pg == nil {
 		return
 	}
+	limit := ticketSyncBatchDefault
+	if v := r.URL.Query().Get("limit"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n < 1 || n > ticketSyncBatchMax {
+			writeErr(w, 400, fmt.Sprintf("limit must be between 1 and %d", ticketSyncBatchMax))
+			return
+		}
+		limit = n
+	}
 	sy := s.enabledSyncer(w, r, pg)
 	if sy == nil {
 		return
 	}
-	links, err := pg.FindingTicketsByTracker(r.Context(), sy.tracker.ID)
-	if err != nil {
-		writeErr(w, 500, err.Error())
+	var out ticketSyncBatch
+	err := withTrackerLock(r.Context(), pg, sy.tracker.ID, func(ctx context.Context) error {
+		var err error
+		out, err = s.syncBatch(ctx, sy, limit)
+		return err
+	})
+	if !writeTrackerLockErr(w, err) {
 		return
 	}
-	out := make([]ticketSyncResult, 0, len(links))
-	for _, l := range links {
-		out = append(out, sy.sync(r.Context(), l))
-	}
-	writeJSON(w, 200, map[string]any{"results": out})
+	writeJSON(w, 200, out)
 }
 
 // findingIntegrations: GET /api/exploration/findings/{id}/integrations returns
