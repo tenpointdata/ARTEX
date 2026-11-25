@@ -4,13 +4,7 @@ import * as React from "react";
 
 import Link from "next/link";
 
-import {
-  FileUpIcon,
-  PencilIcon,
-  PlusIcon,
-  RefreshCwIcon,
-  Trash2Icon,
-} from "lucide-react";
+import { FileUpIcon, PencilIcon, PlusIcon, RefreshCwIcon, Trash2Icon } from "lucide-react";
 import { toast } from "sonner";
 
 import {
@@ -27,27 +21,12 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Switch } from "@/components/ui/switch";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { useCan } from "@/hooks/use-session";
 import { t } from "@/i18n";
-import {
-  evidenceEnabled,
-  summarizeSync,
-  trackerDestination,
-} from "@/lib/integrations";
+import { evidenceEnabled, summarizeSync, trackerDestination } from "@/lib/integrations";
 import { integrationsApi } from "@/lib/integrations-api";
-import type {
-  TicketSyncResult,
-  TicketTracker,
-  TicketTrackerMeta,
-} from "@/lib/types";
+import type { TicketSyncResult, TicketTracker, TicketTrackerMeta } from "@/lib/types";
 
 import { SyncResultsTable } from "./_components/sync-results";
 import { trackerKindLabel } from "./_components/tracker-fields";
@@ -66,9 +45,7 @@ export default function IntegrationsPage() {
   const [loaded, setLoaded] = React.useState(false);
   const [sheetOpen, setSheetOpen] = React.useState(false);
   const [editing, setEditing] = React.useState<TicketTracker | null>(null);
-  const [deleteTarget, setDeleteTarget] = React.useState<TicketTracker | null>(
-    null,
-  );
+  const [deleteTarget, setDeleteTarget] = React.useState<TicketTracker | null>(null);
   const [busyId, setBusyId] = React.useState<number | null>(null);
   const [lastSync, setLastSync] = React.useState<{
     tracker: TicketTracker;
@@ -122,13 +99,10 @@ export default function IntegrationsPage() {
       const results = await integrationsApi.sync(tr.id);
       const s = summarizeSync(results);
       setLastSync({ tracker: tr, results });
-      const msg = t(
-        "{name}: {pulled} pulled, {pushed} pushed, {unchanged} unchanged, {error} failed",
-        {
-          name: tr.name,
-          ...s,
-        },
-      );
+      const msg = t("{name}: {pulled} pulled, {pushed} pushed, {unchanged} unchanged, {error} failed", {
+        name: tr.name,
+        ...s,
+      });
       if (s.error > 0) toast.warning(msg);
       else toast.success(msg);
     } catch (e) {
@@ -185,23 +159,14 @@ export default function IntegrationsPage() {
                 <TableHead>{t("Destination")}</TableHead>
                 <TableHead>{t("Evidence")}</TableHead>
                 <TableHead>{t("Enabled")}</TableHead>
-                {hasActions && (
-                  <TableHead className="text-right">{t("Actions")}</TableHead>
-                )}
+                {hasActions && <TableHead className="text-right">{t("Actions")}</TableHead>}
               </TableRow>
             </TableHeader>
             <TableBody>
               {trackers.length === 0 && (
                 <TableRow>
-                  <TableCell
-                    colSpan={hasActions ? 6 : 5}
-                    className="text-muted-foreground py-8 text-center text-sm"
-                  >
-                    {loaded
-                      ? t(
-                          "No trackers yet. Add one to push findings as tickets.",
-                        )
-                      : t("Loading…")}
+                  <TableCell colSpan={hasActions ? 6 : 5} className="text-muted-foreground py-8 text-center text-sm">
+                    {loaded ? t("No trackers yet. Add one to push findings as tickets.") : t("Loading…")}
                   </TableCell>
                 </TableRow>
               )}
@@ -209,11 +174,7 @@ export default function IntegrationsPage() {
                 <TableRow key={tr.id}>
                   <TableCell className="font-medium">
                     {isAdmin ? (
-                      <button
-                        type="button"
-                        className="hover:underline"
-                        onClick={() => openEdit(tr)}
-                      >
+                      <button type="button" className="hover:underline" onClick={() => openEdit(tr)}>
                         {tr.name}
                       </button>
                     ) : (
@@ -223,12 +184,8 @@ export default function IntegrationsPage() {
                   <TableCell>
                     <Badge variant="outline">{trackerKindLabel(tr.kind)}</Badge>
                   </TableCell>
-                  <TableCell className="font-mono text-xs">
-                    {trackerDestination(tr) || "—"}
-                  </TableCell>
-                  <TableCell className="text-sm">
-                    {evidenceEnabled(tr.config) ? t("Included") : t("Off")}
-                  </TableCell>
+                  <TableCell className="font-mono text-xs">{trackerDestination(tr) || "—"}</TableCell>
+                  <TableCell className="text-sm">{evidenceEnabled(tr.config) ? t("Included") : t("Off")}</TableCell>
                   <TableCell>
                     {isAdmin ? (
                       <Switch
@@ -237,9 +194,7 @@ export default function IntegrationsPage() {
                         aria-label={t("Enable {name}", { name: tr.name })}
                       />
                     ) : (
-                      <span className="text-sm">
-                        {tr.enabled ? t("On") : t("Off")}
-                      </span>
+                      <span className="text-sm">{tr.enabled ? t("On") : t("Off")}</span>
                     )}
                   </TableCell>
                   {hasActions && (
@@ -252,20 +207,12 @@ export default function IntegrationsPage() {
                             disabled={!tr.enabled || busyId === tr.id}
                             onClick={() => void sync(tr)}
                           >
-                            <RefreshCwIcon
-                              className={busyId === tr.id ? "animate-spin" : ""}
-                            />{" "}
-                            {t("Sync")}
+                            <RefreshCwIcon className={busyId === tr.id ? "animate-spin" : ""} /> {t("Sync")}
                           </Button>
                         )}
                         {isAdmin && (
                           <>
-                            <Button
-                              size="icon-sm"
-                              variant="ghost"
-                              aria-label={t("Edit")}
-                              onClick={() => openEdit(tr)}
-                            >
+                            <Button size="icon-sm" variant="ghost" aria-label={t("Edit")} onClick={() => openEdit(tr)}>
                               <PencilIcon />
                             </Button>
                             <Button
@@ -291,9 +238,7 @@ export default function IntegrationsPage() {
       {lastSync && (
         <Card>
           <CardHeader>
-            <CardTitle className="text-sm">
-              {t("Last sync: {name}", { name: lastSync.tracker.name })}
-            </CardTitle>
+            <CardTitle className="text-sm">{t("Last sync: {name}", { name: lastSync.tracker.name })}</CardTitle>
           </CardHeader>
           <CardContent className="px-0">
             <SyncResultsTable results={lastSync.results} />
@@ -309,28 +254,20 @@ export default function IntegrationsPage() {
           editing={editing}
           onSaved={(saved) =>
             setTrackers((list) =>
-              list.some((x) => x.id === saved.id)
-                ? list.map((x) => (x.id === saved.id ? saved : x))
-                : [...list, saved],
+              list.some((x) => x.id === saved.id) ? list.map((x) => (x.id === saved.id ? saved : x)) : [...list, saved],
             )
           }
         />
       )}
 
-      <AlertDialog
-        open={deleteTarget !== null}
-        onOpenChange={(o) => !o && setDeleteTarget(null)}
-      >
+      <AlertDialog open={deleteTarget !== null} onOpenChange={(o) => !o && setDeleteTarget(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>{t("Delete tracker?")}</AlertDialogTitle>
             <AlertDialogDescription>
-              {t(
-                'This removes "{name}" and its links to tickets. The tickets themselves stay in the tracker.',
-                {
-                  name: deleteTarget?.name ?? "",
-                },
-              )}
+              {t('This removes "{name}" and its links to tickets. The tickets themselves stay in the tracker.', {
+                name: deleteTarget?.name ?? "",
+              })}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

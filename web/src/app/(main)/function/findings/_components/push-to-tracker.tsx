@@ -4,13 +4,7 @@ import * as React from "react";
 
 import { toast } from "sonner";
 
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useCan } from "@/hooks/use-session";
 import { t } from "@/i18n";
 import { pushableFindingIds, summarizePush } from "@/lib/integrations";
@@ -69,15 +63,12 @@ export function PushToTrackerSelect({
     try {
       const results = await integrationsApi.push(trackerId, ids);
       const s = summarizePush(results);
-      const msg = t(
-        "{name}: {created} created, {updated} updated, {failed} failed",
-        {
-          name: tracker.name,
-          created: s.created,
-          updated: s.updated,
-          failed: s.failed,
-        },
-      );
+      const msg = t("{name}: {created} created, {updated} updated, {failed} failed", {
+        name: tracker.name,
+        created: s.created,
+        updated: s.updated,
+        failed: s.failed,
+      });
       if (s.failed > 0)
         toast.warning(msg, {
           description: s.errors.join("\n"),
@@ -100,14 +91,8 @@ export function PushToTrackerSelect({
       }}
       disabled={busy}
     >
-      <SelectTrigger
-        size="sm"
-        className={className}
-        aria-label={t("Push to tracker")}
-      >
-        <SelectValue
-          placeholder={busy ? t("Pushing…") : t("Push to tracker")}
-        />
+      <SelectTrigger size="sm" className={className} aria-label={t("Push to tracker")}>
+        <SelectValue placeholder={busy ? t("Pushing…") : t("Push to tracker")} />
       </SelectTrigger>
       <SelectContent>
         {trackers.map((tr) => (

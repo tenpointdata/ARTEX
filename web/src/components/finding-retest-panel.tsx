@@ -15,9 +15,10 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Spinner } from "@/components/ui/spinner";
+import { useCan } from "@/hooks/use-session";
+import { intlLocale, t } from "@/i18n";
 import { api } from "@/lib/api";
 import type { FindingRetest } from "@/lib/types";
-import { intlLocale, t } from "@/i18n";
 
 const statusLabels = {
   pending: t("Waiting to start"),
@@ -43,6 +44,8 @@ export function FindingRetestPanel({
   readOnly?: boolean;
   onCompleted?: () => void;
 }) {
+  // Starting a retest and opening its session (raw conversation) need operate (server/rbac_policy.go).
+  const canOperate = useCan("operate");
   const [items, setItems] = React.useState<FindingRetest[] | null>(null);
   const [error, setError] = React.useState("");
   const [open, setOpen] = React.useState(false);
@@ -86,9 +89,17 @@ export function FindingRetestPanel({
       <CardHeader className="flex flex-row flex-wrap items-start justify-between gap-3">
         <div className="flex flex-col gap-1.5">
           <CardTitle>{t("Vulnerability retest")}</CardTitle>
-          <CardDescription>{t("Verifies the current state in a separate session, keeping each retest's verdict and evidence.")}</CardDescription>
+          <CardDescription>
+            {t("Verifies the current state in a separate session, keeping each retest's verdict and evidence.")}
+          </CardDescription>
         </div>
-        {running?.conversation_id != null ? (
+        {running && !canOperate ? (
+          <Badge variant="secondary">
+            <Spinner data-icon="inline-start" aria-hidden="true" />
+            {t("Retesting")}
+          </Badge>
+        ) : null}
+        {canOperate && running?.conversation_id != null ? (
           <Button asChild variant="outline" size="sm">
             <Link href={`/chat?c=${running.conversation_id}`} title={t("View the running retest session")}>
               <Spinner data-icon="inline-start" aria-hidden="true" />
@@ -96,7 +107,7 @@ export function FindingRetestPanel({
             </Link>
           </Button>
         ) : null}
-        {!running && !readOnly ? (
+        {!running && !readOnly && canOperate ? (
           <Button size="sm" onClick={() => setOpen(true)} disabled={items === null || !!error}>
             <RotateCcwIcon data-icon="inline-start" />
             {t("Start retest")}
@@ -119,7 +130,11 @@ export function FindingRetestPanel({
           <Empty>
             <EmptyHeader>
               <EmptyTitle>{t("No retest records")}</EmptyTitle>
-              <EmptyDescription>{t("Once the fix is deployed, start a retest to compare new and old evidence.")}</EmptyDescription>
+              {canOperate && !readOnly ? (
+                <EmptyDescription>
+                  {t("Once the fix is deployed, start a retest to compare new and old evidence.")}
+                </EmptyDescription>
+              ) : null}
             </EmptyHeader>
           </Empty>
         ) : null}
@@ -137,13 +152,14 @@ export function FindingRetestPanel({
                   <span className="text-muted-foreground text-xs">
                     #{item.id} · {new Date(item.created_at).toLocaleString(intlLocale)}
                   </span>
-                  {item.conversation_id != null ? (
+                  {canOperate && item.conversation_id != null ? (
                     <Button asChild variant="ghost" size="sm" className="ml-auto">
                       <Link href={`/chat?c=${item.conversation_id}`}>{t("View session")}</Link>
                     </Button>
-                  ) : (
+                  ) : null}
+                  {canOperate && item.conversation_id == null ? (
                     <span className="text-muted-foreground text-xs">{t("Conversation deleted")}</span>
-                  )}
+                  ) : null}
                 </div>
                 {item.status === "completed" && item.summary ? (
                   <p className="whitespace-pre-wrap break-words text-sm">{item.summary}</p>

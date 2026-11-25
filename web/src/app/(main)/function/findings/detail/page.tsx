@@ -21,6 +21,7 @@ import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger } from "@
 import { Separator } from "@/components/ui/separator";
 import { SidebarTrigger } from "@/components/ui/sidebar";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { useCan } from "@/hooks/use-session";
 import { intlLocale, t } from "@/i18n";
 import { api } from "@/lib/api";
 import { statusMeta } from "@/lib/status";
@@ -70,6 +71,8 @@ function FindingDetailInner() {
   const [finding, setFinding] = React.useState<Finding | null>(null);
   const [loaded, setLoaded] = React.useState(false);
   const [tab, setTab] = React.useState("overview");
+  // Severity, triage status and report stage are triage decisions: review (server/rbac_policy.go).
+  const canReview = useCan("review");
 
   const load = React.useCallback(() => {
     if (!id) {
@@ -153,6 +156,8 @@ function FindingDetailInner() {
   }
 
   const title = finding.name || finding.vulnclass || t("Uncategorized");
+  // Inherited findings are edited in their source task; a role without review only reads.
+  const locked = finding.inherited || !canReview;
 
   return (
     <Tabs value={tab} onValueChange={setTab} className="flex flex-1 flex-col gap-0">
@@ -283,7 +288,7 @@ function FindingDetailInner() {
 
                 {/* Severity */}
                 <FieldRow label={t("Severity")}>
-                  {finding.inherited ? (
+                  {locked ? (
                     <StatusBadge domain="severity" value={finding.severity} dot />
                   ) : (
                     <Select value={finding.severity} onValueChange={(v) => changeSeverity(v as Severity)}>
@@ -305,7 +310,7 @@ function FindingDetailInner() {
 
                 {/* Triage status */}
                 <FieldRow label={t("Triage status")}>
-                  {finding.inherited ? (
+                  {locked ? (
                     <StatusBadge domain="finding" value={finding.status} dot />
                   ) : (
                     <Select value={finding.status} onValueChange={(v) => changeStatus(v as FindingStatus)}>
@@ -326,7 +331,7 @@ function FindingDetailInner() {
                 </FieldRow>
 
                 <FieldRow label={t("Report stage")}>
-                  {finding.inherited ? (
+                  {locked ? (
                     <ReportStateBadge state={finding.report_state} />
                   ) : (
                     <Select

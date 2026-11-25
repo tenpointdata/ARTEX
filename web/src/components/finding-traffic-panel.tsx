@@ -24,9 +24,10 @@ import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
+import { useCan } from "@/hooks/use-session";
+import { intlLocale, t } from "@/i18n";
 import { api } from "@/lib/api";
 import type { FindingTraffic, FindingTrafficBinding, TrafficEvidenceRole } from "@/lib/types";
-import { intlLocale, t } from "@/i18n";
 
 const ROLES: Record<TrafficEvidenceRole, string> = {
   baseline: t("Baseline"),
@@ -46,6 +47,8 @@ export function FindingTrafficPanel({
   readOnly?: boolean;
   onChanged: () => void;
 }) {
+  // Linking, editing and reordering evidence need operate (server/rbac_policy.go).
+  const canEdit = useCan("operate") && !readOnly;
   const [data, setData] = React.useState<FindingTraffic | null>(null);
   const [error, setError] = React.useState("");
   const [adding, setAdding] = React.useState(false);
@@ -100,17 +103,22 @@ export function FindingTrafficPanel({
       <Card>
         <CardHeader>
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <CardTitle>{t("Linked traffic")} {data ? `(${data.bindings.length})` : ""}</CardTitle>
-            {!readOnly ? (
+            <CardTitle>
+              {t("Linked traffic")} {data ? `(${data.bindings.length})` : ""}
+            </CardTitle>
+            {canEdit ? (
               <Button variant="outline" size="sm" disabled={!data || busy} onClick={() => setAdding(true)}>
                 <PlusIcon data-icon="inline-start" />
                 {t("Link traffic")}
               </Button>
-            ) : (
-              <Badge variant="outline">{t("Inherited evidence · read-only")}</Badge>
-            )}
+            ) : null}
+            {readOnly ? <Badge variant="outline">{t("Inherited evidence · read-only")}</Badge> : null}
           </div>
-          <CardDescription>{t("Requests and responses organized in reproduction order. Bound evidence is kept even after raw traffic is purged.")}</CardDescription>
+          <CardDescription>
+            {t(
+              "Requests and responses organized in reproduction order. Bound evidence is kept even after raw traffic is purged.",
+            )}
+          </CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-3">
           {error ? (
@@ -129,7 +137,9 @@ export function FindingTrafficPanel({
             <Empty>
               <EmptyHeader>
                 <EmptyTitle>{t("No linked traffic")}</EmptyTitle>
-                <EmptyDescription>{t("Link baseline, vulnerability proof, and supplementary verification requests.")}</EmptyDescription>
+                <EmptyDescription>
+                  {t("Link baseline, vulnerability proof, and supplementary verification requests.")}
+                </EmptyDescription>
               </EmptyHeader>
             </Empty>
           ) : (
@@ -160,7 +170,7 @@ export function FindingTrafficPanel({
                     <Button variant="outline" size="sm" onClick={() => setPreview(b.id)}>
                       {t("View message")}
                     </Button>
-                    {!readOnly ? (
+                    {canEdit ? (
                       <>
                         <Button
                           variant="ghost"
@@ -238,7 +248,9 @@ export function FindingTrafficPanel({
         <DialogContent>
           <DialogHeader>
             <DialogTitle>{t("Edit traffic evidence")}</DialogTitle>
-            <DialogDescription>{t("Explain how this set of requests/responses supports the vulnerability conclusion.")}</DialogDescription>
+            <DialogDescription>
+              {t("Explain how this set of requests/responses supports the vulnerability conclusion.")}
+            </DialogDescription>
           </DialogHeader>
           <FieldGroup>
             <Field>

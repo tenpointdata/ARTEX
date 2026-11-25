@@ -1,4 +1,4 @@
-// Role probes for the E2 integrations UI (c-119206): signed in as a reviewer and as
+// Role probes for the E2 integrations UI (c-119206) and the finding detail (c-81193b): signed in as a reviewer and as
 // a client_read user, every page must hide the controls the server refuses that role
 // (server/rbac_policy.go) and must not send a request the server answers with 403.
 //
@@ -57,6 +57,11 @@ async function probeRoles(browser, o) {
     await o.shot("11-reviewer-detail");
     check("reviewer: Tickets card shown", (await card.count()) >= 1);
     check("reviewer: no Push to tracker on detail", (await pushControls(page)) === 0);
+    // c-81193b: review keeps the triage pickers; retest and linking traffic need operate.
+    const controls = await detailControls(page);
+    check("reviewer: severity/status/report-stage pickers shown", controls.pickers === 3, controls.pickers);
+    check("reviewer: no Start retest", controls.retest === 0);
+    check("reviewer: no Link traffic", controls.link === 0);
   });
 
   await asRole(browser, o, "e2e-client", async (page, open) => {
@@ -72,6 +77,11 @@ async function probeRoles(browser, o) {
         0,
     );
     check("client: no Push to tracker on detail", (await pushControls(page)) === 0);
+    // c-81193b: client_read has neither review (pickers) nor operate (retest, link traffic).
+    const controls = await detailControls(page);
+    check("client: no severity/status/report-stage pickers", controls.pickers === 0, controls.pickers);
+    check("client: no Start retest", controls.retest === 0);
+    check("client: no Link traffic", controls.link === 0);
     await open("/function/findings");
     await selectFirstRow(page);
     check("client: no bulk Push to tracker", (await pushControls(page)) === 0);
@@ -120,6 +130,21 @@ async function selectFirstRow(page) {
     .waitFor({ timeout: 10000 })
     .then(() => true)
     .catch(() => false);
+}
+
+// detailControls counts the finding detail's role-gated controls: the Status card's
+// pickers (Severity, Triage status, Report stage), Start retest and Link traffic. It
+// waits for the retest and traffic cards to finish loading first.
+async function detailControls(page) {
+  await page.getByText("Vulnerability retest").first().waitFor({ timeout: 30000 });
+  await page.getByText(/^Linked traffic/).first().waitFor({ timeout: 30000 });
+  await page.waitForLoadState("networkidle");
+  const status = page.locator("div[data-slot=card]").filter({ hasText: "Triage status" });
+  return {
+    pickers: await status.getByRole("combobox").count(),
+    retest: await page.getByRole("button", { name: "Start retest" }).count(),
+    link: await page.getByRole("button", { name: "Link traffic" }).count(),
+  };
 }
 
 const pushControls = (page) => page.getByRole("combobox", { name: "Push to tracker" }).count();
