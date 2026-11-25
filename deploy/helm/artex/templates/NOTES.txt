@@ -23,7 +23,8 @@ test. Scope gate, approvals, budgets, noise governor and audit run on every node
 {{- if not .Values.controlTLS.enabled }}
 
 WARNING: controlTLS.enabled=false. Worker nodes reach the control API over plain
-HTTP; node RPC payloads (captured target traffic) cross the network in clear text.
+HTTP; node RPC payloads (captured target traffic) cross the network in clear text,
+and so do the recording-proxy hop's plain-HTTP target requests and scope tokens.
 {{- end }}
 {{- if and .Values.postgresql.bundled.enabled }}
 

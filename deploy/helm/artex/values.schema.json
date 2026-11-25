@@ -46,7 +46,9 @@
     "control": {
       "type": "object",
       "properties": {
-        "localWorkers": {"type": "integer", "minimum": 0}
+        "localWorkers": {"type": "integer", "minimum": 0},
+        "proxyAddr": {"type": "string"},
+        "proxyTLSPort": {"type": "integer", "minimum": 1, "maximum": 65535}
       }
     },
     "worker": {

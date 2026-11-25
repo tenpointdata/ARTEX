@@ -7,6 +7,8 @@ import (
 	"net"
 	"net/netip"
 	"strings"
+
+	"github.com/Autumn-27/artex/server"
 )
 
 // Environment variables that configure the listener. The flags -tls-cert and
@@ -15,6 +17,7 @@ const (
 	envTLSCert       = "ARTEX_TLS_CERT"
 	envTLSKey        = "ARTEX_TLS_KEY"
 	envAllowInsecure = "ARTEX_ALLOW_INSECURE_BIND"
+	envProxyTLSAddr  = "ARTEX_PROXY_TLS_ADDR"
 )
 
 // isLoopbackListenAddr reports whether addr (host:port) binds only to the
@@ -64,4 +67,27 @@ func serverTLSConfig() *tls.Config {
 			tls.TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305,
 		},
 	}
+}
+
+// checkProxyTLS decides whether the recording proxy's TLS front (-proxy-tls)
+// may start: it serves the -tls-cert/-tls-key certificate, so it needs both,
+// and it fronts this process's recording proxy, so it needs one. A worker node
+// runs no proxy of its own.
+func checkProxyTLS(frontAddr, proxyAddr, certFile, keyFile string, role server.NodeRole) error {
+	if frontAddr == "" {
+		return nil
+	}
+	if role == server.RoleWorker {
+		return errors.New("-proxy-tls (ARTEX_PROXY_TLS_ADDR) is for the control node; a worker node reaches the control proxy through ARTEX_CONTROL_PROXY=https://…")
+	}
+	if proxyAddr == "" {
+		return errors.New("-proxy-tls needs the recording proxy (-proxy)")
+	}
+	if certFile == "" || keyFile == "" {
+		return errors.New("-proxy-tls serves the control certificate: set -tls-cert/-tls-key (ARTEX_TLS_CERT/ARTEX_TLS_KEY)")
+	}
+	if _, _, err := net.SplitHostPort(frontAddr); err != nil {
+		return fmt.Errorf("-proxy-tls %q: %w", frontAddr, err)
+	}
+	return nil
 }

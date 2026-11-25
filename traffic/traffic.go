@@ -694,6 +694,7 @@ type sink struct {
 	paced   sync.Map // ClientConn.Id of a marked connection -> struct{}
 	scoped  sync.Map // client remote address -> scopeBinding (scope.go)
 	relayed sync.Map // address of a scope relay's connection -> scope token (scope_relay.go)
+	fronted sync.Map // address of a TLS front's connection -> struct{}: a remote client (proxy_tls_front.go)
 	clients sync.Map // client remote address -> live *mproxy.ClientConn (closeScope, scope.go)
 	streams sync.Map // *mproxy.Flow of a live WebSocket/SSE stream -> *streamState (stream.go)
 	bypass  sync.Map // flowKey of a replay flow bypassing rewrite rules -> struct{}

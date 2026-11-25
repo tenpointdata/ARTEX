@@ -33,10 +33,10 @@ import (
 type CredentialRelay struct {
 	URL string // credential-free proxy URL for the client
 
-	*relayConns
-	upstream string // host:port
-	tls      bool   // https:// upstream
-	auth     string // Proxy-Authorization value
+	conns    *connSet // listener and open connections, at most maxRelayConns clients at once
+	upstream string   // host:port
+	tls      bool     // https:// upstream
+	auth     string   // Proxy-Authorization value
 }
 
 // credentialRelayDialTimeout bounds a relay's dial of the upstream proxy.
@@ -60,20 +60,20 @@ func StartCredentialRelay(proxyURL string) (*CredentialRelay, error) {
 	if u.Port() == "" {
 		host = net.JoinHostPort(u.Hostname(), map[string]string{"http": "80", "https": "443"}[u.Scheme])
 	}
-	base, err := listenRelay()
+	conns, err := listenLoopback(maxRelayConns)
 	if err != nil {
 		return nil, err
 	}
 	cred := base64.StdEncoding.EncodeToString([]byte(u.User.Username() + ":" + pass))
-	r := &CredentialRelay{URL: base.url(), relayConns: base, upstream: host, tls: u.Scheme == "https", auth: "Basic " + cred}
-	go r.serve(r.relay)
+	r := &CredentialRelay{URL: conns.url(), conns: conns, upstream: host, tls: u.Scheme == "https", auth: "Basic " + cred}
+	go conns.serve(r.relay)
 	return r, nil
 }
 
 // Close stops the relay and closes its open connections. Safe on nil.
 func (r *CredentialRelay) Close() error {
 	if r != nil {
-		r.close()
+		r.conns.close()
 	}
 	return nil
 }
@@ -97,11 +97,11 @@ func (r *CredentialRelay) relay(down net.Conn) {
 		return
 	}
 	defer up.Close()
-	if !r.track(down) || !r.track(up) {
+	untrack, ok := r.conns.trackPair(down, up)
+	if !ok {
 		return
 	}
-	defer r.untrack(down)
-	defer r.untrack(up)
+	defer untrack()
 	downR, upR := bufio.NewReader(down), bufio.NewReader(up)
 	for {
 		req, err := http.ReadRequest(downR)
@@ -110,7 +110,7 @@ func (r *CredentialRelay) relay(down net.Conn) {
 		}
 		tunnel, keep := r.forward(req, down, up, upR)
 		if tunnel {
-			pipeTunnel(down, downR, up, upR)
+			pipeBoth(down, downR, up, upR)
 			return
 		}
 		if !keep {
@@ -173,23 +173,4 @@ func writeHead(w io.Writer, resp *http.Response) error {
 		return err
 	}
 	return bw.Flush()
-}
-
-// pipeTunnel copies both ways until both directions end, starting with what
-// the readers already buffered.
-func pipeTunnel(down net.Conn, downR *bufio.Reader, up net.Conn, upR *bufio.Reader) {
-	done := make(chan struct{}, 2)
-	pipe := func(dst net.Conn, src io.Reader) {
-		_, _ = io.Copy(dst, src)
-		if cw, ok := dst.(interface{ CloseWrite() error }); ok {
-			_ = cw.CloseWrite()
-		} else {
-			_ = dst.Close()
-		}
-		done <- struct{}{}
-	}
-	go pipe(up, downR)
-	go pipe(down, upR)
-	<-done
-	<-done
 }

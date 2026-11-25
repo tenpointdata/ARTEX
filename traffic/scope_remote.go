@@ -265,7 +265,15 @@ func (t *Traffic) remoteClientRefusal(req *http.Request, tok string) error {
 
 // loopbackClient reports whether a client remote address ("ip:port") is on
 // loopback. An address that does not parse is not (fail closed).
+//
+// A connection a TLS front opened (proxy_tls_front.go) comes from loopback but
+// carries a remote client's bytes, so it is never a loopback client.
 func (t *Traffic) loopbackClient(addr string) bool {
+	if t.sink != nil {
+		if _, fronted := t.sink.fronted.Load(addr); fronted {
+			return false
+		}
+	}
 	if fn := t.isLoopback.Load(); fn != nil {
 		return (*fn)(addr)
 	}

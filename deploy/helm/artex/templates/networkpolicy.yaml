@@ -39,9 +39,9 @@ spec:
     # UI/API from anywhere the Service or Ingress routes.
     - ports:
         - {protocol: TCP, port: 8787}
-    # The recording proxy from worker pods only.
+    # The recording proxy (its TLS front with controlTLS) from worker pods only.
     - ports:
-        - {protocol: TCP, port: 8788}
+        - {protocol: TCP, port: {{ ternary .Values.control.proxyTLSPort 8788 .Values.controlTLS.enabled }}}
       from:
         - podSelector:
             matchLabels:

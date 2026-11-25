@@ -14,7 +14,7 @@ Do not weaken them through `extraEnv`.
 | Role | Workload | What it does |
 | --- | --- | --- |
 | `control` | Deployment, 1 replica, strategy `Recreate` | UI/API on 8787, planners, schedulers, notifier. Holds in-memory planner state, so it must stay a single replica. `control.localWorkers` (default `0`) sets how many intent workers run inside it; `0` sends all intents to worker nodes. |
-| `worker` | Deployment, `worker.replicas` (default 2) | No API. Plaintext `GET /healthz` on `worker.healthPort` (8790). Claims intents from PostgreSQL, runs them through the same guards; tool traffic goes through the control node's recording proxy (`<release>-control-proxy:8788`, scope-token gated) and evidence calls go to the control API's signed node RPC over TLS. `ARTEX_NODE_ID` is the pod name; `worker.concurrency` sets `ARTEX_NODE_WORKERS`. |
+| `worker` | Deployment, `worker.replicas` (default 2) | No API. Plaintext `GET /healthz` on `worker.healthPort` (8790). Claims intents from PostgreSQL, runs them through the same guards; tool traffic goes through the control node's recording proxy (`<release>-control-proxy`, scope-token gated; over TLS through a loopback relay when `controlTLS.enabled`) and evidence calls go to the control API's signed node RPC over TLS. `ARTEX_NODE_ID` is the pod name; `worker.concurrency` sets `ARTEX_NODE_WORKERS`. |
 
 All nodes share the same PostgreSQL, `ARTEX_SECRET_KEY`, LLM provider env, and egress/noise/budget
 settings (one ConfigMap plus one Secret).
@@ -106,8 +106,13 @@ Secret's CA key only; worker pods never mount the control key). Pick the certifi
 
 With TLS on, probes use HTTPS, the Service port has `appProtocol: https`, the Ingress gets
 `nginx.ingress.kubernetes.io/backend-protocol: HTTPS`, and `kubectl port-forward` serves
-`https://localhost:8787`. The recording proxy hop (port 8788) stays plain HTTP. See
-docs/DISTRIBUTED.md "Transport".
+`https://localhost:8787`. The recording proxy hop is TLS too: the control node binds the plain
+proxy to `127.0.0.1:8788` and serves its TLS front on `control.proxyTLSPort` (8789) with the
+same certificate; each worker's agents use a loopback relay that dials
+`<release>-control-proxy:8789`, pinned to the CA and checked against `<release>-control`
+(`ARTEX_CONTROL_PROXY_TLS_NAME`), so plain-HTTP target traffic and the scope tokens never cross
+the pod network in clear text. With `controlTLS.enabled=false` the hop is plain HTTP on 8788.
+See docs/DISTRIBUTED.md "Transport".
 
 ## Ingress
 

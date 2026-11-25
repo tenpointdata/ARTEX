@@ -233,15 +233,15 @@ func TestScopeRelayConnectionCap(t *testing.T) {
 	tr.SetUpstreamDialer(spy.dial)
 	target := textServer(t, "ok")
 	relay := startRelay(t, tr, "task-c")
-	for i := 0; i < cap(relay.slots)-1; i++ { // all but one slot taken
-		relay.slots <- struct{}{}
+	for i := 0; i < cap(relay.conns.slots)-1; i++ { // all but one slot taken
+		relay.conns.slots <- struct{}{}
 	}
 	addr := strings.TrimPrefix(relay.URL, "http://")
 	held, err := net.Dial("tcp", addr)
 	if err != nil {
 		t.Fatal(err)
 	}
-	waitFor(t, "the last slot", func() bool { return len(relay.slots) == cap(relay.slots) })
+	waitFor(t, "the last slot", func() bool { return len(relay.conns.slots) == cap(relay.conns.slots) })
 
 	over, err := net.Dial("tcp", addr)
 	if err != nil {
@@ -254,7 +254,7 @@ func TestScopeRelayConnectionCap(t *testing.T) {
 	}
 
 	held.Close()
-	waitFor(t, "the slot to free", func() bool { return len(relay.slots) < cap(relay.slots) })
+	waitFor(t, "the slot to free", func() bool { return len(relay.conns.slots) < cap(relay.conns.slots) })
 	c := proxyClient(t, tr, relay.URL)
 	if code, body := getBody(t, c, target.URL); code != http.StatusOK || body != "ok" {
 		t.Fatalf("after a slot freed: %d %q", code, body)

@@ -2,7 +2,6 @@ package traffic
 
 import (
 	"errors"
-	"io"
 	"net"
 	"net/url"
 	"time"
@@ -24,9 +23,9 @@ import (
 type ScopeRelay struct {
 	URL string // credential-free proxy URL for the client
 
-	*relayConns
 	t     *Traffic
 	token string
+	conns *connSet // listener and open connections, at most maxRelayConns clients at once
 }
 
 // StartScopeRelay returns a relay for the scope token in proxyURL, a URL that
@@ -48,19 +47,19 @@ func (t *Traffic) StartScopeRelay(proxyURL string) (string, *ScopeRelay, error) 
 	if !ok {
 		return t.ProxyAddr(), nil, nil
 	}
-	base, err := listenRelay()
+	conns, err := listenLoopback(maxRelayConns)
 	if err != nil {
 		return "", nil, err
 	}
-	r := &ScopeRelay{URL: base.url(), relayConns: base, t: t, token: tok}
-	go r.serve(func(down net.Conn) { r.relay(down, u.Host) })
+	r := &ScopeRelay{URL: conns.url(), t: t, token: tok, conns: conns}
+	go conns.serve(func(down net.Conn) { r.relay(down, u.Host) })
 	return r.URL, r, nil
 }
 
 // Close stops the relay and closes its open connections. Safe on nil.
 func (r *ScopeRelay) Close() error {
 	if r != nil {
-		r.close()
+		r.conns.close()
 	}
 	return nil
 }
@@ -89,21 +88,5 @@ func (r *ScopeRelay) relay(down net.Conn, proxyHost string) {
 	key := up.LocalAddr().String()
 	r.t.sink.relayed.Store(key, r.token)
 	defer r.t.sink.relayed.CompareAndSwap(key, r.token, endedRelayToken)
-	if !r.track(down) || !r.track(up) {
-		return
-	}
-	defer r.untrack(down)
-	defer r.untrack(up)
-	done := make(chan struct{}, 2)
-	pipe := func(dst, src net.Conn) {
-		_, _ = io.Copy(dst, src)
-		if cw, ok := dst.(interface{ CloseWrite() error }); ok {
-			_ = cw.CloseWrite()
-		}
-		done <- struct{}{}
-	}
-	go pipe(up, down)
-	go pipe(down, up)
-	<-done
-	<-done
+	r.conns.splice(down, up)
 }

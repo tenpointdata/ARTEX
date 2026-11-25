@@ -60,13 +60,13 @@ spec:
             {{- include "artex.envFrom" . | nindent 12 }}
           {{- $caEnv := dict }}
           {{- if .Values.controlTLS.enabled }}
-          {{- $caEnv = dict "ARTEX_CONTROL_CA" "/app/control-ca/ca.crt" }}
+          {{- $caEnv = dict "ARTEX_CONTROL_CA" "/app/control-ca/ca.crt" "ARTEX_CONTROL_PROXY_TLS_NAME" (printf "%s-control" (include "artex.fullname" .)) }}
           {{- end }}
           env:
             - name: ARTEX_NODE_ID
               valueFrom:
                 fieldRef: {fieldPath: metadata.name}
-            {{- include "artex.sharedEnv" (dict "ctx" . "extra" (merge (dict "ARTEX_ROLE" "worker" "ARTEX_NODE_WORKERS" (toString $w.concurrency) "ARTEX_HEALTH_ADDR" (printf ":%v" $w.healthPort) "ARTEX_CONTROL_PROXY" (printf "http://%s-control-proxy:8788" (include "artex.fullname" .)) "ARTEX_CONTROL_API" (printf "%s://%s-control:%v" (include "artex.controlScheme" .) (include "artex.fullname" .) .Values.control.service.port)) $caEnv $w.extraEnv)) | nindent 12 }}
+            {{- include "artex.sharedEnv" (dict "ctx" . "extra" (merge (dict "ARTEX_ROLE" "worker" "ARTEX_NODE_WORKERS" (toString $w.concurrency) "ARTEX_HEALTH_ADDR" (printf ":%v" $w.healthPort) "ARTEX_CONTROL_PROXY" (include "artex.controlProxyURL" .) "ARTEX_CONTROL_API" (printf "%s://%s-control:%v" (include "artex.controlScheme" .) (include "artex.fullname" .) .Values.control.service.port)) $caEnv $w.extraEnv)) | nindent 12 }}
           ports:
             - {name: health, containerPort: {{ $w.healthPort }}}
           startupProbe:

@@ -13,6 +13,10 @@
 # control node serves it, and workers trust only that CA (ARTEX_CONTROL_CA).
 # The UI is then https://localhost:8787; the browser warns until you trust
 # ca.crt (docker compose cp worker-1:/app/control-ca/ca.crt .).
+# The workers' recording-proxy hop is TLS too: the control node serves the
+# proxy's TLS front on :8789 with the same certificate, and each worker's agents
+# use a loopback relay that dials it pinned to the CA, so plain-HTTP target
+# traffic and the scope tokens never cross the Docker network in clear text.
 services:
   artex-tls-init:
     image: artex:local
@@ -25,9 +29,10 @@ services:
     restart: "no"
 
   artex:
-    # The proxy listens beyond loopback for the workers; in the control role it
-    # refuses any non-loopback client that presents no worker scope token.
-    command: ["-role", "control", "-addr", ":8787", "-proxy", "0.0.0.0:8788"]
+    # Workers use the proxy's TLS front (:8789). The plain proxy still binds
+    # beyond loopback so the base file's host port 127.0.0.1:8788 reaches it; in
+    # the control role it refuses any remote client that presents no scope token.
+    command: ["-role", "control", "-addr", ":8787", "-proxy", "0.0.0.0:8788", "-proxy-tls", ":8789"]
     depends_on:
       artex-tls-init:
         condition: service_completed_successfully
@@ -58,8 +63,9 @@ services:
       ARTEX_ROLE: worker
       ARTEX_NODE_ID: worker-1
       ARTEX_NODE_WORKERS: "3"
-      # The proxy hop is plain HTTP (see docs/DISTRIBUTED.md "Transport").
-      ARTEX_CONTROL_PROXY: http://artex:8788
+      # The proxy's TLS front, pinned to ARTEX_CONTROL_CA (docs/DISTRIBUTED.md
+      # "Transport"): the agents get a loopback relay as their proxy.
+      ARTEX_CONTROL_PROXY: https://artex:8789
       ARTEX_CONTROL_API: https://artex:8787
       ARTEX_CONTROL_CA: /app/control-ca/ca.crt
       ARTEX_PG_HOST: postgres

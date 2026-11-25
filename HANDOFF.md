@@ -59,6 +59,18 @@ See `docs/ARCHITECTURE.md` for the code-level map. Summary:
 
 ## Current state
 
+**2026-11-24 — E7 c-677166 + c-6bcdd3 land together, one relay helper (`c-ccc7a8`, in review)** on
+`ej/20261124-185428-8c1cc4`. It merges `ej/20261124-172031-c2bb7b` (c-6bcdd3, carrying c-20c400, c-d4946f,
+c-8cfbfe and the E7 stack) and `ej/20261124-163818-870578` (c-677166, proxy-hop TLS), so **landing it lands
+both; neither branch should land on its own after this**. The two had each extracted the loopback-relay
+bookkeeping from `traffic/scope_relay.go`; now `traffic/conn_relay.go` `connSet` is the only helper
+(`relay_conns.go`/`relayConns` is gone). `connSet` owns the listener (`newConnSet`, `listenLoopback`),
+`serve` (capped accept loop), `close` (once: listener + tracked conns), `track`/`trackPair`, `splice`, and
+`pipeBoth` (full duplex from buffered readers). ScopeRelay, CredentialRelay, TLSRelay and ProxyTLSFront all use
+it. The c-677166 TLS hop design and its kind run (c-67993f): `docs/handoff/2026-11-24-e7-tls-hop-kind.md` on
+`ej/20261124-175803-248cdf`; c-677166 detail in its branch's HANDOFF. Verified: `go build ./...`, `go vet`,
+`go test ./traffic` (and `-race` on the relay tests), `go test ./server ./db ./cmd/...`. Not re-run: the live kind lab.
+
 **2026-11-24 — LLM sampling pin (`c-d73308`, E8; in review).** Migration 0028 adds nullable
 `llm_profiles.sampling_seed`/`sampling_temperature`; `agent/sampling.go` splices them into the wire body
 (seed on openai/ollama only; temperature only where the caller set none). Suite stamps `llm_sampling`.
@@ -248,8 +260,6 @@ the full Docker image, the E8 suite) are in `docs/handoff/2026-11-24-current-sta
 
 - *(unclaimed)* — **DB: renumber colliding migrations as branches land** (S), card `c-c18f43`. Done = unique
   versions on main, `go test ./db` green.
-- *(unclaimed)* — **E7: TLS on the worker→control proxy hop** (M), card `c-677166`. Done = a plain-HTTP
-  target request from a worker crosses the network inside TLS; Helm/compose default to it.
 
 **Human lane**
 - **E7 live install on two hosts** (card `c-8cfbfe`): `helm install` on a ≥2-node cluster, a task whose
@@ -330,7 +340,7 @@ Card ids in brackets:
   `c-3b781a` (evidence on workers), `c-29ff19` (transcripts across hosts), `c-8cfbfe` (live two-host
   install), `c-18f7a8` (browser MCP relay, finding wake-ups, proxy scope default, rule-revision tx; in review),
   `c-548e8b` (TLS to the control API, landed on main as #46), `c-1d3e0a` (worker drain ack, LLM profile reload; in review), `c-20c400` (one settings follower; in review),
-  `c-677166` (proxy-hop TLS).
+  `c-677166` (proxy-hop TLS; in review, lands with `c-6bcdd3` via `c-ccc7a8`).
   From the install: `c-6bcdd3` (state workers read only at start; in review), `c-d4946f` (egress deny
   re-resolved; in review), `c-597b06` (stale node rows; in review), `c-620510` (real multi-machine cluster, human).
 - **E8** [`c-5487e8`] Planner/worker evaluation suite (regression targets, prompt-version A/B via the benchmark gate).
@@ -430,6 +440,19 @@ Card ids in brackets:
   `ARTEX_SECRET_KEY`) loses stored secrets.
 
 ## Decisions
+
+- **2026-11-24** — c-ccc7a8: `connSet` (c-677166) is the one relay helper, not `relayConns` (c-6bcdd3), because it
+  already served three relays including the TLS front, whose accept listener (a `tls.NewListener`) differs from the
+  raw one. It gained relayConns' listener ownership and once-close, so no relay carries its own `ln`/`once`. The
+  splice now closes a destination that cannot half-close (CredentialRelay's old `pipeTunnel` behaviour) instead of
+  leaving the other direction waiting; TCP and TLS conns both half-close, so the existing relays are unchanged.
+- **2026-11-24** — c-677166: the proxy hop's TLS runs between two relays, not in the agents' tools
+  (most cannot use a TLS proxy). go-mitmproxy cannot serve a caller's listener, so the control side is a
+  TLS front that dials the proxy over loopback; its connections are marked remote (`sink.fronted`, kept
+  until the proxy's disconnect, like the scope relay's tombstone) so loopback trust never applies to
+  them. Helm reaches the front through the existing ClusterIP `-control-proxy` Service and checks the
+  certificate against `<release>-control` (`ARTEX_CONTROL_PROXY_TLS_NAME`) rather than adding a name.
+  An `http://` control proxy still works with a WARNING (compatibility) rather than being refused.
 
 - **2026-11-24 c-f729e8 (approvals triage):** approval keys are A/D (separate verdict set from findings' C/F/D/A/I/P;
   the meaning of a key depends on the queue). They act only on an open pending request, never on a selection or with
