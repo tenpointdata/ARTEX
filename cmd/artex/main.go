@@ -80,6 +80,10 @@ func main() {
 	// Started as the Bash shim or as an MCP drop command: drop the identity and exec
 	// the real program. It returns only for an ordinary start.
 	server.RunExecShimIfRequested(os.Args)
+	// A one-shot helper, not a server start: make the node TLS files and exit.
+	if len(os.Args) > 1 && os.Args[1] == nodeTLSCommand {
+		os.Exit(runNodeTLS(os.Args[2:], os.Stdout))
+	}
 	// Before any listener or child exists: keep the secrets out of /proc/<pid>/environ.
 	server.SealProcessEnv()
 	os.Exit(run())
@@ -270,14 +274,20 @@ func run() int {
 		IdleTimeout:       2 * time.Minute,
 	}
 	if useTLS {
+		reloader, err := newCertReloader(*tlsCert, *tlsKey, 30*time.Second)
+		if err != nil {
+			log.Printf("[tls] %v", err)
+			return 1
+		}
 		httpSrv.TLSConfig = serverTLSConfig()
+		httpSrv.TLSConfig.GetCertificate = reloader.GetCertificate
 	}
 
 	go func() {
 		log.Printf("ARTEX %s %s node %s listening on %s (data=%s)", version, role, node.NodeID, listenAddr, *dataDir)
 		var err error
 		if useTLS {
-			err = httpSrv.ListenAndServeTLS(*tlsCert, *tlsKey)
+			err = httpSrv.ListenAndServeTLS("", "") // certificates from TLSConfig.GetCertificate
 		} else {
 			err = httpSrv.ListenAndServe()
 		}

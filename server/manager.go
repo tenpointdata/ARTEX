@@ -306,6 +306,9 @@ type Manager struct {
 	node         NodeConfig
 	remoteProxy  *remoteTaskProxy
 	remoteCACert string
+	// controlRPC reaches the control node's capture and evidence stores
+	// (node_rpc.go). Worker nodes only.
+	controlRPC *controlRPC
 	// globalProxy is the egress proxy all target traffic routes through
 	// (http/https/socks5, optional user:pass). Empty = direct. When traffic
 	// capture is on it becomes the MITM's upstream; when capture is off it is
@@ -923,11 +926,34 @@ func encodeJSON(v any) json.RawMessage {
 // ToolAugment); the tools table then filters them per-agent binding. Currently the
 // traffic tools, gated by the global capture switch: empty when capture is off, so
 // no agent gets traffic_search/traffic_get regardless of binding.
+//
+// On a worker node the same tools run on the control node, which holds the
+// capture (node_rpc.go); they exist exactly when the worker's agents get the
+// control proxy and CA, which is what the worker prompt's traffic note keys on.
 func (m *Manager) HostTools() []actool.CoreTool {
-	if m.traffic == nil || !m.TrafficEnabled() {
+	if !m.TrafficEnabled() {
 		return nil
 	}
-	return m.traffic.Tools()
+	if m.traffic != nil {
+		return m.traffic.Tools()
+	}
+	if m.controlRPC != nil && m.remoteProxy != nil {
+		return m.controlRPC.Tools()
+	}
+	return nil
+}
+
+// factTraffic is the capture lookup that classifies recorded facts: the local
+// capture store, the control node's on a worker node, or none (a nil interface,
+// never a typed nil).
+func (m *Manager) factTraffic() agent.FactTrafficLookup {
+	switch {
+	case m.traffic != nil:
+		return m.traffic
+	case m.controlRPC != nil:
+		return m.controlRPC
+	}
+	return nil
 }
 
 func (m *Manager) Assets() *pgdb.AssetStore  { return m.assets }
@@ -2261,7 +2287,16 @@ func (m *Manager) configureNodeProxy() error {
 		if err != nil {
 			return fmt.Errorf("control node CA certificate (start the control node first): %w", err)
 		}
+		api, err := controlAPIURL(m.node.ControlAPI, m.node.ControlProxy, m.node.ControlCA != "")
+		if err != nil {
+			return err
+		}
+		hc, err := controlHTTPClient(api, m.node.ControlCA)
+		if err != nil {
+			return err
+		}
 		m.remoteProxy, m.remoteCACert = rp, ca
+		m.controlRPC = newControlRPC(api, m.node.NodeID, pgdb.NodeRPCKey, hc)
 	}
 	return nil
 }

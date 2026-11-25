@@ -8,7 +8,7 @@ all the same binary:
 |---|---|---|---|
 | `all` (default) | `-role all` | API, planners, schedulers, intent workers | UI/API on `-addr` |
 | `control` | `-role control`, `ARTEX_LOCAL_WORKERS=N` (default: the `workers` setting; `0` = none) | API, planners, deadline coordinators, schedulers, notifier, capture proxy, and N local workers per task | UI/API on `-addr`, capture proxy on `-proxy` |
-| `worker` | `-role worker`, `ARTEX_NODE_WORKERS=N` (default 3), `ARTEX_NODE_ID` (default: host name), `ARTEX_CONTROL_PROXY` | intent worker loops only | `GET /healthz` on `-health-addr` (default `:8790`) |
+| `worker` | `-role worker`, `ARTEX_NODE_WORKERS=N` (default 3), `ARTEX_NODE_ID` (default: host name), `ARTEX_CONTROL_PROXY`, `ARTEX_CONTROL_API` (default: the control proxy's host on port 8787) | intent worker loops only | `GET /healthz` on `-health-addr` (default `:8790`) |
 
 Run exactly one control node, plus any number of worker nodes. A worker node
 will not claim while a live `role=all` node shares the database. A single
@@ -100,6 +100,109 @@ the task's TargetScope, and paces the traffic.
 - **CA certificate.** The control node publishes its CA certificate (the public
   cert only) for worker nodes to install for their agent processes.
 
+## Evidence on worker nodes
+
+The capture store (the control node's local index of recorded exchanges) and
+the evidence blob directory live on the control node. A worker node's agents
+reach them through a **node RPC** on the control API,
+`POST /api/node/rpc/{op}` (`server/node_rpc.go`):
+
+| Op | Worker-node caller | Runs on the control node |
+|---|---|---|
+| `tool` | `traffic_search`, `traffic_get`, `traffic_blob`, `traffic_messages` | the capture store's own tool (only those names) |
+| `fact` | fact provenance (a fact quoting a captured response is labelled `target_response`) | `ResponseContaining` |
+| `record` | `report_finding` with `traffic_refs` | `evidence.Store.Record`: the snapshot bodies are written to the control node's evidence directory |
+| `bind` | `bind_finding_traffic` | `evidence.Store.Bind` |
+| `exists` | `prove_goal`'s check that a bound exchange is still captured | `TrafficExists` |
+| `preview` | `get_finding_traffic` reading a bound body | the same read as on a single process |
+| `assess` | `update_finding_report`'s S1 quote check | the same assessment, against the bodies on the control node |
+
+- **Same checks, same place.** The worker node runs every agent-side check
+  before the call, as a single process does: the agent traffic-binding
+  setting, finding access and provenance, ref normalisation. The control node
+  runs the evidence code unchanged. A finding without `traffic_refs` is
+  recorded on the worker node directly.
+- **Authentication.** Each request carries an HMAC-SHA256 under a sub-key of
+  `ARTEX_SECRET_KEY` (`db.NodeRPCKey`), over the method, path, node id,
+  timestamp, nonce and body hash. Every node holds that key (start-up refuses a
+  key that does not open the shared data), and agent processes never see it.
+  The per-task scope token is not used here, because it rides in the agents'
+  proxy URL. The control node refuses a wrong signature, a timestamp more than
+  60 s off, and a replayed nonce. The route exists only on `role=control`; it
+  is outside the user-session check and is its own authentication.
+- **Failures fail closed.** An unreachable control node makes the tool call or
+  the `record`/`bind` fail with an error the agent sees (the finding is not
+  recorded without its proof), and makes `assess` return `not_assessed`, never
+  a verdict.
+- **Signed replies.** Every reply carries an HMAC under the same key, bound to
+  the request's nonce and the status. The worker drops a reply that is unsigned
+  or signed for another request, so nothing on the path can inject a
+  `verified` assessment or a fake binding.
+- **Agent processes and the key.** `ARTEX_SECRET_KEY` is scrubbed from the
+  environment, and the server re-executes with a sealed environment
+  (`server/envseal.go`), so `/proc/<pid>/environ` does not show it. Agent
+  processes run as per-task uids, which cannot read the server's key file.
+  Anyone holding the key can already decrypt every stored secret, so the RPC
+  does not re-run the agent-side checks on the control node.
+- **Transport.** See "Transport" below: the node RPC runs over TLS with the
+  control API's CA pinned by default.
+
+## Transport
+
+Worker nodes make two kinds of connection to the control node:
+
+| Connection | Carries | Default protection |
+| --- | --- | --- |
+| Control API (`ARTEX_CONTROL_API`), node RPC | `tool`/`preview` payloads with captured target traffic (session cookies, credentials), findings | **TLS, CA pinned** (Helm and compose), plus the HMAC on every request and reply |
+| Recording proxy (`ARTEX_CONTROL_PROXY`) | the agents' target traffic | plain HTTP to the proxy; HTTPS targets stay TLS inside `CONNECT` |
+
+- **Control side.** The control node serves its API over TLS when
+  `ARTEX_TLS_CERT`/`ARTEX_TLS_KEY` (or `-tls-cert`/`-tls-key`) are set. It
+  rereads the pair when either file changes (checked at most every 30 s), so a
+  renewed certificate (cert-manager, a rotated Secret) is served without a
+  restart. A renewal that fails to load keeps the last good pair and logs.
+- **Worker side.** `ARTEX_CONTROL_CA` names a PEM file holding the CA that
+  signed the control API certificate. With it the worker accepts only
+  `https://` and trusts only that CA, never the system roots, so a publicly
+  valid certificate for the same name does not pass. The file must hold CA
+  certificates only (a private key block is refused). When `ARTEX_CONTROL_API`
+  is empty, it is derived from the proxy host as `https://<host>:8787` if a CA
+  is pinned, else `http://`. Without a CA an `https://` API is checked against
+  the system roots. A plain `http://` API still works (compatibility), but the
+  worker logs a WARNING at start-up. The worker reads the CA once at start-up,
+  so restart the workers after a CA change.
+- **Helm.** `controlTLS.enabled` (default `true`) with `controlTLS.source`:
+  `generate` (the chart makes a private CA and certificate once and keeps them
+  through `lookup`, which is not available under `helm template`/GitOps),
+  `secret` (`controlTLS.existingSecret` with `tls.crt`, `tls.key` and the CA
+  under `controlTLS.caKey`), or `certManager` (a `Certificate` from
+  `controlTLS.certManager.issuerRef`, which must be a CA-type issuer so the
+  Secret's `ca.crt` is the signing CA). The certificate covers
+  `<release>-control[.<ns>[.svc[.cluster.local]]]`, `localhost`, `127.0.0.1`
+  and `controlTLS.extraDnsNames`. Worker pods mount only the CA key of that
+  Secret, never the control key. Probes use HTTPS, the Service port has
+  `appProtocol: https`, and the Ingress gets
+  `nginx.ingress.kubernetes.io/backend-protocol: HTTPS` (other controllers
+  need their own backend-TLS setting).
+- **Compose.** `docker-compose.distributed.yml` runs `artex node-tls` once
+  (`artex-tls-init`), which writes the control pair to the `artex-tls` volume
+  (mounted on the control node only) and `ca.crt` to `artex-control-ca`
+  (mounted on the workers). The UI is then `https://localhost:8787`.
+- **`artex node-tls`.** `artex node-tls -dir D [-ca-dir C] -names a,b -ips
+  10.0.0.5 [-days N]` makes a fresh CA and a server certificate for those names
+  (ECDSA P-256) and writes `D/tls.crt`, `D/tls.key` (0600) and `C/ca.crt`. The
+  CA key is discarded, so nothing else can be signed with it. Existing files
+  are kept, so it is safe to run on every start. To renew, delete the files,
+  rerun the command and restart the workers.
+- **The proxy hop is still plain HTTP.** Agent tools speak to the recording
+  proxy as an ordinary HTTP proxy, and most of them cannot use a TLS proxy.
+  HTTPS targets are unaffected: the MITM TLS session runs from the worker to
+  the control proxy inside `CONNECT`. Plain-HTTP target traffic and the
+  per-task scope token in `Proxy-Authorization` do cross the network in clear
+  text. Until a worker-side TLS relay exists (card c-677166), keep
+  the proxy port on a trusted network. The Helm `networkPolicy.enabled` admits
+  only worker pods to it.
+
 ## Deploying
 
 - **Helm.** The chart is in `deploy/helm/artex` (see its README). It runs one
@@ -114,7 +217,12 @@ the task's TargetScope, and paces the traffic.
 - **Separate hosts by hand.** Run the control node with
   `-role control -proxy :8788`. On each other host, run
   `-role worker -health-addr :8790` with the same database environment,
-  `ARTEX_SECRET_KEY`, LLM configuration and `ARTEX_CONTROL_PROXY=http://<control>:8788`.
+  `ARTEX_SECRET_KEY`, LLM configuration, `ARTEX_CONTROL_PROXY=http://<control>:8788`,
+  `ARTEX_CONTROL_API=https://<control>:<api port>` and `ARTEX_CONTROL_CA`.
+  Make the files with `artex node-tls -dir tls -names <control host> -ips
+  <control ip>`, start the control node with `ARTEX_TLS_CERT=tls/tls.crt
+  ARTEX_TLS_KEY=tls/tls.key`, and copy only `tls/ca.crt` to the workers.
+  Worker nodes must reach the control API as well as the proxy.
 
 ## Limits
 
@@ -131,11 +239,9 @@ These are known and carded on the ARTEX board:
   can reach the network like any target, including the control API and
   Postgres, just as the bundled compose Postgres is reachable today. Deny those
   addresses with `ARTEX_EGRESS_DENY` or a NetworkPolicy.
-- **The capture store exists only on the control node.** A worker node has no
-  local store. Its agents get no `traffic_search`/`traffic_get`, facts stay
-  activity-only, and a finding cannot bind captured traffic as proof (`prove_goal`
-  is refused). Findings without traffic references work. The traffic itself is
-  recorded on the control node.
+- **The capture-store tools need the control node.** On a worker node they
+  are calls to the control node (see "Evidence on worker nodes"). While it is
+  down they fail, and so does a finding that carries traffic refs.
 - **The compose overlay changes how the host reaches the capture proxy.** The
   overlay binds the control proxy to `0.0.0.0` inside the container. A
   host-side client (for example the browser extension through the published

@@ -13,11 +13,18 @@ test. Scope gate, approvals, budgets, noise governor and audit run on every node
 {{- end }}
 {{- else }}
      kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "artex.fullname" . }}-control {{ .Values.control.service.port }}:{{ .Values.control.service.port }}
-     then http://localhost:{{ .Values.control.service.port }}
+     then {{ include "artex.controlScheme" . }}://localhost:{{ .Values.control.service.port }}{{ if and .Values.controlTLS.enabled (eq .Values.controlTLS.source "generate") }}
+     (the certificate is signed by the release's private CA; trust it with
+      kubectl -n {{ .Release.Namespace }} get secret {{ include "artex.controlTLSSecret" . }} -o jsonpath='{.data.ca\.crt}' | base64 -d > artex-ca.crt){{ end }}
 {{- end }}
 
 3. Workers: {{ if .Values.worker.enabled }}{{ .Values.worker.replicas }} replica(s), anti-affinity "{{ .Values.worker.antiAffinity }}" on {{ .Values.worker.topologyKey }}.
      kubectl -n {{ .Release.Namespace }} get pods -l app.kubernetes.io/component=worker -o wide{{ else }}disabled (set control.localWorkers > 0 or enable worker).{{ end }}
+{{- if not .Values.controlTLS.enabled }}
+
+WARNING: controlTLS.enabled=false. Worker nodes reach the control API over plain
+HTTP; node RPC payloads (captured target traffic) cross the network in clear text.
+{{- end }}
 {{- if and .Values.postgresql.bundled.enabled }}
 
 WARNING: the bundled PostgreSQL is a single instance without backups. Use

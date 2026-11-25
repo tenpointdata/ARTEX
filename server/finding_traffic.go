@@ -23,6 +23,15 @@ func (s *Server) evidenceStore() *evidence.Store {
 	return evidence.New(s.m.pg, s.m.traffic, filepath.Join(s.m.dir, "evidence"))
 }
 
+// findingEvidence is the store agents record findings and bind traffic with:
+// on a worker node the control node's, which holds the capture (node_rpc.go).
+func (s *Server) findingEvidence() findingEvidence {
+	if s.m.controlRPC != nil {
+		return remoteEvidence{local: s.evidenceStore(), rpc: s.m.controlRPC}
+	}
+	return localEvidence{s.evidenceStore()}
+}
+
 // Add only new optional properties; preserve edited descriptions, existing
 // properties, agent bindings and disabled flags. The one-time flag also keeps
 // subsequent user unbinding of the evidence reader intact.
@@ -389,26 +398,56 @@ func (s *Server) toolGetFindingTraffic() actool.CoreTool {
 				}
 				return jsonResult(trafficSummary(list))
 			}
-			if a.Side == "" {
-				a.Side = "response"
-			}
-			store := s.evidenceStore()
-			var result any
-			err := store.WithBinding(ctx, id, bid, func(b db.FindingTrafficBinding) error {
-				preview, err := readEvidencePreview(store, b.Snapshot, a.Side, a.Offset, a.Length)
-				if err != nil {
-					return err
-				}
-				head := b.Snapshot.ReqHead
-				if a.Side == "response" {
-					head = b.Snapshot.RespHead
-				}
-				result = map[string]any{"binding_id": strconv.FormatInt(bid, 10), "head": head, "body": preview}
-				return nil
-			})
+			result, err := s.findingEvidence().Preview(ctx, bindingPreviewReq{FindingID: id, BindingID: bid, Side: a.Side, Offset: a.Offset, Length: a.Length})
 			if err != nil {
 				return actool.Errorf(err.Error()), nil
 			}
 			return jsonResult(result)
 		})
+}
+
+// bindingPreviewReq names one segment of a bound evidence body.
+type bindingPreviewReq struct {
+	FindingID int64  `json:"finding_id"`
+	BindingID int64  `json:"binding_id"`
+	Side      string `json:"side"` // request | response (default)
+	Offset    int64  `json:"offset"`
+	Length    int64  `json:"length"`
+}
+
+// bindingPreview is get_finding_traffic's view of one body segment.
+type bindingPreview struct {
+	BindingID string `json:"binding_id"`
+	Head      string `json:"head"`
+	Body      any    `json:"body"`
+}
+
+// previewBinding reads a segment of a bound body from this node's evidence
+// directory. The bodies live where the binding was made: the node holding
+// the capture (a worker node asks the control node, node_rpc.go).
+func previewBinding(ctx context.Context, store *evidence.Store, in bindingPreviewReq) (*bindingPreview, error) {
+	if in.Side == "" {
+		in.Side = "response"
+	}
+	var result *bindingPreview
+	err := store.WithBinding(ctx, in.FindingID, in.BindingID, func(b db.FindingTrafficBinding) error {
+		preview, err := readEvidencePreview(store, b.Snapshot, in.Side, in.Offset, in.Length)
+		if err != nil {
+			return err
+		}
+		head := b.Snapshot.ReqHead
+		if in.Side == "response" {
+			head = b.Snapshot.RespHead
+		}
+		result = &bindingPreview{BindingID: strconv.FormatInt(in.BindingID, 10), Head: head, Body: preview}
+		return nil
+	})
+	return result, err
+}
+
+// localEvidence is the evidence.Store as a findingEvidence.
+type localEvidence struct{ *evidence.Store }
+
+func (l localEvidence) Preview(ctx context.Context, in bindingPreviewReq) (*bindingPreview, error) {
+	return previewBinding(ctx, l.Store, in)
 }

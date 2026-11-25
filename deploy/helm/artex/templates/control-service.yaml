@@ -13,6 +13,9 @@ spec:
     - name: http
       port: {{ .Values.control.service.port }}
       targetPort: http
+      {{- if .Values.controlTLS.enabled }}
+      appProtocol: https
+      {{- end }}
   selector:
     {{- include "artex.selector" (dict "ctx" . "component" "control") | nindent 4 }}
 ---
