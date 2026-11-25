@@ -10,8 +10,11 @@
 # For each pod it opens a TCP connection as root (the server) and as the executor
 # uid through `/app/artex __artex-exec-drop`. Expected with the chart defaults
 # (egress.denyClusterServices): the executor is refused PostgreSQL (the Service
-# name and the database pod IP) and the control API, and reaches the control
-# proxy and the target; root reaches PostgreSQL and the control API.
+# name and the database pod IP) and the control API (the Service and the control
+# pod IP), and reaches the control proxy and the target; root reaches PostgreSQL
+# and the control API. The addresses are looked up at probe time, so after a
+# database pod is rescheduled the probe tests its new IP (the pods re-resolve
+# every egress.refreshSeconds; give them that long plus the DNS cache TTL).
 set -u
 ns="${1:?namespace}"
 rel="${2:-artex}"
@@ -26,7 +29,9 @@ for pod in $pods; do
 	kubectl -n "$ns" exec "$pod" -- sh -c '
 		uid="$1"; shift
 		pgip="$(getent ahostsv4 "$1" | awk "{print \$1; exit}")"
-		for t in "$1:5432" "$pgip:5432" "$2:8787" "$3:8788" ${4:+"$4"}; do
+		ctlip="$(getent ahostsv4 "$2-pods" | awk "{print \$1; exit}")"
+		echo "postgresql pod $pgip, control pod ${ctlip:-unresolved}"
+		for t in "$1:5432" "$pgip:5432" "$2:8787" ${ctlip:+"$ctlip:8787"} "$3:8788" ${4:+"$4"}; do
 			h="${t%:*}"; p="${t##*:}"
 			for who in root exec; do
 				if [ "$who" = root ]; then pre=""; else pre="/app/artex __artex-exec-drop $uid $uid --"; fi

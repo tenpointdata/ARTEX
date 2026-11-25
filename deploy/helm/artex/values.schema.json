@@ -82,6 +82,7 @@
       "properties": {
         "enabled": {"type": "boolean"},
         "denyClusterServices": {"type": "boolean"},
+        "refreshSeconds": {"type": "integer", "minimum": 0},
         "clusterCIDRs": {"type": "array", "items": {"type": "string"}},
         "denyHosts": {"type": "string"},
         "allowHosts": {"type": "string"}

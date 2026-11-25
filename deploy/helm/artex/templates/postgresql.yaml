@@ -9,6 +9,10 @@ metadata:
     {{- include "artex.labels" . | nindent 4 }}
 spec:
   clusterIP: None
+  # Publish the pod's address before it is ready, so the agents' egress deny
+  # (ARTEX_EGRESS_DENY_HOSTS, re-resolved every egress.refreshSeconds) learns a
+  # rescheduled database's new IP before PostgreSQL accepts connections on it.
+  publishNotReadyAddresses: true
   ports:
     - {name: postgres, port: 5432, targetPort: postgres}
   selector:
