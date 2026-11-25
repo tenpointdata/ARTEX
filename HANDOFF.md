@@ -1,6 +1,6 @@
 # HANDOFF.md — ARTEX
 
-**Last updated:** 2026-11-24 15:58 MST, by claude-code: c-2d91eb (E2 UI follow-ups, now in review; board cards c-1198a2 and c-119206 opened) on a branch that merges the unmerged E2 UI + backend branch (ej/20261124-132955-7aef3f), so landing it lands all of E2. Earlier hand-offs are under Deltas and in `ej handoff log`.
+**Last updated:** 2026-11-24 16:07 MST, by claude-code: E10 (c-72dd9d, now in review): code-security lane. Earlier hand-offs are under Deltas and in `ej handoff log`.
 
 > Single entry point for whoever picks this up next (any agent or human), with no access to the
 > originating conversation. Read this first, then the sections of the code it points at.
@@ -58,6 +58,42 @@ See `docs/ARCHITECTURE.md` for the code-level map. Summary:
 - `docs/` — `ARCHITECTURE.md`, `OPS.md`, traffic docs, `RSI.md` (self-improvement governance contract).
 
 ## Current state
+
+**2026-11-24 — E10 code-security lane (card `c-72dd9d`, in review)** on `ej/20261124-150533-1ba29e`,
+which merges the E2 backend branch `ej/20261124-055326-6bcfa9` (so E2 lands with it). SAST and SCA
+results come in as SARIF through the E2 import API and now share the runtime record:
+- `scanimport` gives each finding a lane (`runtime`/`sast`/`sca`, from the tool, an advisory-style
+  rule id, or a manifest or lockfile; `scanimport/lane.go`).
+- `POST /api/integrations/imports?format=sarif&task_id=N&asset_ids=…` writes one exploration fact
+  for the scan run that `yields` a finding node per new finding (`findings.node_id` set), anchored to
+  the runtime assets the code serves, which must already be in the task's scope or asset set
+  (`db/code_findings.go`, `server/scan_import_lane.go`). The fact itself anchors nothing (coverage).
+  Task imports dedup per task.
+- `GET /api/report` lists code and runtime findings together, with a Source line
+  (lane, tool, rule, `path:line`, import id) and a per-lane summary (`report/source.go`).
+- `findings_total` skips imported claims and `finding_list` marks them; `prove_goal` already refused them.
+- Migration `0024_code_security_lane.sql` adds lane/location/line and fact/anchor columns. E2's
+  unreleased `0015_integrations.sql` is renumbered to `0023_integrations.sql` here, so an existing
+  main database (0022 applied) can start; the loader refuses a pending version older than an applied one.
+- An independent review found four anchor and dedup problems (client cross-visibility, inflated
+  coverage, a second task missing known results, task deletion owning foreign assets); all are
+  fixed in `d483374b`.
+- E2 × E5 fix: `GET /api/exploration/findings/{id}/integrations` now needs `read`, not client_read.
+- Verified against Postgres 16: `TestCodeScanJoinsTaskGraphAndReport` (semgrep + trivy/osv SARIF
+  plus a runtime finding in one task report), the `db`, `agent`, `report` and `scanimport` suites, and
+  `scripts/verify.sh`. The `./server` suite passes except `TestManagerSOCKS5UDP…` (no `127.0.0.2` alias on macOS).
+- Docs: `docs/integrations.md` § Code-security lane. Follow-ups: `c-d059ae` (UI and exports),
+  `c-c978e3` (SAST-guided runtime verification), `c-5c4009` (tracker RBAC).
+
+**2026-11-24** — **E2 integrations** (card `c-6def05`, branch `ej/20261124-055326-6bcfa9`, landing with
+E10's branch; UI `c-597eb6` on `ej/20261124-132955-7aef3f`). See `docs/integrations.md`.
+- Findings out: package `ticketing` (GitHub Issues, Jira, DefectDojo) over `notify.Do` (SSRF guard,
+  redaction); tracker configs sealed at rest and masked; `/api/integrations/trackers` (CRUD, `push`,
+  `sync`); status round-trips, tracker wins on conflict, verification never touched.
+- Scanner data in: package `scanimport` (Nmap XML, Nuclei JSONL, ZAP JSON, Burp XML, SARIF);
+  `POST /api/integrations/imports` writes assets with provenance and unverified POE-0 findings; a
+  re-import never edits or promotes. Migration renumbered `0015` → `0023_integrations.sql` on the E10
+  branch (other E2 branches still carry 0015: merge main first).
 
 **2026-11-24 — SSE 401 after console login (`c-13e86c`, fixed; pre-E5).** Streams are same-origin only
 (`web/src/lib/sse.ts`), dev gzip off, `openSSE` writes `: open`. Test `server/activity_stream_auth_pg_test.go`;
@@ -249,6 +285,11 @@ body, through the versioned prompt API, and the starting bodies are restored aft
 8. *(unclaimed)* — **E2 UI: gate integrations controls by role** (S), card `c-119206`. Done = as reviewer
    and as client_read, no E2 control the server refuses is shown, and the finding detail has no 403.
 
+8. *(unclaimed)* — **E2×E5 tracker RBAC** (S), card `c-5c4009`. Done = tracker create/update/delete
+   need admin (like notify channels), push/sync stay operator; RBAC tests pass.
+9. *(unclaimed)* — **E10 lane in UI and exports** (M), card `c-d059ae` (after the E2 UI branch lands).
+   Done = anchor picker on Scanner imports, lane badge/filter on findings, lane in both exports.
+
 - *(unclaimed)* — **RSI gate hardening** (M), card `c-0d277f`: server-side per-task arm ledger, suite
   pre-registration, adopted-lesson retire sync. Done = Postgres tests for each.
 - *(unclaimed)* — **RSI gate web UI** (M), card `c-936308`. Done = adopt/rollback from a proposals table in ≤2 clicks + password.
@@ -342,7 +383,9 @@ Card ids in brackets:
   is on main (origin/main's has no `github-actions` entry).
 - **E8 follow-ups** [`c-f1518c`] first live run, [`c-75c593`] bench
   image from a clean clone, [`c-d73308`] optional provider sampling seed per LLM profile.
-- **E10** [`c-72dd9d`] Code-security testing lane (SAST/dependency ingest) feeding the same dual-graph + evidence model.
+- **E10** [`c-72dd9d`] Code-security lane: built 2026-11-24, in review (see Current state). Follow-ups:
+  [`c-d059ae`] lane in UI and exports; [`c-c978e3`] SAST-guided runtime verification;
+  [`c-5c4009`] tracker RBAC (E2×E5).
 
 ## Known issues and gotchas
 
@@ -352,6 +395,13 @@ Card ids in brackets:
   `compress: false` in the dev branch of `web/next.config.mjs` and the `: open` comment in `openSSE`, or
   streams buffer or stay unopened in the browser.
 
+- **E2's migration is 0023 now, not 0015** (renumbered on the E10 branch, `ej/20261124-150533-1ba29e`,
+  because main already applies 0016–0022 and the loader refuses an older pending version). The other
+  E2 branches (`…132955-7aef3f` UI, `…135159-6d9961` sync, `…150516-d78c96` c-2d91eb) still carry `0015_integrations.sql`: merge
+  main into them after E10 lands, and git takes the rename. A dev database that already applied
+  `0015_integrations` refuses to start ("applied in the database but missing from this binary"):
+  drop it, or `DELETE FROM schema_migrations WHERE version=15` and start again (0023 is idempotent).
+  Server tests use per-package databases (`artex_server`, `artex_db`, …), so reset those too.
 - **Migration 0020 (RSI) vs other branches' 0015–0019:** the runner refuses a pending migration older
   than the newest applied one, so merge 0015–0019 (E2, E5, E1, c-ba9f64, c-5b5421) before this branch
   reaches a database, or renumber 0020 forward at merge. `db/migrate_test.go` lists 0020 explicitly.
@@ -397,6 +447,28 @@ Card ids in brackets:
 
 ## Decisions
 
+- **2026-11-24 E10:**
+  - Code findings come in through the E2 SARIF import, not a new ingest path: one parser, and one
+    provenance table with a `lane` column, instead of a SAST-specific store.
+  - A task import writes into the task's exploration graph (a fact for the scan run that `yields`
+    finding nodes, `findings.node_id` set), so the existing report, planner tools and exports read one
+    record. No new node kind or edge relation, so no CHECK migration.
+  - Code is not a new asset type. Code findings anchor to existing runtime assets the operator
+    names (`asset_ids`), which is where a SAST and a runtime finding on one application meet. A
+    `repository` asset type can come later if a consumer needs it.
+  - Imported findings stay unverified leads: excluded from `findings_total`, and `prove_goal`
+    refuses them (no verified traffic). Only a reproduced worker finding proves a goal.
+  - SCA is classified from typed fields only (tool, advisory-style rule id, manifest file name).
+- **2026-11-24 E2:**
+  - Imported findings are scanner claims: `unverified`, POE 0, `worker=import:<tool>`. A known dedup
+    key leaves the existing finding untouched.
+  - Imports register no notification events, so bulk uploads do not flood the channels.
+  - Scanner free text goes only into quoted evidence; summary and name come from typed tokens.
+  - When both sides changed, the ticket sync lets the tracker win, because remediation is tracked
+    there.
+  - A tracker destination change drops its ticket links.
+  - Evidence goes into a ticket only when `include_evidence` is on, and then with credentials
+    redacted.
 - **2026-11-24 c-2d91eb (E2 follow-ups):**
   - This branch merges the unmerged E2 UI branch (which carries the backend) instead of waiting, as c-597eb6
     did. Landing it lands E2.
@@ -581,10 +653,11 @@ Card ids in brackets:
 ## Deltas
 
 <!-- composite:deltas · newest first; Composite rewrites this block on every merge (ej handoff merge / merge_handoff) -->
+- **2026-11-24 16:07 MST** · claude-code · `ej/20261124-150533-1ba29e` `ca784d2`→`6e1aa4c` (16 commits) · `h-59c24d` — E10 (c-72dd9d, now in review): code-security lane. This branch merges the E2 backend branch (ej/20261124-055326-6bcfa9), so E2 lands with it. SARIF findings get a lane (runtime/sast/sca). A task import with asset_ids writes an exploration fact that yields a finding node per new finding, anchored to runtime assets already in the task's scope. GET /api/report lists code and runtime findings together, with a Source line and per-lane counts; imported claims are not counted as confirmed or toward findings_total. Migrations: E2's unreleased 0015 is renumbered to 0023 (main already has 0016–0022), and 0024 adds the lane columns. Also fixed the E2×E5 client_read leak on findings/{id}/integrations. Four review findings were fixed: anchor scope, fact anchors inflating coverage, per-task dedup, and from_intent. **Next:** c-5c4009: tracker config RBAC (admin vs operate). c-d059ae: lane in the Scanner imports UI, findings table and exports (after the E2 UI branch lands). The E2 branches still carrying 0015 (…132955-7aef3f, …135159-6d9961) must merge main after this lands. c-c978e3: SAST-guided runtime verification. **Decided:** - Code findings reuse the E2 SARIF import and provenance table (with a lane column) rather than a separate SAST store. - Task imports join the exploration graph through a fact that yields finding nodes; no new node kind or edge relation is needed. - Code is not an asset type. Findings anchor to existing runtime assets, which must already be in the task's scope or carry the task in task_ids. - Imported findings stay unverified leads. - Renumbered E2's 0015 to 0023 because main's loader refuses older pending versions. **Issues:** opened #c-5c4009, #c-c978e3, #c-d059ae.
 - **2026-11-24 15:58 MST** · claude-code · `ej/20261124-150516-d78c96` `f1ec47a`→`9fdfa3b` (4 commits) · `h-0548f2` — c-2d91eb (E2 UI follow-ups, now in review; board cards c-1198a2 and c-119206 opened) on a branch that merges the unmerged E2 UI + backend branch (ej/20261124-132955-7aef3f), so landing it lands all of E2. (1) Findings filter by import: db.FindingFilter.ImportID (an EXISTS on the finding_import_sources primary key), parsed from ?import_id= in the shared filter, so it applies to the list, groups, asset tree and export. The findings page shows an "Import #N" chip that clears it, and each Past imports row's New findings count links to its findings. (2) A committed browser e2e: scripts/e2e/integrations.sh (throwaway Postgres, the backend, a Next production build, Playwright) runs integrations-e2e.js against fake-github.js. 24/24 checks passed locally, including exactly the import's findings (3 of 7). (3) The imports list pages: limit/offset → {imports, total}, with TablePagination. Also fixed an E2×E5 merge gap: GET /findings/{id}/integrations was open to client_read with no binder; it now needs read, and tracker CRUD needs admin. Verified: db and server PG tests (only the known environment failures), verify.sh --web-only, and the e2e. **Next:** Land ej/20261124-150516-d78c96 (it carries the E2 backend, UI and these follow-ups). c-119206: role-gate the E2 UI controls. c-1198a2: wire scripts/e2e/integrations.sh into CI after c-cc25b6's pinned ci.yml lands. The E2 backend follow-ups c-da9198 and c-ea60a0 are unchanged. **Decided:** Merged the unmerged E2 UI branch rather than waiting. import_id matches the findings an import created; a dedup re-match does not claim them. Migration 0015 was not edited for an index (its checksum is enforced); the EXISTS on the primary key is enough. The import filter lives in the URL, not in saved preferences. E2 under E5: finding integrations need read, and tracker CRUD needs admin like notification channels; push, sync and import stay operate. The e2e uses next build + next start instead of embedding the UI. The CI job is deferred until the SHA-pinning branch lands.
 - **2026-11-24 15:56 MST** · claude-code · `ej/20261124-141024-67b6b6` at `81edb00`, no commits · `h-f62f2d` — c-4c8fd6 (E6 live check, now in review): built the E6 branch into an isolated compose stack (local Ollama with prices, nginx target on its own network, OTel collector via host.docker.internal). The cost page in headless Chromium lists tasks with a correct EUR cost; Task/Provider/Role/Model regroup without a reload; the URL keeps by/days. The collector got 51 spans = 51 ledger rows, one trace per task, and all four metrics. The egress filter refuses the collector to uid 10001 while the server exports. Gap: no single trace with planner and worker together (the local model never finished a planner intent). No code changed. **Next:** Land ej/20261124-123231-b78990 (E6, not on main yet) with c-f4a69d. c-990198: fix wall time (first_ts = min(ts - latency)). c-7361b4: goals role calling after a terminal status and 32k runaway outputs. Optionally repeat the trace check with a hosted model to see planner+worker spans in one trace. **Decided:** Ran the check from the unmerged E6 branch in an isolated stack (artex-e6check, port 18797), not on the running artex-artex-1 instance and without merging E6 into this branch: E6 is in review, and merging it here would land it on main uncontrolled. Used the local Ollama (keyless) after reading the blend gateway key from the keychain was denied. The target was an nginx container the stack itself ran, the only scope entry. The stack, volumes and image were removed afterwards. **Issues:** opened #c-7361b4, #c-990198.
-- **2026-11-24 15:30 MST** · claude-code · `ej/20261124-145313-129188` `f70fe41`→`33e6d6e` (1 commit) · `h-124b6f` — c-f4a69d (E6 follow-up, now in review; card c-888292 opened): the Cost & efficiency view now includes archived tasks. Archives record aggregate_stats.cost_cells (per profile, worker, model and UTC day: calls, errors, tokens, latency, first/last call), and db.CostBreakdown folds them in, so archived tasks appear in every dimension and day window. Older archives (token_profiles only) count under All by task/profile and are reported as archived_omitted elsewhere; the page says how many. GET /api/llm/cost returns a distinct `tasks` total, which the totals row uses instead of summing. New web test npm run test:cost (cost-metrics helpers) is in verify.sh; biome is clean on the cost files. This branch merges the unmerged E6 branch ej/20261124-123231-b78990, so landing it lands E6. The 2026-11-23 audit verification detail moved from Current state to docs/handoff/security-audit-2026-11-23.md to fit the size limit. Verified: TestCostBreakdownIncludesArchivedTasks and the archive round-trip on Postgres 16, verify.sh (only the known macOS 127.0.0.2 SOCKS5 test fails), the web tests, tsc and i18n. **Next:** c-4c8fd6: check the cost page in a browser against real LLM traffic, including an archived task. c-888292 (low): backfill cost_cells for archives made before this change. c-9ca57a (RBAC on cost routes) can rebase on main once this lands. **Decided:** Archived cost comes from a new additive archive aggregate (cost_cells) instead of reading cold archive files, so the view stays one DB read. Old archives are not backfilled: their per-profile totals are used where they fit and counted as omitted elsewhere, which the UI states. The server computes the distinct task total, because only it can dedupe a task across groups. first_ts/last_ts are nullable for groups with no call times.
 - _Older hand-offs, a line each; `ej handoff log` has them whole:_
+- **2026-11-24 15:30 MST** · claude-code · `h-124b6f` — c-f4a69d (E6 follow-up, now in review; card c-888292 opened): the Cost & efficiency view now includes archived tasks. **Next:** c-4c8fd6: check the cost page in a browser against real LLM traffic, including an archived task.
 - **2026-11-24 15:29 MST** · claude-code · `h-0c292e` — E9 (c-73af97). **Next:** Land this branch. **Issues:** opened #c-45c921, #c-4b7989, #c-f729e8.
 - **2026-11-24 15:21 MST** · claude-code · `h-683872` — c-92bb52 (E5 UI follow-up, closed; c-4ee114 opened): every existing web page now hides or disables the mutating controls the session's role lacks, per server/rbac_policy.go. **Next:** c-4ee114: re-probe with seeded rows (MCP, channels, LLM profiles, pending approvals, traffic exchange sheet, files, skills, hooks), hide the assets checkboxes without operate, switch credentials-tab…
 - **2026-11-24 14:52 MST** · claude-code · `h-6ea377` — c-13e86c fixed: the activity stream 401 after a console login predates E5. **Next:** Land with or after the E5 stack branches (c-f4115c, c-01377e).
