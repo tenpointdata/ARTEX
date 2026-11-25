@@ -83,6 +83,8 @@ RFC 1929 0x01. It now uses `Traffic.resolveScope` (local, then remote). `TestSOC
 and then gets 0x02 at CONNECT. `TestManagerSOCKS5UDP…` was failing only because 127.0.0.2 can't be bound on
 macOS. It now skips there and passes on Linux with real PG (golang:1.26.11-bookworm, private Docker network).
 `scripts/verify.sh` Go steps pass. Its web i18n step fails on #80's strings (`c-be8a4f`).
+`c-1a74a4` was the same fix made in parallel; its merge kept main's code and added one assertion (an
+unresolvable worker token as `egress.ScopeUser` gets 0x01).
 
 **2026-11-24 — E2 push updates via signed webhooks (`c-c2bdc8`; in review on `ej/20261124-191156-37e38c`).**
 This branch also carries the c-da9198 commit (per-tracker advisory lock, capped sync cursor, background
@@ -101,8 +103,8 @@ unchanged, redelivery of the same id then processed), the ticketing webhook unit
 `test:integrations`. An independent security review found no bypass or leak; its slowloris, timing, dedup-order
 and id-length findings are fixed (10 s read deadline, every refusal hashes the body). `scripts/verify.sh`:
 only the two known environment failures (`TestConnectWithoutPasswordRealPG` on a trust-auth Postgres,
-`TestManagerSOCKS5UDPOptInAndAssetBlockRuleDropsDatagram` without 127.0.0.2), plus `TestSOCKS5RemoteScope`, which
-also fails on main (`traffic/` is identical to main; card `c-1a74a4`). Not verified: a live
+`TestManagerSOCKS5UDPOptInAndAssetBlockRuleDropsDatagram` without 127.0.0.2) (`TestSOCKS5RemoteScope`, then
+also failing on main, is fixed by `c-831dfa`). Not verified: a live
 GitHub/Jira delivery (needs a publicly reachable instance), the sheet in a browser.
 
 **2026-11-24 — RSI proposer (`c-c89f5b`, on main via #77) + model drafter (`c-0aaa24`, in review on
@@ -110,7 +112,7 @@ GitHub/Jira delivery (needs a publicly reachable instance), the sheet in a brows
 (core `rsi/propose`) drafts goals/planner/worker body edits from closed tasks when a rule's signal holds
 on ≥2 tasks across ≥2 scopes, inside the round budget; `--draft-model` (off by default) lets a model
 rewrite the body through the same checks; the drafter must not be the judge. `verify.sh` there fails only
-on `TestSOCKS5RemoteScope` (fix in review, `c-1a74a4`) and the web i18n check (`c-430ba2`). Detail:
+on `TestSOCKS5RemoteScope` (since fixed, `c-831dfa`) and the web i18n check (`c-be8a4f`). Detail:
 `docs/handoff/2026-11-24-e3-rsi-loops.md`. Not checked: a real instance (`c-4bbf29`).
 
 **2026-11-24 — LLM sampling pin (`c-d73308`, E8; on main via #69).** Migration 0028 adds nullable
