@@ -59,18 +59,10 @@ See `docs/ARCHITECTURE.md` for the code-level map. Summary:
 
 ## Current state
 
-**2026-11-24 (c-0d277f, RSI gate hardening; in review)** — Evidence is now checked against the server's
-own records, not only the upload. Migration **0026** (numbered past 0021/0024/0025 on open branches;
-0023 is on main): `task_rsi_arm` (per-task arm ledger: prompt sha per goals/planner/worker, injected lesson ids and
-block sha, written in `agentsForTask` via `server/rsi_ledger.go` `recordTaskArm`; marked drifted by a
-different rebuild or a prompt pointer move while the task is live), `rsi_suite_runs` (pre-registration,
-`POST/GET /api/rsi/proposals/{id}/suite-runs`; held-out only, one open per proposal, ≤3, each consumed by
-exactly one upload), and log actions `register`, `lesson_retire`, `lesson_revive` (a graduated lesson retired
-or revived by extraction is logged on its adopted proposal). Pure checks `rsi.CheckRegistration` /
-`rsi.CheckLedger` (`rsi/ledger.go`) also bind each record's task name to its run id (which names the target).
-Harness: `rsi_submit.py register` and `eval_suite.py --rsi-proposal ID`. Verified on a throwaway Postgres 18:
-`go test ./rsi`, the RSI db tests (3 new), `TestRSIGateEndToEndPG` (registration, forged-arm refusal, cap),
-68 benchmark Python tests. Not verified: a live suite run (`c-772190`).
+**2026-11-24 (c-0d277f, RSI gate hardening; in review)** — RSI evidence must be a suite run registered
+before it ran (`POST /api/rsi/proposals/{id}/suite-runs`; `eval_suite.py --rsi-proposal`), and each task
+must match the server's per-task arm ledger (`task_rsi_arm`, migration **0026**). Graduated lessons that
+retire or revive are logged on their proposal. Tested on Postgres; detail in `docs/handoff/2026-11-24-rsi-gate.md`.
 
 **2026-11-24 — TLS between worker nodes and the control node by default (`c-548e8b`, E7; in review).**
 Worker nodes reach the control API (node RPC) over **TLS with the CA pinned**: `ARTEX_CONTROL_CA`
@@ -152,24 +144,10 @@ the backend `ej/20261124-055326-6bcfa9`, so landing it lands all of E2. See `doc
   and the SOCKS5 test that needs a `127.0.0.2` alias.
 
 **2026-11-24 (c-d25ff9, E3)** — The `RSI.md` Loop C benchmark gate and Loop B lesson graduation are built,
-flag off (`ARTEX_RSI_LOOP`, default off, read per request). Pure core `rsi/` (search-space allowlist:
-`prompt_body` for goals/planner/worker and `lesson`; immutable and git-reviewed surfaces refused;
-annealed budget 4,2,1,1…; `Evaluate` recomputes per-gate and paired results from raw E8 arm records,
-binds them to the exact body sha / lesson set, refuses proposed-from targets, net regressions and
-gains on fewer than 2 targets). API `/api/rsi/*` (`server/rsi_loop.go`); migration **0020**
-(`rsi_proposals`, `rsi_proposal_evidence`, append-only `rsi_adoption_log`). Adoption = owner
-password + newest passing evidence id + evidence baseline equal to the live prompt; it appends an
-`agent_prompts` version; rollback is a pointer change (refused if an owner edited since, open
-with the flag off). `ARTEX_RSI_LESSONS` gains `adopted` (only graduated lessons) and `bench` (a
-pinned set, `PUT /api/rsi/bench-lessons`). This branch merges the unmerged E8 suite branch
-(`ej/20261124-084655-ccdab2`); harness gains lesson arms and `scripts/benchmark/rsi_submit.py`.
-An adversarial review (opus) found real-upload breakage (string task ids) and replay/forgery
-paths; fixed here: task ledger across proposals, `suite_run` invariant, 3 uploads per proposal,
-crashed candidate runs count as losses, rendered + normalized marker checks, ≤4 open proposals
-with forward-only rounds, split agent lock, lesson block sha and unedited-role shas re-checked at
-adoption. Remaining findings: `c-0d277f`. Verified: `go test ./rsi`, the RSI DB and server tests
-against Postgres 16, 65 benchmark Python tests, `scripts/verify.sh`. Not verified: any live suite run through the gate (`c-772190`); no UI
-(`c-936308`).
+behind `ARTEX_RSI_LOOP` (off by default). The pure core is `rsi/`, the API is `/api/rsi/*`
+(`server/rsi_loop.go`), and migration **0020** adds the tables. Adoption needs the owner password.
+`ARTEX_RSI_LESSONS` gains `adopted|bench`. Detail and verification are in `docs/handoff/2026-11-24-rsi-gate.md`.
+No live suite run yet (`c-772190`), no UI yet (`c-936308`).
 
 **2026-11-24 (c-c0bb07, E4)** — Methodology-driven coverage: OWASP WSTG 4.2 (97 tests) and the OWASP
 API Security Top 10 2023 are typed checklists in `methodology/` (data in `methodology/data/*.json`,
