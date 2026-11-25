@@ -8,7 +8,7 @@ import { api } from "@/lib/api";
 import { setVisibleInterval } from "@/lib/polling";
 import type { Edge, TaskNode } from "@/lib/types";
 
-export function GraphTab({ taskId }: { taskId: string }) {
+export function GraphTab({ taskId, focusNodeId }: { taskId: string; focusNodeId?: string }) {
   const [nodes, setNodes] = React.useState<TaskNode[]>([]);
   const [edges, setEdges] = React.useState<Edge[]>([]);
   // Signature of the previous graph data: polling skips setState on identical data to avoid
@@ -49,7 +49,7 @@ export function GraphTab({ taskId }: { taskId: string }) {
   return (
     <Card>
       <CardContent className="p-0">
-        <ExplorationGraph nodes={nodes} edges={edges} className="h-[72vh]" />
+        <ExplorationGraph nodes={nodes} edges={edges} className="h-[72vh]" focusNodeId={focusNodeId} />
       </CardContent>
     </Card>
   );

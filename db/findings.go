@@ -717,11 +717,18 @@ func (d *DB) FindingStatsForCompany(company string) (*FindingStats, error) {
 	return d.FindingStatsFor(FindingFilter{Company: company})
 }
 
-// FindingStatsFor is FindingStatsForCompany taking the company fields
-// (Company, StrictCompany) of f; its other fields are ignored.
+// FindingStatsFor is FindingStatsForCompany taking the page-wide fields of f:
+// the company (Company, StrictCompany), the scanner import (ImportID) and the
+// lane (Lane), so the stat cards count what the list shows under the same deep
+// links. Its other fields (the per-view filters the cards ignore) are ignored.
+// With any of those set, archived (cold) tasks are left out: their aggregates
+// carry no company, import or lane attribution.
 func (d *DB) FindingStatsFor(cf FindingFilter) (*FindingStats, error) {
 	st := &FindingStats{VulnClasses: []string{}, Tasks: []FindingTaskOption{}}
-	f, err := d.resolveCompany(FindingFilter{Company: cf.Company, StrictCompany: cf.StrictCompany})
+	f, err := d.resolveCompany(FindingFilter{
+		Company: cf.Company, StrictCompany: cf.StrictCompany,
+		ImportID: cf.ImportID, Lane: cf.Lane,
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -779,7 +786,7 @@ func (d *DB) FindingStatsFor(cf FindingFilter) (*FindingStats, error) {
 	if err := trows.Err(); err != nil {
 		return nil, err
 	}
-	if strings.TrimSpace(cf.Company) != "" {
+	if strings.TrimSpace(cf.Company) != "" || cf.ImportID != "" || cf.Lane != "" {
 		return st, nil
 	}
 	archived, err := d.archivedTaskAggregates()

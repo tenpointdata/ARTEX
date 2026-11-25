@@ -302,8 +302,8 @@ function ImportsTable({ imports, loaded }: { imports: ScanImport[]; loaded: bool
               {im.fact_node_id ? (
                 im.task_id ? (
                   <Link
-                    href={`/function/tasks/detail?id=${im.task_id}`}
-                    title={t("Open task #{id}, where this import is recorded as fact node #{node}", {
+                    href={`/function/tasks/detail?id=${im.task_id}&tab=graph&node=${im.fact_node_id}`}
+                    title={t("Open fact node #{node} in the exploration graph of task #{id}", {
                       id: im.task_id,
                       node: im.fact_node_id,
                     })}

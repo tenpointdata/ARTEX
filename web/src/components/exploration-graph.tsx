@@ -16,6 +16,7 @@ import {
   type Edge as RFEdge,
   useEdgesState,
   useNodesState,
+  useReactFlow,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 
@@ -41,11 +42,16 @@ function ExplorationGraphInner({
   nodes,
   edges,
   emptyHint = t("No exploration data"),
+  focusNodeId,
 }: {
   nodes: TaskNode[];
   edges: Edge[];
   emptyHint?: string;
+  focusNodeId?: string;
 }) {
+  const { fitView } = useReactFlow();
+  // The focus id already applied, so polling refreshes do not re-open the drawer the user closed.
+  const focusedRef = React.useRef("");
   const [rfNodes, setRfNodes, onNodesChange] = useNodesState<ExploreRFNode>([]);
   const [rfEdges, setRfEdges, onEdgesChange] = useEdgesState<RFEdge>([]);
   const [selected, setSelected] = React.useState<TaskNode | null>(null);
@@ -92,6 +98,21 @@ function ExplorationGraphInner({
       }),
     );
   }, [viewNodes, viewEdges, nodesById, setRfNodes, setRfEdges]);
+
+  // Deep link focus (?node=<id>): once the node loads, open its drawer and, when it is on the
+  // canvas (not folded into a digest), select and center on it.
+  React.useEffect(() => {
+    if (!focusNodeId || focusedRef.current === focusNodeId) return;
+    const target = nodesById.get(focusNodeId);
+    if (!target || rfNodes.length === 0) return;
+    focusedRef.current = focusNodeId;
+    setSelected(target);
+    if (!rfNodes.some((n) => n.id === focusNodeId)) return;
+    setRfNodes((prev) => prev.map((n) => ({ ...n, selected: n.id === focusNodeId })));
+    window.requestAnimationFrame(() => {
+      void fitView({ nodes: [{ id: focusNodeId }], padding: 0.6, maxZoom: 1.2, duration: 400 });
+    });
+  }, [focusNodeId, nodesById, rfNodes, setRfNodes, fitView]);
 
   return (
     <>
@@ -177,16 +198,19 @@ export function ExplorationGraph({
   edges,
   className,
   emptyHint,
+  focusNodeId,
 }: {
   nodes: TaskNode[];
   edges: Edge[];
   className?: string;
   emptyHint?: string;
+  /** Node to select and center on once it loads (the task page's ?node= deep link). */
+  focusNodeId?: string;
 }) {
   return (
     <div className={cn("w-full overflow-hidden rounded-xl", className)}>
       <ReactFlowProvider>
-        <ExplorationGraphInner nodes={nodes} edges={edges} emptyHint={emptyHint} />
+        <ExplorationGraphInner nodes={nodes} edges={edges} emptyHint={emptyHint} focusNodeId={focusNodeId} />
       </ReactFlowProvider>
     </div>
   );

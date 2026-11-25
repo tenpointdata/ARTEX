@@ -2961,7 +2961,7 @@
   "Location": "Konum",
   "Fact node": "Olgu düğümü",
   "Lanes": "Hatlar",
-  "Open task #{id}, where this import is recorded as fact node #{node}": "#{id} numaralı görevi aç; bu içe aktarma orada #{node} olgu düğümü olarak kayıtlı",
+  "Open fact node #{node} in the exploration graph of task #{id}": "#{id} numaralı görevin keşif grafiğinde #{node} olgu düğümünü aç",
   "Anchor assets": "Bağlantı varlıkları",
   "{count} anchor assets": "{count} bağlantı varlığı",
   "Anchor assets (optional)": "Bağlantı varlıkları (isteğe bağlı)",

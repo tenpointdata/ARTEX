@@ -326,12 +326,12 @@ export function useFindingData({
   // refreshStats re-reads the whole-table aggregates after a mutation; a failure keeps the last snapshot.
   const refreshStats = React.useCallback(() => {
     api
-      .findingStats(company)
+      .findingStats({ company, importId, lane })
       .then(setStats)
       .catch(() => {
         // The mutation remains valid even if the aggregate refresh fails.
       });
-  }, [company]);
+  }, [company, importId, lane]);
 
   // Refresh the current view after an inline mutation: the flat view reloads its page, the grouped view refreshes group headers + the finding's group.
   const refreshAfterMutation = React.useCallback(
@@ -424,7 +424,7 @@ export function useFindingData({
     let alive = true;
     const load = () => {
       api
-        .findingStats(company)
+        .findingStats({ company, importId, lane })
         .then((s) => {
           if (alive) {
             setStats(s);
@@ -441,7 +441,7 @@ export function useFindingData({
       alive = false;
       stopPolling();
     };
-  }, [company]);
+  }, [company, importId, lane]);
 
   return {
     flat,

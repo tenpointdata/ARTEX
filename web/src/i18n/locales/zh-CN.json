@@ -2961,7 +2961,7 @@
   "Location": "位置",
   "Fact node": "事实节点",
   "Lanes": "通道",
-  "Open task #{id}, where this import is recorded as fact node #{node}": "打开任务 #{id}，此导入在其中记录为事实节点 #{node}",
+  "Open fact node #{node} in the exploration graph of task #{id}": "在任务 #{id} 的探索图中打开事实节点 #{node}",
   "Anchor assets": "锚定资产",
   "{count} anchor assets": "{count} 个锚定资产",
   "Anchor assets (optional)": "锚定资产（可选）",

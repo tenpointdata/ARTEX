@@ -57,8 +57,11 @@ export const explorationApi = {
   // findings and their ancestors, nodes carrying subtree aggregate counts. Not paginated — the tree is a navigation structure, fetched in one go.
   findingAssetTree: (q: Omit<FindingQuery, "page" | "pageSize">) =>
     get<FindingAssetTree>(`/exploration/findings/asset-tree?${findingFilterParams(q).toString()}`),
-  findingStats: (company?: string) =>
-    get<FindingStats>(`/exploration/findings/stats${company ? `?company=${encodeURIComponent(company)}` : ""}`),
+  // findingStats reads the stat cards; company, importId and lane narrow them like the list (other filters are ignored).
+  findingStats: (q: Pick<FindingQuery, "company" | "importId" | "lane"> = {}) => {
+    const qs = findingFilterParams(q).toString();
+    return get<FindingStats>(`/exploration/findings/stats${qs ? `?${qs}` : ""}`);
+  },
   // exportFindings triggers the findings page export and downloads the file. scope=selected
   // sends ids (a finding_id list); scope=filtered sends the current filters (the FindingQuery filter fields); scope=all ignores filters.
   exportFindings: async (opts: {

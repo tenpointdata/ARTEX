@@ -2511,8 +2511,10 @@ func (s *Server) resolveAssetIDs(ids []int64) map[int64]*db.Asset {
 // findingStats serves the whole-table aggregates (stat cards + vuln-class filter)
 // for the paginated Findings page.
 func (s *Server) findingStats(w http.ResponseWriter, r *http.Request) {
-	// company narrows the cards to the sidebar's company, with the list's rule.
-	st, err := s.m.pg.FindingStatsFor(clientFindingFilter(r, db.FindingFilter{Company: r.URL.Query().Get("company")}))
+	// company, import_id and lane narrow the cards with the list's rules; the
+	// per-view filters (severity, status, ...) are not applied to the cards.
+	q := findingFilterFromQuery(r.URL.Query())
+	st, err := s.m.pg.FindingStatsFor(clientFindingFilter(r, db.FindingFilter{Company: q.Company, ImportID: q.ImportID, Lane: q.Lane}))
 	if err != nil {
 		writeErr(w, 500, err.Error())
 		return

@@ -233,7 +233,22 @@ function TaskDetailInner() {
   const [task, setTask] = React.useState<Task | null>(null);
   const [paused, setPaused] = React.useState(false);
   const [loaded, setLoaded] = React.useState(false);
-  const [tab, setTab] = React.useState("sessions");
+  // ?tab= picks the opening tab and ?node= focuses an exploration-graph node (Scanner imports → Fact node).
+  const focusNodeId = searchParams.get("node") ?? undefined;
+  const tabParam = searchParams.get("tab");
+  const [tab, setTabState] = React.useState(
+    TABS.some((x) => x.value === tabParam) ? (tabParam as string) : focusNodeId ? "graph" : "sessions",
+  );
+  // Switching tabs keeps the URL shareable; the node focus belongs to the link that opened the page.
+  const setTab = React.useCallback(
+    (next: string) => {
+      setTabState(next);
+      const p = new URLSearchParams({ id, tab: next });
+      if (next === "graph" && focusNodeId) p.set("node", focusNodeId);
+      router.replace(`/function/tasks/detail?${p.toString()}`, { scroll: false });
+    },
+    [focusNodeId, id, router],
+  );
   const [interceptPendingCount, setInterceptPendingCount] = React.useState(0);
   const [profiles, setProfiles] = React.useState<LLMProfile[]>([]);
   const [archiving, setArchiving] = React.useState(false);
@@ -456,7 +471,7 @@ function TaskDetailInner() {
           <OverviewTab taskId={id} />
         </TabsContent>
         <TabsContent value="graph" className="mt-0">
-          <GraphTab taskId={id} />
+          <GraphTab taskId={id} focusNodeId={focusNodeId} />
         </TabsContent>
         <TabsContent value="broadcast" className="mt-0">
           <BroadcastTab taskId={id} />

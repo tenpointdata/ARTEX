@@ -92,3 +92,66 @@ func TestFindingFilterByLane(t *testing.T) {
 	}
 	t.Fatalf("import %d not listed", im.ID)
 }
+
+// The stat cards narrow by lane and import like the list: under ?lane= and
+// ?import_id= the card counts equal the filtered list's total.
+func TestFindingStatsByLaneAndImport(t *testing.T) {
+	d := notifyTestDB(t)
+	ctx := context.Background()
+	im := &ScanImport{Format: "sarif", ToolName: "semgrep", FileSHA256: "lane-stats"}
+	if err := d.CreateScanImport(ctx, im); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { d.Exec(`DELETE FROM scan_imports WHERE id=$1`, im.ID) })
+	for i, lane := range []string{"sast", "sast", "sca", "runtime"} {
+		sev := SeverityLow
+		if i == 0 {
+			sev = SeverityHigh
+		}
+		id, _, err := d.AddImportedFinding(ctx, ImportedFinding{ImportID: im.ID, VulnClass: "stats-" + lane, Name: "x",
+			Severity: sev, Summary: "s", Worker: "import:semgrep", Tool: "semgrep", RuleID: "rule",
+			DedupKey: "lane-stats-" + t.Name() + "-" + itoa(int64(i)), Lane: lane, Location: "src/x.go", Line: i + 1})
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { d.Exec(`DELETE FROM findings WHERE id=$1`, id) })
+	}
+	worker, err := d.AddFinding(0, 0, "xss", "x", SeverityLow, "s", "e", "worker", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { d.Exec(`DELETE FROM findings WHERE id=$1`, worker) })
+
+	imp := itoa(im.ID)
+	for _, c := range []struct {
+		f                FindingFilter
+		total, high, low int // -1 = only compare with the list
+	}{
+		{FindingFilter{ImportID: imp}, 4, 1, 3},
+		{FindingFilter{ImportID: imp, Lane: "sast"}, 2, 1, 1},
+		{FindingFilter{ImportID: imp, Lane: "sca"}, 1, 0, 1},
+		{FindingFilter{ImportID: imp, Lane: "runtime"}, 1, 0, 1},
+		{FindingFilter{Lane: "sast"}, -1, -1, -1},
+		{FindingFilter{Lane: "runtime"}, -1, -1, -1},
+		{FindingFilter{Lane: "bogus"}, 0, 0, 0},
+	} {
+		st, err := d.FindingStatsFor(c.f)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, total, err := d.ListFindingsPage(c.f, 1, 1)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if st.Total != total {
+			t.Fatalf("%+v: stats total %d, list total %d", c.f, st.Total, total)
+		}
+		if c.total >= 0 && (st.Total != c.total || st.High != c.high || st.Low != c.low) {
+			t.Fatalf("%+v: stats = %+v, want total=%d high=%d low=%d", c.f, st, c.total, c.high, c.low)
+		}
+	}
+	if st, err := d.FindingStatsFor(FindingFilter{ImportID: imp, Lane: "sca"}); err != nil ||
+		len(st.VulnClasses) != 1 || st.VulnClasses[0] != "stats-sca" {
+		t.Fatalf("sca vuln classes = %+v, %v", st, err)
+	}
+}
