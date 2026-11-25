@@ -76,7 +76,7 @@ The gate implements the contract above. The proposer is a separate client (next 
 | 1. live tasks propose, benchmarks adopt | `rsi.Evaluate`: split must be `held-out`; the proposal's and the arm's `proposed_from` must not be in the evaluated targets; every run's task must exist on this instance and be newer than the proposal, and a task backs at most one evidence upload across all proposals (`rsi_evidence_tasks` ledger); both arms must come from one `suite_run`; at most 3 uploads per proposal |
 | 2. owner approval per adoption | `POST /api/rsi/proposals/{id}/adopt` needs the owner password (step-up under the login rate limit) and names the exact passing evidence id; a bearer token alone cannot adopt |
 | 3. immutable surfaces | `rsi.ValidateEdit` admits only `prompt_body` for `goals`/`planner`/`worker` and `lesson`; `rsi.ImmutableSurfaces` and git-reviewed surfaces (`skill`, `tool_description`) are refused; a body may not carry a code-owned tail marker (`rsiForbiddenMarkers`), checked on the raw and the rendered template after NFKC, dash, zero-width and whitespace folding. The tails are appended by code after the body, so a body cannot remove them |
-| 4. one-step rollback | adoption appends an `agent_prompts` version and records before/after; `POST .../rollback` moves the pointer back, only while the adopted version is still active (an owner edit since is never overwritten); open with the flag off |
+| 4. one-step rollback | adoption appends an `agent_prompts` version and records before/after; `POST .../rollback` moves the pointer back, only while the adopted version is still active (an owner edit since is never overwritten); open with the flag off; `admin` role, no password |
 | 5. flag off by default | `ARTEX_RSI_LOOP=on` is read on every request; off refuses propose, evidence and adopt. Lesson injection keeps its own flag, `ARTEX_RSI_LESSONS` |
 | 6. bounded, annealed budget | `rsi.DefaultBudget`: 4, 2, 1, 1, … proposals per round; rounds move forward one at a time, and at most 4 proposals are open at once. The pruner: paired gain must appear on at least 2 distinct held-out targets |
 | 7. attribution | the server recomputes per-gate rates and paired gained/lost from the raw arm records; the candidate may differ from the baseline in exactly the proposed module (prompt sha per role, lesson set); any gate with net paired loss rejects and is reported as a regression of that module, with its targets (a candidate run that crashed where the baseline ran counts its baseline passes as lost); the baseline must not evolve (no lessons) |
@@ -94,8 +94,11 @@ the server, so the server checks their shape, binding, task freshness and
 uniqueness but cannot re-judge them or prove which prompt a given task ran; the
 owner reviews the suite's `report.md` before adopting. Marker checks catch
 imitation of a tail, not a body that argues against one in its own words.
-`proposed_from` is compared as exact target ids. Reject and rollback need only
-a session (they move toward the owner-approved prior state), by decision. The generic prompt editor (`PUT /api/agents/{key}/prompt`)
+`proposed_from` is compared as exact target ids. Reject needs only an
+`operate` session (it applies before adoption and changes no live prompt).
+Rollback needs no password (it moves toward the owner-approved prior state) but
+needs the `admin` role, because it re-points an agent's live prompt version, the
+same effect as `PUT /api/agents/...` (decision 2026-11-24, c-cce755). The generic prompt editor (`PUT /api/agents/{key}/prompt`)
 remains an owner path outside the gate, and the benchmark harness uses it on its
 dedicated bench instance to switch arms.
 

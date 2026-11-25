@@ -17,9 +17,9 @@ import (
 // A client is admitted in exactly one of three ways:
 //
 //  1. Scope token: the password is a live task scope token (egress.ScopeToken),
-//     minted by this proxy (Traffic.ScopedProxyURL) or resolved through the
-//     remote scope resolver (SetRemoteScopeResolver, for a worker node's
-//     token). The connection runs on that scope's rules. A token-shaped password the registry does not hold (an ended run)
+//     minted by Traffic.ScopedProxyURL or resolved by the remote scope resolver
+//     (a worker node's token; Traffic.resolveScope). The connection runs on that
+//     scope's rules. A token-shaped password the registry does not hold (an ended run)
 //     is refused, never downgraded to the global rules.
 //  2. Operator credential: the password equals the configured operator
 //     password (ARTEX_SOCKS5_PASSWORD; the user defaults to "artex" and is
@@ -123,9 +123,6 @@ func (s *socks5Server) authUserPass(conn net.Conn) (cred socks5Cred, ok bool) {
 func (s *socks5Server) checkCredential(user, pass string) (socks5Cred, bool) {
 	paced := user == egress.PaceUser
 	if tok, isTok := egress.ScopeToken(pass); isTok && s.t != nil {
-		// resolveScope checks the local registry, then the remote resolver
-		// (scope_remote.go), so a distributed worker's token authenticates
-		// only while the scope that minted it is live.
 		if _, live := s.t.resolveScope(tok); live {
 			return socks5Cred{paced: paced, token: tok}, true
 		}

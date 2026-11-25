@@ -1,6 +1,6 @@
 # HANDOFF.md — ARTEX
 
-**Last updated:** 2026-11-24 20:54 MST, by claude-code: c-81b834 (also closes card c-1a74a4): #79's SOCKS5 checkCredential looked scope tokens up only in the local registry, so remote-worker tokens got 0x01 before the remote resolver ran. Earlier hand-offs are under Deltas and in `ej handoff log`.
+**Last updated:** 2026-11-25, by claude-code: c-81b834 merged with main. Main had already landed the same SOCKS5 fix (c-831dfa) and the #80 strings (c-430ba2/c-be8a4f), so main's versions were kept. Earlier hand-offs are under Deltas and in `ej handoff log`.
 
 > Single entry point for whoever picks this up next (any agent or human), with no access to the
 > originating conversation. Read this first, then the sections of the code it points at.
@@ -59,16 +59,13 @@ See `docs/ARCHITECTURE.md` for the code-level map. Summary:
 
 ## Current state
 
-**2026-11-24 — SOCKS5 remote-worker tokens authenticate again (`c-81b834`, also closes `c-1a74a4`).**
-#79 (ad3e5b24) made SOCKS5 RFC 1929 verify credentials, but `checkCredential` (`traffic/socks5_auth.go`) looked a
-scope token up only in the local registry. A distributed worker's token (E7, resolved through
-`SetRemoteScopeResolver`) got status 0x01 before the remote resolver ran. That was a real regression, not a test
-problem. It now calls `resolveScope` (local registry first, then the remote resolver, with its TTL cache and ended-scope
-checks), so a remote token is admitted only while its scope is live. Junk and unresolvable tokens are still refused at
-auth; the rest of the policy is unchanged. `TestSOCKS5RemoteScope` now expects those refusals at auth (0x01) instead of at
-CONNECT (0x02). The six #80 webhook strings, which the go failure had hidden from verify.sh's i18n step, are now in
-`tr.json`/`zh-CN.json` (machine-quality translations). `go test ./traffic` and `scripts/verify.sh` pass on macOS.
-Not verified: a real two-node worker setup.
+**2026-11-24 — SOCKS5 auth regression after #79 fixed (`c-831dfa`).** `checkCredential` looked up a
+scope-token password in the local registry only, so worker-minted tokens that the remote resolver holds got
+RFC 1929 0x01. It now uses `Traffic.resolveScope` (local, then remote). `TestSOCKS5RemoteScope` now expects
+#79's refusal stage: unknown or ended tokens get 0x01 at auth, and the bare pace marker passes open-mode auth
+and then gets 0x02 at CONNECT. `TestManagerSOCKS5UDP…` was failing only because 127.0.0.2 can't be bound on
+macOS. It now skips there and passes on Linux with real PG (golang:1.26.11-bookworm, private Docker network).
+`scripts/verify.sh` Go steps pass; the #80 i18n strings landed in `c-be8a4f`/`c-430ba2`. Board cards `c-81b834` and `c-1a74a4` were the same bug: `c-81b834`'s branch fixed it independently, and main's code was kept when it merged.
 
 **2026-11-24 — E2 push updates via signed webhooks (`c-c2bdc8`; in review on `ej/20261124-191156-37e38c`).**
 This branch also carries the c-da9198 commit (per-tracker advisory lock, capped sync cursor, background
@@ -91,18 +88,13 @@ only the two known environment failures (`TestConnectWithoutPasswordRealPG` on a
 also failed on main (card `c-1a74a4`; fixed 2026-11-24 by `c-81b834`, see below). Not verified: a live
 GitHub/Jira delivery (needs a publicly reachable instance), the sheet in a browser.
 
-**2026-11-24 — RSI proposer/critic (`c-c89f5b`, in review)** on `ej/20261124-192202-fbe9e3`.
-`cmd/artex-rsi-propose` (core `rsi/propose`: `Build` critic + pruner, `Slots` budget, `WriteArm`,
-rule table `rules.go`) reads closed tasks' `/outcome` + `/lessons`, `/api/skill-gaps` and the active
-goals/planner/worker bodies, keeps a rule only when its signal holds on ≥2 tasks across ≥2
-companies/categories (and ≥25% of tasks), and appends a fixed `## Field guidance` paragraph to one role's
-body. Writes `round-N/<name>.json|.tmpl` arms (`proposed_from: task:<id>`, rationale) + `plan.json`, at
-most the round's remaining budget from `GET /api/rsi/status` (now also reports `max_open`). Stops unless
-the server reports the loop on; client can only GET and `POST /api/rsi/proposals` (no adopt). Marker list
-moved to `agent.CodeOwnedTailMarkers` (server uses it). Verified: `rsi/propose` + CLI fake-server tests
-(budget per round 0–4, immutable surfaces/markers/forged drafts refused, loop off reads nothing else, post
-only proposes), generated arms load through `arms.load_arm` + `rsi_submit.proposal_body`,
-`scripts/verify.sh`. Not checked: a real instance (`c-4bbf29`). Model-drafted critic: `c-0aaa24`.
+**2026-11-24 — RSI proposer (`c-c89f5b`, on main via #77) + model drafter (`c-0aaa24`, in review on
+`ej/20261124-203755-708a1e`).** `cmd/artex-rsi-propose`
+(core `rsi/propose`) drafts goals/planner/worker body edits from closed tasks when a rule's signal holds
+on ≥2 tasks across ≥2 scopes, inside the round budget; `--draft-model` (off by default) lets a model
+rewrite the body through the same checks; the drafter must not be the judge. `verify.sh` there fails only
+on `TestSOCKS5RemoteScope` (fix in review, `c-1a74a4`) and the web i18n check (`c-430ba2`). Detail:
+`docs/handoff/2026-11-24-e3-rsi-loops.md`. Not checked: a real instance (`c-4bbf29`).
 
 **2026-11-24 — LLM sampling pin (`c-d73308`, E8; on main via #69).** Migration 0028 adds nullable
 `llm_profiles.sampling_seed`/`sampling_temperature`; `agent/sampling.go` splices them into the wire body
@@ -149,9 +141,45 @@ not. Verified on Postgres 16: `TestEventsStreamPushesScopedChangesPG` (finding c
 session in 15ms; B's finding, approvals and other companies withheld), the hub unit tests, RBAC/binder
 coverage tests and `scripts/verify.sh`. Not checked: the dashboard in a real browser.
 
-**2026-11-24 — earlier entries** (TLS worker↔control `c-548e8b`, worker-node proof `c-3b781a`, E10 code-security
-lane `c-72dd9d`/`c-d059ae`, SSE 401 fix `c-13e86c`, E9 UX pass `c-73af97`, operator methodology choice `c-ca2bd0`):
-moved to `docs/handoff/2026-11-24-current-state-archive.md`.
+**2026-11-24 — TLS between worker nodes and the control node by default (`c-548e8b`, E7; in review).**
+Worker nodes reach the control API (node RPC) over **TLS with the CA pinned**: `ARTEX_CONTROL_CA`
+(`server/node_tls.go`) makes the worker accept only `https://` and trust only that CA, never the system
+roots; without it an `http://` API still works with a start-up WARNING. The control listener rereads a
+renewed `ARTEX_TLS_CERT`/`KEY` within 30 s (`cmd/artex/certreload.go`). Helm: `controlTLS.enabled=true`
+by default, `source` = `generate` (chart-made CA via `lookup`) | `secret` | `certManager`; HTTPS probes,
+`appProtocol: https`, nginx backend-protocol annotation; worker pods mount only the CA key. Compose
+overlay: one-shot `artex-tls-init` runs the new `artex node-tls` subcommand (CA + pair, CA key
+discarded) into separate volumes. Docs: `docs/DISTRIBUTED.md` "Transport", chart README.
+**This branch merges the unmerged c-3b781a branch (`ej/20261124-155351-f5bfb9`), which carries E7, so
+landing it lands E7 + c-3b781a.** Verified: `TestWorkerNodeFindingBindsControlCapture` now runs its
+control API over pinned TLS (Postgres 16, passes); `TestControlRPCPinnedCA` (wrong CA and system roots
+refused), cert reload and `node-tls` tests; `helm lint` and `helm template` in all three sources plus
+disabled and the error cases; a chart-generated cert verified by the pinned Go client;
+`docker compose config` of the overlay; `scripts/verify.sh` passed. Full `go test ./server` with
+Postgres: only the known macOS SOCKS5 test and the order-dependent
+`TestFindingWorkflowAutoHintToPlannerAndSetting` (passes alone) failed. **Not checked:** a live
+`helm install` (c-8cfbfe) or a live compose run with a built image. **Still clear text:** the
+worker→control recording-proxy hop (plain-HTTP targets and the scope token), carded `c-677166`.
+
+**2026-11-24 — Worker-node findings carry their captured proof (`c-3b781a`, E7; in review).** A
+worker-node finding binds the control capture through a signed node RPC (`POST /api/node/rpc/{op}`,
+`server/node_rpc.go`, HMAC under `db.NodeRPCKey`); design in `docs/DISTRIBUTED.md` "Evidence on worker
+nodes", verification in Deltas. Gap `c-7ad4da` (capture switch read at start-up) is closed by c-8cfbfe.
+
+**2026-11-24 — SSE 401 after console login (`c-13e86c`, fixed; pre-E5).** Streams are same-origin only
+(`web/src/lib/sse.ts`), dev gzip off, `openSSE` writes `: open`. Test `server/activity_stream_auth_pg_test.go`;
+browser-checked on the E5 stack.
+
+**2026-11-24 (c-ca2bd0, E4 follow-up)** — An operator can choose a task's methodologies. Migration
+**0022** adds `tasks.methodologies TEXT[]` (empty `{}` = automatic, as before). The create request
+(`methodologies`, ids matched loosely, stored canonical, unknown id = 400) and the create form
+(`methodology-picker.tsx`, a table fed by the new `GET /api/methodologies`) set it; `db.TaskMethodologies`
+uses it when set, so the coverage API and the planner block show only the chosen checklists. It is
+carried through archive/restore and echoed on the task DTO. This branch merges the unmerged E4 branch
+(`ej/20261124-123222-d3dc8a`). Verified against Postgres 16: `TestTaskMethodologiesOperatorChoice`,
+the archive round-trip, `TestCreateTaskMethodologies` (server), the full `go test -p 1 ./...` (only the
+known macOS 127.0.0.2 SOCKS5 test fails), web `tsc` and i18n. Not checked: the form in a browser.
+Gaps carded as `c-aed5fd`: no "none" choice, and the choice is fixed at creation.
 
 **2026-11-24 — client_read console (`c-7c4715`, in review)** on `ej/20261124-144554-67afc9`. New
 `GET /api/me/companies` and `GET /api/me/tasks?company=` (`server/client_console.go`, binders
@@ -187,6 +215,9 @@ the full Docker image, the E8 suite) are in `docs/handoff/2026-11-24-current-sta
 ## Triage (next handful)
 
 **Agents' lane**
+0. *(unclaimed)* — **`go test ./traffic` fails on main** (S), card `c-81b834`: `TestSOCKS5RemoteScope`
+   gets auth reply 0x01 since #79's SOCKS5 auth; it stops `scripts/verify.sh` before the web steps. Done = cause found
+   (without loosening auth), verify.sh green.
 1. *(unclaimed)* — **E7: worker nodes miss other runtime control-node state** (M), card `c-6bcdd3`: LLM profiles,
    MCP servers, custom tools and similar are rebuilt only at start. Done = each one is followed or listed in
    DISTRIBUTED.md Limits.
@@ -288,7 +319,7 @@ Card ids in brackets:
   [`c-da9198`] scheduled sync plus a per-tracker lock (on `ej/20261124-135159-6d9961`, also carried by the
   c-c2bdc8 branch); [`c-c2bdc8`] signed webhooks (in review on `ej/20261124-191156-37e38c`); [`c-ea60a0`] move agent `scan_ingest` onto
   `scanimport`, normalize default ports, and settle two dedup edge cases.
-- **E3** [`c-d25ff9`] — gate built (in review). Follow-ups: hardening `c-0d277f`, UI `c-936308`, first live run `c-772190`, proposer/critic `c-c89f5b` (in review; follow-ups `c-4bbf29` live run, `c-0aaa24` model drafter).
+- **E3** [`c-d25ff9`] — gate built (in review). Follow-ups: hardening `c-0d277f`, UI `c-936308`, first live run `c-772190`, proposer/critic `c-c89f5b` (on main; follow-ups `c-4bbf29` live run, `c-0aaa24` model drafter in review).
 - **E4** [`c-c0bb07`] Methodology-driven coverage: landed 2026-11-24 (see Current state). Follow-ups:
   [`c-ca2bd0`] an operator-chosen methodology per task (landed, in review; gaps `c-aed5fd`); [`c-ed937d`] checklist completion in the report export (after E1).
 - **E5** [`c-669406`] Engagement governance. The backend is done on `ej/20261124-055929-bd2253`. Follow-ups:
@@ -400,7 +431,15 @@ Card ids in brackets:
 
 ## Decisions
 
-- 2026-11-24 (`c-81b834`): SOCKS5 auth resolves a token-shaped password through `resolveScope`, the same path as CONNECT and the HTTP proxy, instead of the local registry only. The auth step must accept every token the scope gate would accept, or remote workers break; the remote resolver remains the authority, and SOCKS5 auth is otherwise unchanged.
+- 2026-11-24 (`c-81b834`/`c-831dfa`): SOCKS5 auth resolves token passwords with `resolveScope` (local, then remote resolver), so it admits exactly the tokens the scope gate admits; nothing else in the policy changed.
+- **2026-11-24 c-cce755 (RSI action roles):** `POST /api/rsi/proposals/{id}/rollback` needs `admin`
+  (one exact rule in `server/rbac_policy.go`): it re-points an agent's live prompt version, the same effect as
+  `PUT /api/agents/...`. No password, so the owner (admin) keeps one-step rollback. Reject, propose and evidence stay
+  `operate` (the default): reject applies only before adoption and changes no live prompt, and the proposer and bench
+  harness post with operator tokens; adopt stays `operate` + owner password. Not a blanket `/api/rsi` mutate rule,
+  which would lock the proposer out. Reverses the earlier "reject and rollback need only a session" line in `RSI.md`.
+  The RSI page (c-936308, unmerged branch `ej/20261124-192153-48c72c`) must gate the Rollback button on
+  `useCan("admin")` and keep reject on `useCan("operate")` (follow-up c-a842a0).
 - **2026-11-24 c-c2bdc8 (tracker webhooks):** a delivery is a hint, never state: it names a ticket and the
   normal sync reads the tracker API, so forged or replayed payloads cannot set a finding status. Jira is
   supported only through Jira Cloud's HMAC-signed admin webhooks (`X-Hub-Signature`); a secret in the URL was
@@ -558,12 +597,12 @@ Card ids in brackets:
 ## Deltas
 
 <!-- composite:deltas · newest first; Composite rewrites this block on every merge (ej handoff merge / merge_handoff) -->
-- **2026-11-24 20:54 MST** · claude-code · `ej/20261124-204623-7a8920` `cce7bf1`→`b76ff66` (1 commit) · `h-575a78` — c-81b834 (also closes card c-1a74a4): #79's SOCKS5 checkCredential looked scope tokens up only in the local registry, so remote-worker tokens got 0x01 before the remote resolver ran. That was a real E7 regression. It now uses resolveScope (local registry, then remote resolver); everything else in SOCKS5 auth is unchanged. TestSOCKS5RemoteScope now expects junk and unresolvable tokens to be refused at auth. Also added the six #80 webhook i18n strings that the go failure had hidden. go test ./traffic and scripts/verify.sh pass. Moved six older Current state entries to docs/handoff/2026-11-24-current-state-archive.md to meet the size limit. **Next:** Land ej/20261124-204623-7a8920. Optionally have a native speaker review the tr/zh-CN webhook strings and run a real two-node worker SOCKS5 smoke test. **Decided:** SOCKS5 auth accepts exactly the tokens the scope gate accepts (resolveScope), with the remote resolver as the authority; the policy was not loosened.
+- **2026-11-24 20:54 MST** · claude-code · `ej/20261124-204623-7a8920` · `h-575a78` — c-81b834 (also closes c-1a74a4): the same SOCKS5 remote-token auth fix as main's c-831dfa (checkCredential → resolveScope) plus the #80 i18n strings; on merge main's versions of both were kept. **Next:** none; optional real two-node SOCKS5 smoke test.
 - **2026-11-24 20:51 MST** · claude-code · `ej/20261124-203755-708a1e` `30a1782`→`dac6220` (1 commit) · `h-8ecb71` — c-0aaa24 (in review): propose.Drafter hook (Input.Drafter, nil = fixed guidance). Build drafts in rank order after the transfer filter and the fixed-body ValidateEdit, so only in-space roles reach the model and a refused body frees its slot. DraftRequest carries code-owned text, counts and the active body only. Output is refused (never repaired) on template-action changes, stray delimiters, empty, unchanged or prior bodies, or a ValidateEdit failure. WriteArm re-checks. CheckDrafter refuses a drafter equal to the judge, or any drafter when no judge is named. CLI: --draft-model/--draft-provider/--draft-url/--judge-model, $ARTEX_DRAFT_API_KEY. New agent.Complete (tool-less one-shot) and agent.FrameData (exported data envelope). Arms carry drafted_by. Hostile-output tests in rsi/propose/drafter_test.go and cmd/artex-rsi-propose/drafter_test.go, mutation-checked. Older Current state blocks moved to docs/handoff/. **Next:** Land ej/20261124-203755-708a1e. Then c-4bbf29: run a real-model --draft-model dry run on a bench instance and send one drafted arm through eval_suite with a different judge. Optional: cap the share of a body a rewrite may delete, if real drafts strip useful content. **Decided:** A refused drafted body skips the rule instead of falling back to the fixed text, so the plan says why and the operator can rerun without the flag. Drafting happens after budget ranking to keep model calls within the round's slots. Drafted proposals are tagged "[drafted rule <id>]" in the rationale, because a rewrite need not contain the guidance text the old pruner matches. An unknown judge counts as a refusal, since independence cannot be checked. Template actions must stay exactly the same set as in the active body.
 - **2026-11-24 19:39 MST** · claude-code · `ej/20261124-191154-865292` `e9fbefe`→`af602b8` (12 commits) · `h-be59c2` — c-bd9b7a (in review on ej/20261124-191154-865292): RouteGuard in the (main) layout (route-access.ts resolver from the sidebar's need, tested) sends a role to its landing page without mounting a page it can't see; c-92bb52's useCan gating re-applied onto main's E9 file layout (system/*, tasks, traffic, chat, findings, assets, records, sync, workspace, agent editor, approvals); task Overview by-model card needs operate; integrations page and findings tracker reads gated. scripts/e2e/role-probe.sh passes for reviewer, operator and client_read; scripts/verify.sh passes. The branch also carries the role probe (c-80fe4e). **Next:** Land ej/20261124-191154-865292 (carries c-80fe4e and c-bd9b7a). Do NOT land ej/20261124-144553-d5978e (c-92bb52): superseded. Then c-601ec6. Optional: port c-92bb52's errorText(e) swaps; hide the Overview "click Re-run all" footnote without operate. **Decided:** c-92bb52's single commit (gating + file splits) conflicted with main's E9 split in ~40 files, so its gating intent was ported onto main's files instead of merging; the traffic row selection stays for read roles (Copy URLs) while the sheet opens only with operate. Route permission comes from the sidebar's need so nav and guard share one source.
 - **2026-11-24 19:35 MST** · claude-code · `ej/20261124-192153-48c72c` `5e3f5b4`→`96e3134` (1 commit) · `h-8712ef` — c-936308 (in review): /system/rsi page — proposals table with newest verdict, expandable per-gate rates (with n), paired gained/lost, regressions with targets, adoption log, prompt-history link; inline Adopt (password + newest evidence_id), Reject, Roll back (reason); ARTEX_RSI_LOOP state from /api/rsi/status. GET /api/rsi/proposals now returns latest_evidence (db.LatestRSIEvidence). Verified with tsc, biome, verify.sh, TestRSIGateEndToEndPG on Postgres 17, and headless Chromium: adopt then rollback in 2 clicks each. Issues: opened c-cce755. **Next:** Land ej/20261124-192153-48c72c. Then c-cce755 (decide whether RSI reject/rollback need admin). The live end-to-end run stays c-772190. **Decided:** Newest evidence is attached to the list response (one DISTINCT ON query) rather than a per-row detail call; the field is additive, so existing API users are unaffected. The loop flag is shown, not toggled: turning it on stays an owner decision in the environment (RSI.md rule 5). Actions are shown to operate sessions to match the current server RBAC; c-cce755 tracks whether that should be admin.
+- **2026-11-24 19:31 MST** · claude-code · `ej/20261124-192202-fbe9e3` `5e3f5b4`→`077451f` (1 commit) · `h-8d9748` — c-c89f5b (in review): RSI Loop C proposer. cmd/artex-rsi-propose + rsi/propose read closed tasks' outcome/lessons and /api/skill-gaps, keep only rules whose signal holds on >=2 tasks across >=2 scopes, append fixed guidance to one goals/planner/worker body, validate with rsi.ValidateEdit (draft and write time), write arm files (proposed_from task:<id>, rationale) + plan.json within the round's remaining status budget; --post registers them. Refuses while ARTEX_RSI_LOOP is off; client can only GET and POST /api/rsi/proposals. Tail markers moved to agent.CodeOwnedTailMarkers; status reports max_open. **Next:** Land ej/20261124-192202-fbe9e3. Then c-4bbf29: real-instance dry run and one proposal through eval_suite + evidence (fold with c-f1518c). Later c-0aaa24 (model-drafted critic). **Decided:** Go, not Python, so the proposer calls rsi.ValidateEdit directly. Guidance is a fixed code-written table and no live task text enters a body (live output is untrusted). The proposer stays in the newest round and opens the next only when --round names it, since advancing closes the current round. Dry run is the default. Loop flag is required even for a dry run (checked at start and before posting). **Issues:** opened #c-0aaa24, #c-4bbf29.
 - _Older hand-offs, a line each; `ej handoff log` has them whole:_
-- **2026-11-24 19:31 MST** · claude-code · `h-8d9748` — c-c89f5b (in review): RSI Loop C proposer. **Next:** Land ej/20261124-192202-fbe9e3. **Issues:** opened #c-0aaa24, #c-4bbf29.
 - **2026-11-24 19:12 MST** · claude-code · `h-43b8d4` — c-80fe4e (in review): scripts/e2e/role-probe.sh, a role probe on the integrations.sh harness. **Next:** Land c-92bb52 (ej/20261124-144553-d5978e; main still lacks it, so the probe fails widely on main). **Issues:** opened #c-bd9b7a.
 - **2026-11-24 19:11 MST** · claude-code · `h-e9f875` — c-1e3b53 (E7, in review): before worker.Execute a distributed node pulls the stored files of the intent's run dir, the task's spills and the session's sidechains (pullRunFilesFrom), makes the dirs as the run does, then hands what it pulled to the executor (sh… **Next:** Land ej/20261124-185425-cbc1cf instead of ej/20261124-180332-433a2b (it carries it).
 - **2026-11-24 19:02 MST** · claude-code · `h-b23a91` — c-ccc7a8 (in review): this branch merges c-6bcdd3 (ej/20261124-172031-c2bb7b, carrying c-20c400/c-d4946f/c-8cfbfe and the E7 stack) and c-677166 (ej/20261124-163818-870578, proxy-hop TLS), so landing it lands both. **Next:** Land ej/20261124-185428-8c1cc4; do not land ej/20261124-163818-870578 or ej/20261124-172031-c2bb7b separately afterwards.
@@ -571,16 +610,3 @@ Card ids in brackets:
 - **2026-11-24 18:23 MST** · claude-code · `h-0668f2` — c-67993f done (closed; c-ccc7a8 opened): the E7 TLS proxy hop was checked on a 3-node kind cluster with an agent-driven (stub LLM) task. **Next:** Land c-677166 (ej/20261124-163818-870578, fork h-c56630): rebase onto main and unify the relay helper with c-6bcdd3's relayConns (c-ccc7a8).
 - **2026-11-24 18:23 MST** · claude-code · `h-970bcd` — c-d73308 (E8 follow-up) built, in review: an optional per-profile LLM sampling pin. **Next:** Land ej/20261124-180334-421555.
 - **2026-11-24 18:23 MST** · claude-code · `h-c952c8` — c-43dbfc (E7, in review): worker-node run directories, spills and subagent sidechains are mirrored into PostgreSQL (new filesync package, db.TaskFiles, migration 0026) when an intent run ends. **Next:** Land ej/20261124-180332-433a2b (migrations 0025, 0026). **Issues:** opened #c-1bbeb6, #c-1e3b53.
-- **2026-11-24 18:21 MST** · claude-code · `h-9bfe0c` — c-601ec6 (in review): GET /api/intercept/history/chain takes order=desc and before_seq (db.AuditFilter Desc/BeforeSeq; ascending stays the default). **Next:** Land ej/20261124-180916-b60b04.
-- **2026-11-24 18:13 MST** · claude-code · `h-6293db` — c-f729e8 (in review), on a branch that merges the c-45c921 branch (ej/20261124-170157-3aeba5, which carries E9), so landing it lands both. **Next:** Land ej/20261124-175807-17ca91 (carries c-45c921 and E9).
-- **2026-11-24 18:12 MST** · claude-code · `h-bb3c3b` — c-4ee114 done (closed; c-80fe4e opened). **Next:** c-80fe4e: probe the stream-messages view, the detail pages and client_read.
-<!-- /composite:deltas -->
-
-_(written by `merge_handoff`)_
-
-## Updating this document
-
-Keep the sections above in the standard form. Refresh **Current state** (dated stamp) and **Triage**
-at the end of any session that changed code/state/config/plans; add or close GitHub issues and record
-**Decisions** with their reason. `merge_handoff` writes the Deltas block and the one-line stamp — do
-not hand-maintain a history chain in Current state.

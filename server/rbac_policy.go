@@ -83,6 +83,10 @@ var rbacPolicy = []policyRule{
 	{methodMutate, "/api/tools", true, permAdmin},
 	{methodMutate, "/api/mcp", true, permAdmin},
 	{methodMutate, "/api/agents", true, permAdmin},
+	// RSI rollback re-points an agent's live prompt version, the same effect
+	// as PUT /api/agents. Adopt is owner-gated by password in its handler;
+	// propose, evidence and reject change no live prompt and stay operate.
+	{http.MethodPost, "/api/rsi/proposals/{id}/rollback", false, permAdmin},
 	{methodMutate, "/api/visibility", true, permAdmin},
 	{methodMutate, "/api/llm", true, permAdmin},
 	{methodMutate, "/api/notify/channels", true, permAdmin},

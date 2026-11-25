@@ -194,6 +194,12 @@ func TestRBACPolicyByRole(t *testing.T) {
 		{"GET", "/api/tasks/t1/coverage", permClientRead},
 		{"GET", "/api/tasks/t1/coverage-graph", permRead},
 		{"GET", "/api/tasks", permRead},
+		{"POST", "/api/rsi/proposals/4/rollback", permAdmin},
+		{"POST", "/api/rsi/proposals/4/reject", permOperate},
+		{"POST", "/api/rsi/proposals/4/evidence", permOperate},
+		{"POST", "/api/rsi/proposals/4/adopt", permOperate}, // plus the owner password in the handler
+		{"POST", "/api/rsi/proposals", permOperate},
+		{"GET", "/api/rsi/proposals/4", permRead},
 		{"POST", "/api/tasks", permOperate},
 		{"POST", "/api/tasks/t1/control", permOperate},
 		{"DELETE", "/api/exploration/findings/5", permOperate},
