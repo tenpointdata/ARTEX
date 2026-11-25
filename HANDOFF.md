@@ -1,6 +1,6 @@
 # HANDOFF.md — ARTEX
 
-**Last updated:** 2026-11-24 17:18 MST, by claude-code: c-d059ae (now in review; card c-7651e5 opened): the E10 lane is visible and filterable outside the task report. Earlier hand-offs are under Deltas and in `ej handoff log`.
+**Last updated:** 2026-11-24 17:21 MST, by claude-code: c-119206 (now in review; card c-81193b opened): E2 integrations UI gates its controls by role with useCan, matching server/rbac_policy.go — tracker add/edit/delete/enable admin; Sync, Push to tracker (bulk + detail) and… Earlier hand-offs are under Deltas and in `ej handoff log`.
 
 > Single entry point for whoever picks this up next (any agent or human), with no access to the
 > originating conversation. Read this first, then the sections of the code it points at.
@@ -248,8 +248,9 @@ body, through the versioned prompt API, and the starting bodies are restored aft
    CVSS/EPSS-scored, remediation-bearing, standards-mapped deliverables (OWASP ASVS/WSTG, MITRE
    ATT&CK). Done = a report export with per-finding CVSS vector + remediation + framework tags,
    covered by tests. Card `c-8f9cca`.
-8. *(unclaimed)* — **E2 UI: gate integrations controls by role** (S), card `c-119206`. Done = as reviewer
-   and as client_read, no E2 control the server refuses is shown, and the finding detail has no 403.
+8. *(unclaimed)* — **client_read finding detail: hide refused controls** (S), card `c-81193b`. Start retest,
+   Link traffic and the severity/status/report-stage pickers show for client_read. Done = the client block of
+   `scripts/e2e/roles-e2e.js` asserts they are hidden and the e2e passes.
 
 9. *(unclaimed)* — **E2×E5 tracker RBAC** (S), card `c-5c4009`. Done = tracker create/update/delete
    need admin (like notify channels), push/sync stay operator; RBAC tests pass.
@@ -317,7 +318,7 @@ Card ids in brackets:
 
 - **E1** [`c-8f9cca`] Client-grade reporting & deliverables (scoring, remediation, framework mappings, branded export).
 - **E2** [`c-6def05`] Backend, UI (`c-597eb6`) and UI follow-ups (`c-2d91eb`) are done, in review on `ej/20261124-150516-d78c96` (see Current state). Follow-ups:
-  [`c-119206`] role-gate the E2 UI controls; [`c-1198a2`] run `scripts/e2e/integrations.sh` in CI (after c-cc25b6);
+  [`c-119206`] role-gate the E2 UI controls (in review); [`c-81193b`] the same for the client_read finding detail; [`c-1198a2`] run `scripts/e2e/integrations.sh` in CI (after c-cc25b6);
   [`c-da9198`] scheduled sync plus a per-tracker lock; [`c-ea60a0`] move agent `scan_ingest` onto
   `scanimport`, normalize default ports, and settle two dedup edge cases.
 - **E3** [`c-d25ff9`] — gate built (in review). Follow-ups: hardening `c-0d277f`, UI `c-936308`, first live run `c-772190`, proposer/critic `c-c89f5b`.
@@ -647,6 +648,7 @@ Card ids in brackets:
 ## Deltas
 
 <!-- composite:deltas · newest first; Composite rewrites this block on every merge (ej handoff merge / merge_handoff) -->
+- **2026-11-24 17:21 MST** · claude-code · `ej/20261124-171041-463f80` `12f0d0a`→`9620b30` (1 commit) · `h-585760` — c-119206 (now in review; card c-81193b opened): E2 integrations UI gates its controls by role with useCan, matching server/rbac_policy.go — tracker add/edit/delete/enable admin; Sync, Push to tracker (bulk + detail) and the scanner import form operate; the finding Tickets card needs read so client_read no longer fetches it (no 403). New scripts/e2e/roles-e2e.js, run by integrations.sh, browser-probes as reviewer and company-bound client_read: 45/45 pass; against the old UI the probes fail 8 checks. **Next:** c-81193b: hide Start retest, Link traffic and the severity/status/report-stage pickers on the finding detail for client_read (extend roles-e2e.js client block). c-1198a2: run scripts/e2e/integrations.sh in CI (now also needs psql). **Decided:** Non-admins see the tracker list read-only (name as text, enabled as On/Off) instead of disabled controls; the Actions column is dropped when the role has neither admin nor operate. useEnabledTrackers skips the fetch without operate. The role probe puts the imported finding's assets in the client's company with psql, since an imported finding has no company.
 - **2026-11-24 17:18 MST** · claude-code · `ej/20261124-170322-736db7` `5e33af0`→`71d6b23` (1 commit) · `h-5e6f9c` — c-d059ae (now in review; card c-7651e5 opened): the E10 lane is visible and filterable outside the task report. The branch merges the unlanded E10 branch and main. E2 is on main as 0015, so E10's renumber of it to 0023 is dropped, and the lane migration stays at 0024 after main's 0023_distributed_workers. Backend: ?lane=runtime|sast|sca in the shared findings filter (list, groups, tree, export); finding DTOs carry a client-safe source (lane, tool, rule, path:line, import id); the findings Markdown exports get the Source line and the CSV gets lane/source columns; scan import rows carry lane_counts; a dead post-create anchor check is removed (anchors were already validated before CreateScanImport). Web: lane badge and path:line on the findings table and detail, a lane dropdown in the URL, an anchor-asset picker on Scanner imports, and Lanes and Fact node columns on Past imports. Verified on Postgres 16 (TestFindingFilterByLane, TestCodeScanJoinsTaskGraphAndReport extended, report tests); scripts/verify.sh passes except the known macOS SOCKS5 test, and --web-only passes. Not checked in a browser. **Next:** Land ej/20261124-170322-736db7 (it carries E10); do not land the E10 branch alone. c-7651e5: stat cards honour lane/import filters, and a fact-node deep link. c-5c4009 tracker RBAC, c-c978e3 SAST-guided runtime verification. **Decided:** Kept E2 at main's 0015 and E10's lane at 0024, rather than E10's renumber to 0023, which collides with main's 0023_distributed_workers. Finding DTOs expose only the fields the client_read task report already shows (lane, tool, rule, location, import id); the raw scanner record and dedup key stay behind /findings/{id}/integrations (read). lane=runtime includes worker findings, and an unknown lane matches nothing. Worker findings show no lane badge, so the badge flags imports. Moved the E2/E10 Current state detail to docs/handoff/2026-11-24-e2-e10-integrations.md to fit the size limit.
 - _Older hand-offs, a line each; `ej handoff log` has them whole:_
 - **2026-11-24 17:17 MST** · claude-code · `h-adc4a6` — c-0d277f (RSI gate hardening, now in review; card closed): evidence is checked against the server's own records. **Next:** c-936308 (RSI gate web UI: show suite runs and the new log actions).

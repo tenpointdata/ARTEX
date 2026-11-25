@@ -4,17 +4,32 @@ import * as React from "react";
 
 import { toast } from "sonner";
 
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { useCan } from "@/hooks/use-session";
 import { t } from "@/i18n";
 import { pushableFindingIds, summarizePush } from "@/lib/integrations";
 import { integrationsApi } from "@/lib/integrations-api";
 import type { TicketPushResult, TicketTracker } from "@/lib/types";
 
-// useEnabledTrackers loads the trackers a finding can be pushed to. Failures stay
-// quiet: without trackers the push control is simply not shown.
+// Pushing needs operate (server/rbac_policy.go); without it there is nothing to load or show.
+export function useCanPush(): boolean {
+  return useCan("operate");
+}
+
+// useEnabledTrackers loads the trackers a finding can be pushed to, and only for a
+// session that may push. Failures stay quiet: without trackers the push control is
+// simply not shown.
 export function useEnabledTrackers(): TicketTracker[] {
+  const canPush = useCanPush();
   const [trackers, setTrackers] = React.useState<TicketTracker[]>([]);
   React.useEffect(() => {
+    if (!canPush) return;
     let alive = true;
     integrationsApi
       .trackers()
@@ -25,8 +40,8 @@ export function useEnabledTrackers(): TicketTracker[] {
     return () => {
       alive = false;
     };
-  }, []);
-  return trackers;
+  }, [canPush]);
+  return canPush ? trackers : [];
 }
 
 // PushToTrackerSelect pushes the given findings to the tracker picked: one pick, no
@@ -42,8 +57,9 @@ export function PushToTrackerSelect({
   onPushed?: (results: TicketPushResult[]) => void;
   className?: string;
 }) {
+  const canPush = useCanPush();
   const [busy, setBusy] = React.useState(false);
-  if (trackers.length === 0) return null;
+  if (!canPush || trackers.length === 0) return null;
 
   async function push(trackerId: number) {
     const ids = pushableFindingIds(findingIds);
@@ -53,13 +69,20 @@ export function PushToTrackerSelect({
     try {
       const results = await integrationsApi.push(trackerId, ids);
       const s = summarizePush(results);
-      const msg = t("{name}: {created} created, {updated} updated, {failed} failed", {
-        name: tracker.name,
-        created: s.created,
-        updated: s.updated,
-        failed: s.failed,
-      });
-      if (s.failed > 0) toast.warning(msg, { description: s.errors.join("\n"), duration: 10000 });
+      const msg = t(
+        "{name}: {created} created, {updated} updated, {failed} failed",
+        {
+          name: tracker.name,
+          created: s.created,
+          updated: s.updated,
+          failed: s.failed,
+        },
+      );
+      if (s.failed > 0)
+        toast.warning(msg, {
+          description: s.errors.join("\n"),
+          duration: 10000,
+        });
       else toast.success(msg);
       onPushed?.(results);
     } catch (e) {
@@ -77,8 +100,14 @@ export function PushToTrackerSelect({
       }}
       disabled={busy}
     >
-      <SelectTrigger size="sm" className={className} aria-label={t("Push to tracker")}>
-        <SelectValue placeholder={busy ? t("Pushing…") : t("Push to tracker")} />
+      <SelectTrigger
+        size="sm"
+        className={className}
+        aria-label={t("Push to tracker")}
+      >
+        <SelectValue
+          placeholder={busy ? t("Pushing…") : t("Push to tracker")}
+        />
       </SelectTrigger>
       <SelectContent>
         {trackers.map((tr) => (

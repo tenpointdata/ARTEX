@@ -20,6 +20,7 @@
 const path = require("node:path");
 const { chromium } = require("playwright");
 const { startFakeGitHub } = require("./fake-github");
+const { probeRoles } = require("./roles-e2e");
 
 const base = (process.env.ARTEX_E2E_URL || "http://127.0.0.1:25173").replace(/\/$/, "");
 const password = process.env.ARTEX_E2E_PASSWORD;
@@ -46,7 +47,8 @@ const must = (name, ok, detail) => {
   const page = await ctx.newPage();
   const problems = [];
   page.on("pageerror", (e) => problems.push(`pageerror: ${String(e).slice(0, 200)}`));
-  const shot = (name) => (shots ? page.screenshot({ path: path.join(shots, `${name}.png`), fullPage: true }) : null);
+  const shot = (name, on = page) =>
+    shots ? on.screenshot({ path: path.join(shots, `${name}.png`), fullPage: true }) : null;
   // JSON from the API with the browser's session cookie.
   const api = (p, init) =>
     page.evaluate(
@@ -191,6 +193,20 @@ const must = (name, ok, detail) => {
     await shot("05-synced");
     const status = (await api(`/exploration/findings/${findingId}`)).body.status;
     check("sync pulled the closed issue to fixed", status === "fixed", status);
+
+    // ---- role probes: reviewer and client_read see no control the server refuses ----
+    const shown = (await api(`/exploration/findings/${findingId}`)).body;
+    const findingTitle = shown.name || shown.vulnclass;
+    await probeRoles(browser, {
+      base,
+      api,
+      check,
+      shot,
+      findingId,
+      findingTitle,
+      tracker: TRACKER,
+      dsn: process.env.ARTEX_E2E_PG_DSN,
+    });
 
     // ---- delete with confirmation ----
     await page.getByRole("row", { name: new RegExp(TRACKER) }).getByRole("button", { name: "Delete" }).click();
