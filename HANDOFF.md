@@ -59,6 +59,14 @@ See `docs/ARCHITECTURE.md` for the code-level map. Summary:
 
 ## Current state
 
+**2026-11-24 — Per-role default output caps (`c-83ae7b`, in review).** A profile `max_tokens` of 0 no
+longer reaches norma (which sent 32768 and resumed truncations 3×): `agent.ReplyCap` (`agent/reply_caps.go`)
+sends the profile cap when > 0, else the role default (8192 for planner, worker, mainagent, chat). Defaults
+come from `llm_usage` (largest observed reply 3,511 tokens). Compactor (1500) and the context summariser were
+already bounded; goals has its own cap on the c-7361b4 branch. Tests: `agent/reply_caps_test.go` (every role,
+unset/0/explicit). The profile UI hint says what 0 does. Not checked: a live benchmark run for truncated
+outputs (no bench instance here). verify.sh: Go tests pass except the known macOS 127.0.0.2 SOCKS5 test; web checks pass. Open question split out: `c-cea6ac` (task done during decomposition).
+
 **2026-11-24 — SSE 401 after console login (`c-13e86c`, fixed; pre-E5).** Streams are same-origin only
 (`web/src/lib/sse.ts`), dev gzip off, `openSSE` writes `: open`. Test `server/activity_stream_auth_pg_test.go`;
 browser-checked on the E5 stack.
@@ -344,6 +352,8 @@ Card ids in brackets:
   image from a clean clone, [`c-d73308`] optional provider sampling seed per LLM profile.
 - **E10** [`c-72dd9d`] Code-security testing lane (SAST/dependency ingest) feeding the same dual-graph + evidence model.
 
+- [`c-cea6ac`] Explain how a c-4c8fd6 task reached `done` while its bootstrap decomposition still ran (spike).
+
 ## Known issues and gotchas
 
 - **`next dev` writes `web/AGENTS.md`** (Next 16 agent rules) on start. Delete it before committing; it
@@ -396,6 +406,14 @@ Card ids in brackets:
   `ARTEX_SECRET_KEY`) loses stored secrets.
 
 ## Decisions
+
+- **2026-11-24 c-83ae7b (per-role output caps):**
+  - An explicit profile cap wins in either direction (unlike goals' min()), so an operator can raise a role's
+    cap per profile; only 0 maps to the role default.
+  - One 8192 default for all four roles: the data (max 3,511) gives no reason to split them, the table keeps
+    them separable, and the harness's truncation resume still completes a legit longer reply.
+  - Applied in the agent layer (each role's `maxTokens()`), not `taskLLMRuntime`, so the sidebar chat and any
+    future caller get it without server wiring, and it does not conflict with the c-7361b4 goals change.
 
 - **2026-11-24 c-2d91eb (E2 follow-ups):**
   - This branch merges the unmerged E2 UI branch (which carries the backend) instead of waiting, as c-597eb6
