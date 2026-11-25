@@ -29,11 +29,37 @@ import (
 // heartbeating their lease; the control node can always fence them out by
 // revoking the claim (RevokeRemoteIntentClaims).
 
+// controlUnreachablePolls is how many consecutive failed control-state reads
+// make a worker node pause a served task locally (about 30 s).
+const controlUnreachablePolls = 15
+
 // workerNodeState is the node-wide claim gate.
 type workerNodeState struct {
 	blocked atomic.Value // string: why this node may not claim ("" = may claim)
 	mu      sync.Mutex
 	served  map[string]bool // task ids whose worker loops run here
+	misses  map[string]int  // consecutive failed control reads per served task
+	// budgets is the run budget the control node published, as last read. Once
+	// known it is kept across a failed read (the gate still blocks while the
+	// registry or the control node cannot be read).
+	budgetMu      sync.Mutex
+	budgetKnown   bool
+	budgetTask    agent.Budget
+	budgetIntent  agent.Budget
+	sharedEgress  string                // fingerprint of the shared egress settings last applied
+	agentSettings agentSettingsFollower // touched by the dispatch loop only
+}
+
+func (w *workerNodeState) publishedBudgets() (task, intent agent.Budget, ok bool) {
+	w.budgetMu.Lock()
+	defer w.budgetMu.Unlock()
+	return w.budgetTask, w.budgetIntent, w.budgetKnown
+}
+
+func (w *workerNodeState) setPublishedBudgets(task, intent agent.Budget) {
+	w.budgetMu.Lock()
+	w.budgetTask, w.budgetIntent, w.budgetKnown = task, intent, true
+	w.budgetMu.Unlock()
 }
 
 func (w *workerNodeState) reason() string {
@@ -57,7 +83,7 @@ func (s *Server) startWorkerNode() {
 	if s.m.pg == nil || s.ctx.Err() != nil {
 		return
 	}
-	s.engine.wnode = &workerNodeState{served: map[string]bool{}}
+	s.engine.wnode = &workerNodeState{served: map[string]bool{}, misses: map[string]int{}}
 	s.engine.wnode.blocked.Store("starting")
 	go s.workerDispatchLoop(s.ctx)
 	go s.engine.workSignalLoop(s.ctx)
@@ -81,18 +107,29 @@ func (s *Server) workerDispatchLoop(ctx context.Context) {
 // the loops of tasks that ended.
 func (s *Server) workerDispatchOnce(ctx context.Context) {
 	e, pg, w := s.engine, s.m.pg, s.engine.wnode
-	switch allNode, err := pg.LiveNodeWithRole(string(RoleAll), s.node.NodeID); {
-	case err != nil:
-		w.setBlocked(s.node.NodeID, "node registry unreadable: "+err.Error())
+	if task, intent, ok := readPublishedBudgets(pg); ok {
+		w.setPublishedBudgets(task, intent)
+	}
+	_, _, budgetKnown := w.publishedBudgets()
+	allNode, errAll := pg.LiveNodeWithRole(string(RoleAll), s.node.NodeID)
+	control, errCtl := pg.LiveNodeWithRole(string(RoleControl), s.node.NodeID)
+	egressChanged := s.syncSharedEgress()
+	switch {
+	case errAll != nil || errCtl != nil:
+		w.setBlocked(s.node.NodeID, "node registry unreadable")
 	case allNode:
 		w.setBlocked(s.node.NodeID, "a live role=all node shares this database (its control state is in memory only); run it as role=control")
+	case !control:
+		// No deadline coordinator, budget settle or planner is running.
+		w.setBlocked(s.node.NodeID, "no live control node")
+	case !budgetKnown:
+		w.setBlocked(s.node.NodeID, "no run budget published by a control node yet")
+	case egressChanged:
+		w.setBlocked(s.node.NodeID, "shared capture/proxy settings changed: rebuilding agents")
 	default:
-		if _, _, ok := readPublishedBudgets(pg); !ok {
-			w.setBlocked(s.node.NodeID, "no run budget published by a control node yet")
-		} else {
-			w.setBlocked(s.node.NodeID, "")
-		}
+		w.setBlocked(s.node.NodeID, "")
 	}
+	s.followAgentSettings(&w.agentSettings)
 	ids, err := pg.DispatchableTaskIDs()
 	if err != nil {
 		log.Printf("[node %s] list tasks: %v", s.node.NodeID, err)
@@ -124,9 +161,35 @@ func (s *Server) workerDispatchOnce(ctx context.Context) {
 		if !s.syncServedTask(id) {
 			w.mu.Lock()
 			delete(w.served, id)
+			delete(w.misses, id)
 			w.mu.Unlock()
 		}
 	}
+	s.ackDrains()
+}
+
+// syncSharedEgress applies a capture-switch or global-proxy change made on the
+// control node (its API changes only the control process's memory and the
+// settings rows). The task agents are dropped so the next claim builds them on
+// the new proxy path. Reports whether anything changed this poll.
+func (s *Server) syncSharedEgress() bool {
+	fp, err := s.m.reloadSharedEgress()
+	w := s.engine.wnode
+	if err != nil {
+		log.Printf("[node %s] read shared egress settings: %v", s.node.NodeID, err)
+		return true // block claims this poll: the path is unknown
+	}
+	if w.sharedEgress == fp {
+		return false
+	}
+	first := w.sharedEgress == ""
+	w.sharedEgress = fp
+	if first {
+		return false
+	}
+	log.Printf("[node %s] capture/proxy settings changed on the control node; rebuilding task agents", s.node.NodeID)
+	s.invalidateTaskAgents()
+	return true
 }
 
 // syncServedTask mirrors one served task's control state into this process
@@ -140,12 +203,32 @@ func (s *Server) syncServedTask(id string) bool {
 		return false
 	}
 	c, err := s.m.pg.GetTaskControl(n)
+	w := e.wnode
 	if err != nil {
-		return true // claims are blocked by workerClaimAllowed's own read
+		// Claims are blocked by workerClaimAllowed's own read; after a while the
+		// running intents stop too, so a pause on the control node cannot be missed
+		// for longer than this.
+		w.mu.Lock()
+		w.misses[id]++
+		miss := w.misses[id]
+		w.mu.Unlock()
+		if miss == controlUnreachablePolls && !e.IsPaused(id) {
+			log.Printf("[node %s] task %s: control state unreadable for %d polls, pausing locally: %v", s.node.NodeID, id, miss, err)
+			e.Pause(id, agent.AbortControlUnreachable)
+		}
+		return true
 	}
+	w.mu.Lock()
+	delete(w.misses, id)
+	w.mu.Unlock()
 	if !c.Exists || c.DispatchClosed == db.DispatchDeleting || db.IsTerminal(c.Status) {
-		e.StopTask(id) // cancels running intents; their writes are fenced anyway
-		s.m.forgetTaskHandle(id)
+		// Asynchronously: one task's runs unwinding must not hold up the
+		// pause/settle sync of the others. Running intents are cancelled; their
+		// writes are fenced anyway.
+		go func() {
+			e.StopTask(id)
+			s.m.forgetTaskHandle(id)
+		}()
 		return false
 	}
 	t.updateLifecycle(func(st *taskLifecycleState) {
@@ -154,10 +237,13 @@ func (s *Server) syncServedTask(id string) bool {
 	if c.DeadlineAt > 0 {
 		e.deadline.Store(id, c.DeadlineAt)
 	}
+	// A queued task is parked by the control node with a pause too (admission,
+	// LLM unavailable), so its running intents stop here as well.
+	hold := c.Paused || c.Queued
 	switch {
-	case c.Paused && !e.IsPaused(id):
+	case hold && !e.IsPaused(id):
 		e.Pause(id, agent.AbortPausedByUser) // running intents stop as on the control node
-	case !c.Paused && e.IsPaused(id):
+	case !hold && e.IsPaused(id):
 		e.Resume(t)
 	}
 	switch {
@@ -229,6 +315,7 @@ func (e *Engine) workSignalLoop(ctx context.Context) {
 			ids = append(ids, id)
 		}
 		e.workMu.Unlock()
+		e.syncServedBudgets() // running intents' meters see the other nodes' spend
 		sigs, err := e.m.pg.TakeWorkSignals(ids, e.node.NodeID)
 		if err != nil {
 			log.Printf("[node %s] work signals: %v", e.node.NodeID, err)

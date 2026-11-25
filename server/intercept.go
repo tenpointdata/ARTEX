@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -906,12 +905,10 @@ func (s *Server) interceptExecution(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]any{"conversation_id": target.ConversationID, "task_id": target.TaskID, "session": target.Session, "seq": target.Seq, "items": activityDTOs(target.Items)})
 }
 
-// invalidateInterceptRules drops this process's rule cache and bumps the shared
-// revision so every other node reloads on its next gated call. A failed bump
-// is logged: the other nodes then pick the change up within the cache's
-// maximum age (intercept rulesMaxAge) instead of the revision window.
+// invalidateInterceptRules drops this process's rule cache after a rule write.
+// The write bumped the shared revision in its own transaction (db
+// writeInterceptRules), so every other node reloads within the revision window;
+// a write whose bump failed was rolled back and returned an error instead.
 func (s *Server) invalidateInterceptRules() {
-	if err := s.m.interceptor.Invalidate(); err != nil {
-		log.Printf("[intercept] rules saved; other nodes see them within the cache's maximum age: revision bump failed: %v", err)
-	}
+	s.m.interceptor.DropCache()
 }

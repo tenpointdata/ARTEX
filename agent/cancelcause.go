@@ -35,6 +35,8 @@ var (
 		"The task is being deleted (DELETE /api/tasks/{id}); the deletion barrier has cancelled the task's running Planner, Worker, and main agent; this run's results will not be used")
 	AbortPausedOnReload = cause("paused_on_reload", "Restored the paused state on startup",
 		"On startup the backend restored the task pause from the state persisted in the database. This run was cancelled; normally no agent is running during the restore phase")
+	AbortControlUnreachable = cause("control_unreachable", "A worker node lost the shared control state",
+		"This worker node could not read the task's control state from the database for too long, so it paused the task locally (fail closed); running intents return to frontier(open) and run again once the database answers")
 	AbortGoalMet = cause("goal_met", "The planner judged the task goals met",
 		"The planner judged the task goals met and set the task to done, then cancelled the Workers still running; these intents are marked stopped, not failed")
 	AbortSettleDrainTimeout = cause("settle_drain_timeout", "Task timeout wrap-up wait expired",

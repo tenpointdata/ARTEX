@@ -775,7 +775,23 @@ func (s *Server) chatAgentForProfile(id int64) *agent.ChatAgent {
 // invalidateProfileAgents drops the per-profile ChatAgent + provider caches so a profile
 // save/activate/delete — or an agent's binding change — rebuilds pinned tasks' agents
 // (and re-resolves each agent's bound model) on their next round.
+//
+// It also bumps the LLM config revision, so worker nodes, which build their own
+// providers from the same rows, drop theirs too (followAgentSettings). Callers
+// write the database first: a worker reloads from it on the bump.
 func (s *Server) invalidateProfileAgents() {
+	s.dropProfileCaches()
+	if s.node.Role == RoleWorker || s.m == nil || s.m.pg == nil {
+		return // a worker follows the revision; bumping it here would loop
+	}
+	if _, err := s.m.pg.BumpSettingsRevision(db.LLMConfigRevisionKey); err != nil {
+		log.Printf("[engine] LLM config revision not bumped; worker nodes keep their LLM profiles until restart: %v", err)
+	}
+}
+
+// dropProfileCaches is invalidateProfileAgents without the revision bump: what
+// a worker node does when it sees the revision move.
+func (s *Server) dropProfileCaches() {
 	s.profMu.Lock()
 	s.profChatAgents = map[int64]*agent.ChatAgent{}
 	s.profMu.Unlock()
@@ -4291,6 +4307,11 @@ func (s *Server) putSettings(w http.ResponseWriter, r *http.Request) {
 		changed = true
 	}
 	if changed {
+		// Worker nodes build their own agents from the same settings rows: the
+		// revision tells them to reload and rebuild (followAgentSettings).
+		if _, err := s.m.pg.BumpSettingsRevision(db.AgentSettingsRevisionKey); err != nil {
+			log.Printf("[settings] agent settings revision not bumped; worker nodes keep their agents until restart: %v", err)
+		}
 		// rebuild agents so the new proxy/tools/prompt/web-search take hold (only if LLM configured).
 		s.cfgMu.Lock()
 		cfg, on := s.llmCfg, s.llmOn

@@ -2,7 +2,9 @@ package server
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -560,34 +562,9 @@ func newManager(dir, proxyAddr string, node NodeConfig) (*Manager, error) {
 	}
 	// Asset auto-completion engine (§5): HTTP probes routed through the recording
 	// proxy (via m.ProxyAddr, which honors the traffic-capture toggle).
-	m.trafficOn = pg.GetBool(settingTrafficCapture, false)
 	// LLM recording switch (off by default). The recorder reads this flag on every call.
 	m.llmRecOn = pg.GetBool(settingLLMRecord, false)
-	// Load persisted web-search config (default: off, ddgs).
-	m.webSearchOn = pg.GetBool(settingWebSearchOn, false)
-	if v, ok, _ := pg.GetSetting(settingWebSearchBackend); ok && v != "" {
-		m.webSearchBackend = v
-	} else {
-		m.webSearchBackend = defaultWebSearchBackend
-	}
-	if v, ok, _ := pg.GetSetting(settingBraveKey); ok {
-		m.braveKey = v
-	}
-	if v, ok, _ := pg.GetSetting(settingTavilyKey); ok {
-		m.tavilyKey = v
-	}
-	if v, ok, _ := pg.GetSetting(settingKeenableKey); ok {
-		m.keenableKey = v
-	}
-	if v, ok, _ := pg.GetSetting(settingWebSearchProxy); ok {
-		m.webSearchProxy = v
-	}
-	// Global egress proxy (default: direct). When capture is on, feed it to the
-	// MITM as its upstream so recorded traffic exits through it; when capture is
-	// off, ProxyAddr hands it to agents directly (bash env / WebFetch).
-	if v, ok, _ := pg.GetSetting(settingGlobalProxy); ok {
-		m.globalProxy = strings.TrimSpace(v)
-	}
+	m.loadAgentSettings()
 	if m.traffic != nil {
 		if err := m.traffic.SetUpstreamProxy(m.globalProxy); err != nil {
 			// Neither the stored value nor err (which quotes it) is logged: both
@@ -605,6 +582,39 @@ func newManager(dir, proxyAddr string, node NodeConfig) (*Manager, error) {
 		m.syncBrowserMCPProxy()
 	}
 	return m, nil
+}
+
+// loadAgentSettings reads the settings that are baked into agents when they are
+// built: the traffic-capture switch, web search and the global egress proxy
+// (default: direct; with capture on it is the MITM's upstream, with capture off
+// ProxyAddr hands it to agents directly). It reports whether any of them
+// changed. A worker node calls it again when the agent settings revision moves
+// (followAgentSettings), so it builds its agents from what the control node
+// saved.
+func (m *Manager) loadAgentSettings() bool {
+	pg := m.pg
+	trafficOn := pg.GetBool(settingTrafficCapture, false)
+	webOn := pg.GetBool(settingWebSearchOn, false)
+	backend := defaultWebSearchBackend
+	if v, ok, _ := pg.GetSetting(settingWebSearchBackend); ok && v != "" {
+		backend = v
+	}
+	str := func(key string) string {
+		v, _, _ := pg.GetSetting(key)
+		return v
+	}
+	brave, tavily, keenable, webProxy := str(settingBraveKey), str(settingTavilyKey), str(settingKeenableKey), str(settingWebSearchProxy)
+	globalProxy := strings.TrimSpace(str(settingGlobalProxy))
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	changed := m.trafficOn != trafficOn || m.webSearchOn != webOn || m.webSearchBackend != backend ||
+		m.braveKey != brave || m.tavilyKey != tavily || m.keenableKey != keenable ||
+		m.webSearchProxy != webProxy || m.globalProxy != globalProxy
+	m.trafficOn, m.webSearchOn, m.webSearchBackend = trafficOn, webOn, backend
+	m.braveKey, m.tavilyKey, m.keenableKey, m.webSearchProxy = brave, tavily, keenable, webProxy
+	m.globalProxy = globalProxy
+	return changed
 }
 
 // TrafficEnabled reports whether traffic capture is on (default off). When off,
@@ -2289,4 +2299,36 @@ func (m *Manager) configureNodeProxy() error {
 		m.controlRPC = newControlRPC(api, m.node.NodeID, pgdb.NodeRPCKey, hc)
 	}
 	return nil
+}
+
+// reloadSharedEgress re-reads the settings that decide a worker node's egress
+// path (the capture switch, the global proxy, web search and its proxy), which
+// the control node's API changes in its own memory and in the settings rows
+// only. It updates this process and returns a fingerprint of the values; an
+// error leaves the previous values in place.
+func (m *Manager) reloadSharedEgress() (string, error) {
+	keys := []string{settingTrafficCapture, settingGlobalProxy, settingWebSearchOn, settingWebSearchBackend, settingWebSearchProxy}
+	vals := make(map[string]string, len(keys))
+	for _, k := range keys {
+		v, _, err := m.pg.GetSetting(k)
+		if err != nil {
+			return "", err
+		}
+		vals[k] = v
+	}
+	m.mu.Lock()
+	isTrue := func(v string) bool { v = strings.TrimSpace(v); return v == "true" || v == "1" }
+	m.trafficOn = isTrue(vals[settingTrafficCapture])
+	m.globalProxy = strings.TrimSpace(vals[settingGlobalProxy])
+	m.webSearchOn = isTrue(vals[settingWebSearchOn])
+	if b := vals[settingWebSearchBackend]; b != "" {
+		m.webSearchBackend = b
+	}
+	m.webSearchProxy = vals[settingWebSearchProxy]
+	m.mu.Unlock()
+	sum := sha256.New()
+	for _, k := range keys {
+		fmt.Fprintf(sum, "%s=%s\x00", k, vals[k])
+	}
+	return hex.EncodeToString(sum.Sum(nil)), nil
 }

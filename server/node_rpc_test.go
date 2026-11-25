@@ -167,6 +167,7 @@ func TestWorkerNodeFindingBindsControlCapture(t *testing.T) {
 	if err := publishBudgets(pg); err != nil {
 		t.Fatal(err)
 	}
+	keepControlLive(t, pg) // worker nodes claim nothing without a live control node
 	node := NodeConfig{Role: RoleWorker, NodeID: "node-ev", Host: "node-ev", Workers: 1,
 		ControlProxy: control.traffic.ProxyAddr(), ControlAPI: api.URL, ControlCA: apiCAFile}
 	worker, err := NewManagerForNode(t.TempDir(), "", node)

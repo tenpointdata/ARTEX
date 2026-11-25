@@ -59,6 +59,64 @@ See `docs/ARCHITECTURE.md` for the code-level map. Summary:
 
 ## Current state
 
+**2026-11-24 — E7 drain ack + LLM profile reload on workers (`c-1d3e0a`, in review)** on
+`ej/20261124-165722-c858f3`. The branch merges the unmerged E7 branches `ej/20261124-164948-393f2a` (c-18f7a8 and
+its stack) and `ej/20261124-155353-b1c60a` (c-8cfbfe). It does **not** merge c-7ad4da's `ej/20261124-161438-32780e`:
+that branch's `syncTrafficCapture` conflicts with, and is covered by, `syncSharedEgress` (consolidation card `c-20c400`).
+(1) **Drain ack:** a worker node writes a `task_drain_acks` row (migration **0026**) once a task under the 'deleting'
+fence is no longer served there and its routines are joined (`server/engine_drain.go` `ackDrains`, `db/drain_acks.go`).
+The insert is conditional on the fence, and any fence change clears the rows. `waitTaskQuiescent` (delete and
+archive) waits for every live worker node's ack, up to `remoteDrainAckBound` (8 s), and no longer assumes
+2 polls + 1 s. (2) **LLM reload:** `invalidateProfileAgents` (profile save/activate/delete, `/api/llm`, retry policy,
+failover switches, agent binding) bumps `settings.llm_config_revision`. The worker's `followAgentSettings` drops its
+provider caches and re-applies the retry policy and the active profile. **Verified** against a local Postgres 17:
+`TestDeleteWaitsForWorkerNodeDrainAck` (fails with the ack disabled: the drain hits the bound),
+`TestDeleteDrainWaitsForTheBoundWhenAWorkerNodeIsGone`, `TestWorkerNodeFollowsLLMProfileChange` and the existing E7
+tests. `scripts/verify.sh` is clean except two environment-only failures here (`TestConnectWithoutPasswordRealPG`:
+the local PG uses trust auth; SOCKS5 UDP: macOS has no 127.0.0.2). **Not verified:** a real two-host delete.
+**Merge risk:** migration numbers collide across unmerged branches (`c-c18f43`).
+
+**2026-11-24 — E7 smaller gaps (`c-18f7a8`, in review)** on `ej/20261124-161440-11cbc4`, which merges the
+unmerged E7 branch `ej/20261124-150525-1a95b3`. (1) Browser MCP on worker nodes: `traffic.StartCredentialRelay`
+(`traffic/credential_relay.go`) is a loopback relay that adds the run's scope token as `Proxy-Authorization` and
+forwards to `ARTEX_CONTROL_PROXY`; `server/mcp_proxy_remote.go` swaps the shared row's loopback `--proxy-server`
+for it and points `NODE_EXTRA_CA_CERTS` at the fetched control CA. `ScopeRelay` and the new relay share
+`traffic/relay_conns.go`. (2) Remote findings wake the planner: `remoteSettleLoop` pages
+`ExplorationStore.FindingNodesSince` and calls `NotifyFinding` for worker-node writers. (3) The capture proxy
+requires a scope token from every non-loopback client in every role; `ARTEX_PROXY_ALLOW_UNSCOPED_REMOTE=1`
+opts out (ignored on a control node). (4) Noise-governor floor decided against (Decisions), bound pinned by
+`egress/share_bound_test.go`. (5) Rule and enabled-tools writes bump the intercept revision in their own
+transaction (`db.writeInterceptRules`); callers only `DropCache`. Verified: the new tests against Postgres 16
+(`TestInterceptRuleWritesBumpInTheirTransaction`, `TestFindingNodesSince`, `TestWorkerBrowserMCPRelaysToControlProxy`,
+`TestCredentialRelayCarriesRemoteScope`, `TestRemoteClientScopeRequiredByDefault`), and a real headless Chrome
+through the credential relay (`TestCredentialRelayRealChrome`, `ARTEX_TEST_CHROME`). **Not verified:** the
+Playwright MCP on a real worker host (falls under `c-8cfbfe`). **Merge risk:** `c-50b832`
+(`ej/20261124-114604-e46087`) moves the browser proxy into a Playwright `--config` file; whichever lands second
+must keep the worker path in `scopeMCPProxy`. Not in this card (left over from the E7 delta): delete-drain ack and LLM profile
+reload on workers, now `c-1d3e0a`; proxy-hop TLS is `c-677166` (the credential relay already dials an https upstream,
+but without CA pinning yet).
+
+**2026-11-24 — E7 distributed workers + Helm (`c-d60149`, in review)** on `ej/20261124-150525-1a95b3`; design
+and limits in `docs/DISTRIBUTED.md`. `-role all|control|worker` (`server/node.go`): worker nodes are the same
+binary and `server.New` wiring (guard, intercept rules, LLM reviewer, target gate, budgets, isolation,
+egress filter), run only intent worker loops (`server/worker_node.go`), and serve only `GET /healthz`. They
+claim through the existing fenced lease. Control state moved to Postgres (migration **0023**: `worker_nodes`,
+`work_signals`, `tasks.dispatch_closed`, `proxy_scope_tokens`): pause, queued, terminal, deadline, the
+settle/delete fence and target gate are read per claim or call (fail closed); budgets are published by the
+control node and spend is synced every 2 s; intercept rules follow a DB revision and ask approvals poll
+their row; kill/pause/cancel/steer go through `work_signals`; the noise governor is split across live nodes.
+Worker traffic goes through the control node's recording proxy with DB-resolved per-task tokens (token-less
+remote clients refused; CA cert published). `GET /api/settings/nodes` lists nodes. Helm chart
+`deploy/helm/artex` (control + worker Deployment with hard host anti-affinity) and
+`docker-compose.distributed.yml`. Verified against Postgres 17: two worker nodes ran one task's intents, each
+blocked by a rule added on the control node after they started and seeing the control's gate switch
+(`TestTwoWorkerNodesShareOneTaskWithIdenticalGating`); kill/pause/no-budget/no-control
+(`TestWorkerNodeFollowsControlState`); proxy path recorded on the control node, forged and deleted tokens
+refused (`TestWorkerNodeUsesControlRecordingProxy`); `helm lint`/`template` clean. An opus adversarial
+review found 12 issues; H1–M9, L10, L11 fixed (`c0210dd5`). **Not verified:** a real install on two hosts
+(`c-8cfbfe`). **Gaps:** worker findings cannot bind captured traffic (`c-3b781a`), transcripts are per host
+(`c-29ff19`), smaller items `c-18f7a8` (built, see the entry above).
+
 **2026-11-24 — TLS between worker nodes and the control node by default (`c-548e8b`, E7; in review).**
 Worker nodes reach the control API (node RPC) over **TLS with the CA pinned**: `ARTEX_CONTROL_CA`
 (`server/node_tls.go`) makes the worker accept only `https://` and trust only that CA, never the system
@@ -83,6 +141,7 @@ worker→control recording-proxy hop (plain-HTTP targets and the scope token), c
 worker-node finding binds the control capture through a signed node RPC (`POST /api/node/rpc/{op}`,
 `server/node_rpc.go`, HMAC under `db.NodeRPCKey`); design in `docs/DISTRIBUTED.md` "Evidence on worker
 nodes", verification in Deltas. Gap: `c-7ad4da` (capture switch read at start-up).
+**Landed:** this c-548e8b branch (carrying E7 c-d60149 and c-3b781a) is on main as #46 (`41cda010`, squash).
 
 **2026-11-24 — E10 code-security lane + its UI and exports (`c-72dd9d`, `c-d059ae`; in review)** on
 `ej/20261124-170322-736db7`, which merges the unlanded E10 branch `ej/20261124-150533-1ba29e` and main
@@ -261,10 +320,16 @@ body, through the versioned prompt API, and the starting bodies are restored aft
   pre-registration, adopted-lesson retire sync. Done = Postgres tests for each.
 - *(unclaimed)* — **RSI gate web UI** (M), card `c-936308`. Done = adopt/rollback from a proposals table in ≤2 clicks + password.
 
+- *(unclaimed)* — **DB: renumber colliding migrations as branches land** (S), card `c-c18f43`. Done = unique
+  versions on main, `go test ./db` green.
+- *(unclaimed)* — **E7: one worker settings follower** (S), card `c-20c400`. Done = one reload path, tests green,
+  claims still blocked while the settings are unreadable.
 - *(unclaimed)* — **E7: TLS on the worker→control proxy hop** (M), card `c-677166`. Done = a plain-HTTP
   target request from a worker crosses the network inside TLS; Helm/compose default to it.
 
 **Human lane**
+- **E7 live install on two hosts** (card `c-8cfbfe`): `helm install` on a ≥2-node cluster, a task whose
+  intents run on both worker pods, capability set confirmed, worker egress deny of Postgres/control API.
 - **First live run through the RSI gate** (card `c-772190`, after `c-f1518c`): propose → held-out
   suite → evidence → adopt (password) → rollback on the bench instance with `ARTEX_RSI_LOOP=on`.
 - **E8 first live held-out run** (card `c-f1518c`): needs a bench instance, an LLM, a judge key and a
@@ -292,6 +357,10 @@ body, through the versioned prompt API, and the starting bodies are restored aft
 - **Web deps:** `cd web && npm ci`, then `npx tsc --noEmit` (clean) and `npm run lint` (84 known errors, `c-834a5a`). **Embedded-UI build:** `./build.sh`.
 - **Run (Docker):** `cp .env.example .env` (set `POSTGRES_PASSWORD`), `docker compose up -d --build`,
   open http://localhost:8787, setup token via `docker compose logs artex | grep "Setup token"`.
+- **Distributed (E7):** one `-role control` node plus `-role worker` nodes sharing Postgres and
+  `ARTEX_SECRET_KEY`; workers need `ARTEX_CONTROL_PROXY`. Helm: `deploy/helm/artex` (lint with
+  `docker run --rm -v "$PWD/deploy/helm/artex:/chart" alpine/helm:3 lint /chart`); local: `docker compose -f
+  docker-compose.yml -f docker-compose.distributed.yml up -d --build`. See `docs/DISTRIBUTED.md`.
 - **Verify (reproduces CI):** `scripts/verify.sh` (fast set, no Docker); `--full` adds `go test -race`
   + web static build; `--security` runs `govulncheck ./...`.
 - **Browser e2e (E2 integrations):** `scripts/e2e/integrations.sh`. It needs Go, Node, and initdb/pg_ctl,
@@ -326,11 +395,14 @@ Card ids in brackets:
 - **E5** [`c-669406`] Engagement governance. The backend is done on `ej/20261124-055929-bd2253`. Follow-ups:
   `c-5b5421` (client binding), `c-869050` (UI, in review), `c-f4115c` (lifecycle gaps), `c-92bb52`
   (role-aware controls on existing pages), `c-7c4715` (client_read console, in review), `c-601ec6` (chain paging).
+- **DB** [`c-c18f43`] Migration version collisions across unmerged branches (0023 x3, 0024, 0025; c-1d3e0a uses 0026).
 - **TEST** [`c-3157b4`] `TestGateOffTaskIsUnchanged` fails on main with Postgres (also fails before E5).
 - **E6** [`c-cb0093`] Cost/observability dashboard + OpenTelemetry export, building on existing context telemetry.
-- **E7** [`c-d60149`] Distributed/remote workers (queue-backed intents) for larger engagements; Helm chart.
-  Follow-ups: `c-3b781a` and `c-548e8b` (TLS to the control API) in review; `c-677166` (TLS on the
-  proxy hop), `c-7ad4da`, `c-29ff19`, `c-18f7a8`, `c-8cfbfe` (live install, human).
+- **E7** [`c-d60149`] Distributed workers + Helm: built, in review (see Current state). Follow-ups:
+  `c-3b781a` (evidence on workers), `c-29ff19` (transcripts across hosts), `c-8cfbfe` (live two-host
+  install), `c-18f7a8` (browser MCP relay, finding wake-ups, proxy scope default, rule-revision tx; in review),
+  `c-548e8b` (TLS to the control API, landed on main as #46), `c-1d3e0a` (worker drain ack, LLM profile reload; in review), `c-20c400` (one settings follower),
+  `c-677166` (proxy-hop TLS).
 - **E8** [`c-5487e8`] Planner/worker evaluation suite (regression targets, prompt-version A/B via the benchmark gate).
 - **E9** [`c-73af97`] Frontend/UX pass (tables over cards, fewer-clicks triage workflow, live engagement dashboard).
 - **SEC** [`c-517c2d`] Live Playwright task check of the scope relay (human/bench: needs an LLM key and an authorized target).
@@ -432,6 +504,36 @@ Card ids in brackets:
   API port would be reachable, and raw sockets also allow forged source addresses. The bbot-recon
   skill now says to use `nmap -sT` instead. Revisit only with a server-side (root) port-scan service
   that applies the scope gate and egress denies itself, never by giving the executor raw sockets.
+
+- **2026-11-24** — c-1d3e0a: (a) An ack means "fence up, and no runs of this task here". The worker writes it
+  only from its dispatch loop (the only place a task starts being served), only after StopTask joined the
+  routines, and only while the fence stands. No run starts under the fence, so no fence epoch is needed. A fence
+  change clears the acks. (b) After the bound (8 s, inside the 10 s drain timeout) the delete **goes on** and logs
+  the silent nodes, as the card asked. A stale registry row (NodeTTL 45 s) is not waited for. (c) The LLM reload
+  reuses the c-8cfbfe revision follower with its own key, `llm_config_revision`. The bump lives in
+  `invalidateProfileAgents`, so binding and pool changes are covered too. Workers never bump, which would loop.
+  (d) Migration numbered 0026 to step past the 0023–0025 already taken on other unmerged branches.
+
+- **2026-11-24** — c-18f7a8: (a) The capture proxy refuses token-less non-loopback clients in **every** role,
+  not only on a control node. `ARTEX_PROXY_ALLOW_NONLOOPBACK=1` was meant to expose the proxy, not to make it an
+  open relay on the global rules. Operators who really want remote manual capture set
+  `ARTEX_PROXY_ALLOW_UNSCOPED_REMOTE=1`. A control node ignores that switch. (b) **Decided against** a DB-backed
+  per-host slot for the noise governor. It would add a Postgres round trip and a new failure mode (block or
+  fail open) to every target request. The rate is already divided exactly, and the in-flight overshoot is
+  bounded at max(limit, N). Most worker traffic is also paced again at the control proxy. The bound is pinned by
+  `egress/share_bound_test.go`. Revisit if `quiet` with several nodes is shown to trip a target's limits. (c) The
+  intercept revision bump runs in the write's own transaction: a failed bump rolls the write back (an API 500),
+  so no committed rule is ever unannounced. (d) A worker treats any loopback http `--proxy-server` in a shared
+  MCP row as the capture proxy, because a worker runs no proxy of its own.
+
+- **2026-11-24** — E7 (`c-d60149`): the queue is the existing `exploration_nodes` lease, not a broker.
+  It already had atomic claims, fencing tokens and lease takeover, so a broker would have added a
+  second source of truth. Worker nodes are the same binary and wiring, so the gating is identical by
+  construction; every control decision a single process kept in memory is now read from Postgres, and
+  a read failure blocks the claim. Worker traffic is recorded by the control node's proxy (tokens
+  stored only as SHA-256), not by per-host stores. A worker never falls back to its own budget env,
+  and claims nothing without a live control node or while a `role=all` node shares the database.
+  Migration **0023** — renumber if another branch lands 0023 first.
 
 - **2026-11-24** — c-548e8b: the worker pins the control API's CA (`ARTEX_CONTROL_CA`) rather than
   trusting system roots, so a publicly valid certificate for the same name cannot impersonate the

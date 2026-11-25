@@ -232,7 +232,8 @@ func prepareExecScript(p ExecPrivilege, path string) error {
 // <data>/spill, which the
 // executor group reads and cannot change (makeSpillDir); with a range, the group
 // is the key's uid instead (execuid_spill_unix.go). The key files and the
-// config file (which can hold the database DSN) are restricted to root. Nothing
+// config file (which can hold the database DSN) are restricted to root, and so are
+// the roots of the data and key directories (tightenVolumeRoot). Nothing
 // else under the data directory changes; directories a
 // root-only path needs are left as they are. It sets p.ScriptDir to the script
 // directory it creates, and creates the directory of Norma's background-task output
@@ -244,6 +245,13 @@ func PrepareExecPrivilege(p *ExecPrivilege, dataDir, keyDir, configPath string) 
 		// cannot read them. Agent processes run as the server's user and can.
 		restrictSecretModes(keyDir, configPath)
 		return nil
+	}
+	// Fresh container volumes are world-writable (tightenVolumeRoot).
+	if err := tightenVolumeRoot(dataDir, 0o755); err != nil {
+		return fmt.Errorf("restrict the data directory %s to root: %w", dataDir, err)
+	}
+	if err := tightenVolumeRoot(keyDir, 0o700); err != nil {
+		return fmt.Errorf("restrict the key directory %s to root: %w", keyDir, err)
 	}
 	gid := int(p.GID)
 	if p.Range.Enabled() {

@@ -30,11 +30,17 @@ data:
   {{- with .Values.egress.filter }}
   ARTEX_EGRESS_FILTER: {{ . | quote }}
   {{- end }}
-  {{- with .Values.egress.deny }}
+  {{- with include "artex.egressDeny" . }}
   ARTEX_EGRESS_DENY: {{ . | quote }}
   {{- end }}
   {{- with .Values.egress.allow }}
   ARTEX_EGRESS_ALLOW: {{ . | quote }}
+  {{- end }}
+  {{- with include "artex.egressDenyHosts" . }}
+  ARTEX_EGRESS_DENY_HOSTS: {{ . | quote }}
+  {{- end }}
+  {{- with include "artex.egressAllowHosts" . }}
+  ARTEX_EGRESS_ALLOW_HOSTS: {{ . | quote }}
   {{- end }}
   {{- with $s.trustedProxies }}
   ARTEX_TRUSTED_PROXIES: {{ . | quote }}

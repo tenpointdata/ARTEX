@@ -23,6 +23,7 @@ ARTEX acts against live targets. Only run it against systems you are explicitly 
 - `web/` — Next.js 16 / React 19 UI, embedded into the Go binary with `go:embed` under `-tags embedui` (`server/webui_embed.go`).
 - `docs/` — `ARCHITECTURE.md` is the code-level map; `OPS.md`, traffic docs, `RSI.md` (self-improvement governance contract).
 - `extension/` — browser traffic-capture extension.
+- `deploy/helm/artex` — Helm chart (control + worker nodes); `docs/DISTRIBUTED.md` explains the process roles (`-role all|control|worker`).
 
 ## Set up / run / test / deploy
 

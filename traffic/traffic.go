@@ -347,6 +347,7 @@ func Open(dir, addr string) (*Traffic, error) {
 		return nil, err
 	}
 	t := &Traffic{dir: dir, addr: addr, db: db, closed: make(chan struct{}), snaps: newSnapTable()}
+	t.remote.require = !unscopedRemoteClientsAllowed()
 	if err := t.initIndex(); err != nil {
 		db.Close()
 		return nil, err
