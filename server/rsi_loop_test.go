@@ -204,6 +204,12 @@ func TestRSIGateEndToEndPG(t *testing.T) {
 		t.Fatalf("fresh evidence: %d %v", code, out)
 	}
 	evID = ev["id"]
+	// The list carries each proposal's newest evidence, the row an adoption cites.
+	code, out = h.call("GET", "/api/rsi/proposals", nil)
+	latest, _ := out["latest_evidence"].(map[string]any)
+	if row, _ := latest[strconv.FormatInt(pid, 10)].(map[string]any); code != 200 || row == nil || row["id"] != evID || row["passed"] != true {
+		t.Fatalf("list latest evidence: %d %v", code, out["latest_evidence"])
+	}
 	// A fourth upload is over the per-proposal cap.
 	if code, _ := h.call("POST", base+"/evidence", map[string]any{"baseline": baseArm, "candidate": candArm}); code != 409 {
 		t.Fatalf("upload cap: %d", code)

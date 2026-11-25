@@ -229,6 +229,35 @@ func (d *DB) ListRSIProposals(ctx context.Context, limit int) ([]*RSIProposal, e
 	return out, rows.Err()
 }
 
+// LatestRSIEvidence returns the newest evidence row of each given proposal,
+// keyed by proposal id. Proposals without evidence are absent.
+func (d *DB) LatestRSIEvidence(ctx context.Context, proposalIDs []int64) (map[int64]RSIEvidence, error) {
+	out := map[int64]RSIEvidence{}
+	if len(proposalIDs) == 0 {
+		return out, nil
+	}
+	ids, err := json.Marshal(proposalIDs)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := d.QueryContext(ctx, `SELECT DISTINCT ON (proposal_id) id, proposal_id, passed, verdict, created_at
+		FROM rsi_proposal_evidence
+		WHERE proposal_id IN (SELECT jsonb_array_elements_text($1::jsonb)::bigint)
+		ORDER BY proposal_id, id DESC`, string(ids))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var e RSIEvidence
+		if err := rows.Scan(&e.ID, &e.ProposalID, &e.Passed, &e.Verdict, &e.CreatedAt); err != nil {
+			return nil, err
+		}
+		out[e.ProposalID] = e
+	}
+	return out, rows.Err()
+}
+
 // RSILog returns log rows, oldest first; proposalID 0 means every proposal.
 func (d *DB) RSILog(ctx context.Context, proposalID int64, limit int) ([]RSILogEntry, error) {
 	if limit <= 0 || limit > 1000 {

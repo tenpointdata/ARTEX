@@ -200,7 +200,7 @@ func nonNilStrings(v []string) []string {
 	return v
 }
 
-// GET /api/rsi/proposals
+// GET /api/rsi/proposals — the proposals, newest first, and each one's newest evidence.
 func (s *Server) rsiListProposals(w http.ResponseWriter, r *http.Request) {
 	pg := s.pg(w)
 	if pg == nil {
@@ -212,7 +212,18 @@ func (s *Server) rsiListProposals(w http.ResponseWriter, r *http.Request) {
 		rsiWriteErr(w, "list proposals", err)
 		return
 	}
-	writeJSON(w, 200, map[string]any{"proposals": ps, "loop": rsiLoopOn()})
+	ids := make([]int64, len(ps))
+	for i, p := range ps {
+		ids[i] = p.ID
+	}
+	latest, err := pg.LatestRSIEvidence(r.Context(), ids)
+	if err != nil {
+		rsiWriteErr(w, "list evidence", err)
+		return
+	}
+	// latest_evidence maps a proposal id to its newest evidence row (the one an
+	// adoption would cite), so a list view needs no per-row detail call.
+	writeJSON(w, 200, map[string]any{"proposals": ps, "latest_evidence": latest, "loop": rsiLoopOn()})
 }
 
 // GET /api/rsi/proposals/{id}

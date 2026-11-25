@@ -59,6 +59,16 @@ See `docs/ARCHITECTURE.md` for the code-level map. Summary:
 
 ## Current state
 
+**2026-11-24 — RSI gate web UI (`c-936308`, in review).** `/system/rsi` ("Self-improvement" in the sidebar):
+a proposals table (status, module, round, newest verdict with net paired +/−, regressions count), a
+row expand with per-gate rates with denominators, paired gained/lost/both/neither, regressions with
+targets, the reasons, and the adoption log; a link to the agent's prompt history. Inline Adopt (owner
+password, sends the newest `evidence_id`), Reject, Roll back (reason): one click + the dialog's submit.
+The `ARTEX_RSI_LOOP` state comes from `GET /api/rsi/status`. Server: `GET /api/rsi/proposals` now also
+returns `latest_evidence` (proposal id → newest evidence row, `db.LatestRSIEvidence`). Verified: tsc,
+biome, `scripts/verify.sh`, `TestRSIGateEndToEndPG` on a real Postgres 17, and headless Chromium against
+the embedded UI: adopt then rollback of a passing proposal took 2 clicks each.
+
 **2026-11-24 — LLM sampling pin (`c-d73308`, E8; on main via #69).** Migration 0028 adds nullable
 `llm_profiles.sampling_seed`/`sampling_temperature`; `agent/sampling.go` splices them into the wire body
 (seed on openai/ollama only; temperature only where the caller set none). Suite stamps `llm_sampling`.
@@ -245,7 +255,7 @@ the full Docker image, the E8 suite) are in `docs/handoff/2026-11-24-current-sta
 
 - *(unclaimed)* — **RSI gate hardening** (M), card `c-0d277f`: server-side per-task arm ledger, suite
   pre-registration, adopted-lesson retire sync. Done = Postgres tests for each.
-- *(unclaimed)* — **RSI gate web UI** (M), card `c-936308`. Done = adopt/rollback from a proposals table in ≤2 clicks + password.
+- *(unclaimed)* — **RSI: role for reject/rollback** (S), card `c-cce755`. Done = a decision; if admin, an RBAC rule + test and the `/system/rsi` gate switched.
 
 - *(unclaimed)* — **E7: TLS on the worker→control proxy hop** (M), card `c-677166`. Done = a plain-HTTP
   target request from a worker crosses the network inside TLS; Helm/compose default to it.
@@ -310,7 +320,7 @@ Card ids in brackets:
   [`c-119206`] role-gate the E2 UI controls; [`c-1198a2`] run `scripts/e2e/integrations.sh` in CI (after c-cc25b6);
   [`c-da9198`] scheduled sync plus a per-tracker lock; [`c-ea60a0`] move agent `scan_ingest` onto
   `scanimport`, normalize default ports, and settle two dedup edge cases.
-- **E3** [`c-d25ff9`] — gate built (in review). Follow-ups: hardening `c-0d277f`, UI `c-936308`, first live run `c-772190`, proposer/critic `c-c89f5b`.
+- **E3** [`c-d25ff9`] — gate built (in review). Follow-ups: hardening `c-0d277f`, UI `c-936308` (built, in review), RBAC `c-cce755`, first live run `c-772190`, proposer/critic `c-c89f5b`.
 - **E4** [`c-c0bb07`] Methodology-driven coverage: landed 2026-11-24 (see Current state). Follow-ups:
   [`c-ca2bd0`] an operator-chosen methodology per task (landed, in review; gaps `c-aed5fd`); [`c-ed937d`] checklist completion in the report export (after E1).
 - **E5** [`c-669406`] Engagement governance. The backend is done on `ej/20261124-055929-bd2253`. Follow-ups:

@@ -9,6 +9,7 @@ import {
   ClipboardList,
   FileText,
   FileUp,
+  FlaskConical,
   FolderOpen,
   FolderSync,
   LayoutDashboard,
@@ -107,6 +108,7 @@ export const sidebarItems: NavGroup[] = [
     items: [
       { id: "llm", title: t("LLM"), url: "/system/llm", icon: Brain },
       { id: "agents", title: t("Agent"), url: "/system/agents", icon: Bot },
+      { id: "rsi", title: t("Self-improvement"), url: "/system/rsi", icon: FlaskConical },
       { id: "mcp", title: t("MCP"), url: "/system/mcp", icon: Plug },
       { id: "skills", title: t("Skill"), url: "/system/skills", icon: Sparkles },
       { id: "tools", title: t("Tools"), url: "/system/tools", icon: Wrench },

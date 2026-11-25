@@ -111,6 +111,17 @@ const delivery: Record<string, StatusMeta> = {
   skipped: { label: t("Skipped"), tone: "neutral" },
 };
 
+// RSI proposal lifecycle (db/rsi_loop.go): proposed → passed|failed through
+// evidence, passed → adopted by the owner, adopted → rolled_back.
+const rsi: Record<string, StatusMeta> = {
+  proposed: { label: t("Proposed"), tone: "slate" },
+  passed: { label: t("Passed"), tone: "green" },
+  failed: { label: t("Failed"), tone: "red" },
+  adopted: { label: t("Adopted"), tone: "blue" },
+  rejected: { label: t("Rejected"), tone: "neutral" },
+  rolled_back: { label: t("Rolled back"), tone: "amber" },
+};
+
 const maps = {
   intent,
   task,
@@ -121,6 +132,7 @@ const maps = {
   audit,
   node,
   delivery,
+  rsi,
 } as const;
 
 export type StatusDomain = keyof typeof maps;
