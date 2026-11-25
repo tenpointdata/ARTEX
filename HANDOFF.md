@@ -103,7 +103,14 @@ triage. Allow/Deny is one gated `components/approval-decision-buttons.tsx`, and 
 `web/src/lib/rich-text.tsx`. Every touched file over 600 lines shrank by extraction. Browser-probed
 (headless Chromium, real backend + Postgres 16) as reviewer and operator on 23 pages: no 403 on load, and
 no enabled mutating control the role lacks. Rows that were not seeded (MCP servers, channels, LLM
-profiles, pending approvals, traffic, files, skills) were checked in code only. Open: `c-4ee114` (seeded-row re-probe, biome on extracted files), `c-7c4715`, `c-601ec6`.
+profiles, pending approvals, traffic, files, skills) were checked in code only. **c-4ee114 (done):** re-probed
+with one of each seeded (MCP, channel, LLM profile, pending approvals, traffic incl. exchange sheet + replay,
+workspace files, skill, tamper hook, tracker, assets): 0 4xx across ~400 responses, no enabled control the role
+lacks. That probe found and fixed Integrations (tracker add/edit/delete/enable now admin, Sync operate), Scanner
+imports (upload form operate) and `/system/logs` (no stream without operate). Assets tabs are one table-driven
+`AssetTable` (`function/assets/_components/`); checkboxes and trash column only with operate. biome is clean on
+the c-92bb52 extracted files. Not probed: stream-messages view, detail pages, client_read (`c-80fe4e`).
+Open: `c-80fe4e`, `c-7c4715`, `c-601ec6`.
 
 **2026-11-24** — **E2 integrations** (backend `c-6def05`, UI `c-597eb6`, follow-ups `c-2d91eb`, all in review)
 are on branch `ej/20261124-150516-d78c96`. It merges the UI branch `ej/20261124-132955-7aef3f`, which carries
@@ -121,7 +128,8 @@ the backend `ej/20261124-055326-6bcfa9`, so landing it lands all of E2. See `doc
   The findings bulk bar and the detail page have Push to tracker; the detail has a Tickets card.
 - **RBAC (with E5):** `GET /api/exploration/findings/{id}/integrations` needs `read`, not `client_read`.
   Tracker create/edit/delete need `admin`, the same as notification channels. Push, sync and import need `operate`.
-  The E2 pages do not yet gate their controls by role (`c-119206`).
+  `/system/integrations` and its imports page gate by role since c-4ee114; the finding-detail Tickets/Push
+  controls and the client_read check remain (`c-119206`).
 - **Browser e2e:** `scripts/e2e/integrations.sh` sets up a throwaway Postgres, the backend, a Next production
   build and Playwright, then runs `integrations-e2e.js` against `fake-github.js`. It passed 24 checks
   locally on 2026-11-24. It is not a CI job yet (`c-1198a2`, after c-cc25b6).
@@ -238,8 +246,8 @@ body, through the versioned prompt API, and the starting bodies are restored aft
 **Agents' lane**
 1. *(unclaimed)* — **SEC: per-task uid follow-ups** (S each): `c-12df03` (single-uid start-up fails on a
    socket; MCP uid not egress-filtered), `c-e70e5c` (release ended tasks at start-up; per-key lock). The "Done when" is on each card.
-2. *(claimed: c-4ee114)* — **E5 UI: seeded-row role check + biome on extracted files** (S). Then `c-601ec6`
-   (chain newest-first paging, S). (`c-7c4715`, the client_read console, is in review on `ej/20261124-144554-67afc9`.)
+2. *(unclaimed)* — **E5 UI: role probe of unreached pages** (S), card `c-80fe4e` (stream-messages view, detail
+   pages, client_read). Then `c-601ec6` (chain newest-first paging, S). (`c-7c4715`, the client_read console, is in review on `ej/20261124-144554-67afc9`.)
 3. *(unclaimed)* — **SEC: gorilla/websocket bump, GO-2026-6278** (XS), card `c-c10f2c`; needs network.
    Done = govulncheck clean.
 4. *(unclaimed)* — **SEC: upstream-gate residuals** (M), card `c-5a6f96`: task-scoped rules on proxy
@@ -252,8 +260,8 @@ body, through the versioned prompt API, and the starting bodies are restored aft
    CVSS/EPSS-scored, remediation-bearing, standards-mapped deliverables (OWASP ASVS/WSTG, MITRE
    ATT&CK). Done = a report export with per-finding CVSS vector + remediation + framework tags,
    covered by tests. Card `c-8f9cca`.
-8. *(unclaimed)* — **E2 UI: gate integrations controls by role** (S), card `c-119206`. Done = as reviewer
-   and as client_read, no E2 control the server refuses is shown, and the finding detail has no 403.
+8. *(unclaimed)* — **E2 UI: gate integrations controls by role** (S), card `c-119206`; the Integrations and
+   imports pages are done (c-4ee114). Left: finding-detail Tickets/Push for reviewer, client_read check.
 
 - *(unclaimed)* — **RSI gate hardening** (M), card `c-0d277f`: server-side per-task arm ledger, suite
   pre-registration, adopted-lesson retire sync. Done = Postgres tests for each.
