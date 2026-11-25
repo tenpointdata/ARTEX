@@ -59,11 +59,13 @@ See `docs/ARCHITECTURE.md` for the code-level map. Summary:
 
 ## Current state
 
-**2026-11-24 — E7 start-up-only state audit (`c-6bcdd3`, in review)** on `ej/20261124-172031-c2bb7b`, on top of
-c-20c400's `ej/20261124-173106-51fdcc`. Workers now follow the LLM recording switch (compared every poll) and agent
-config saves (`settings.agent_config_revision` drops task agents). Everything else is per-run, per-call or
-control-only; the list and three new Limits (skills on disk, per-node env, lesson block) are in `docs/DISTRIBUTED.md`.
-Tests: `server/worker_node_agent_test.go` (both fail with the fix removed).
+**2026-11-24 — E7 start-up-only state audit (`c-6bcdd3`, in review)** on `ej/20261124-172031-c2bb7b`. It merges
+c-20c400 (`ej/20261124-173106-51fdcc`, which carries the E7 stack), c-d4946f/c-8cfbfe and main, so **landing it lands
+all of them**. Workers now follow two more things: the LLM recording switch (compared every poll) and agent config
+saves (`settings.agent_config_revision`, which drops task agents). Everything else is read per run or per call, or is
+control-only. `docs/DISTRIBUTED.md` has the list and three new Limits (skills on disk, per-node env, lesson block).
+Tests: `server/worker_node_agent_test.go` (both fail with the fix removed). Full `verify.sh` on Postgres 16 fails only
+the known macOS SOCKS5 UDP test. Its gofmt step does not run on macOS (`c-c81e74`); gofmt was run by hand: clean.
 
 **2026-11-24 — E7: one worker settings follower (`c-20c400`, in review)** on `ej/20261124-173106-51fdcc`, which
 merges the c-1d3e0a branch `ej/20261124-165722-c858f3` (so it carries the whole unmerged E7 stack). `syncSharedEgress`
@@ -299,6 +301,7 @@ Card ids in brackets:
 
 ## Known issues and gotchas
 
+- `scripts/verify.sh` gofmt step is skipped on macOS: `mapfile` needs bash 4 (`c-c81e74`). Run `gofmt -l` by hand.
 - **A database created from an unmerged E7 branch does not start on `main`.** It already applied
   `0023_distributed_workers`, and `main` then added `0015_integrations` (E2). The migrator refuses an
   inserted migration ("migrations must be appended, never inserted"). Only databases from branch builds
