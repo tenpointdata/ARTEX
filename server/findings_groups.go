@@ -37,7 +37,9 @@ func findingFilterFromQuery(q url.Values) db.FindingFilter {
 		// task_id (independent of the task param, which switches to the per-task-node branch): filters the global table by task.
 		TaskID: normFilter(q.Get("task_id")),
 		// import_id: the findings one scanner import created (Scanner imports → Past imports).
-		ImportID:   normFilter(q.Get("import_id")),
+		ImportID: normFilter(q.Get("import_id")),
+		// lane: runtime | sast | sca (E10); runtime includes ARTEX's own findings.
+		Lane:       normFilter(q.Get("lane")),
 		Query:      q.Get("q"),
 		Sort:       q.Get("sort"),
 		AssetScope: strings.TrimSpace(q.Get("asset_scope")),

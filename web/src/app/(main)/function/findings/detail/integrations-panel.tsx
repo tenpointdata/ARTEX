@@ -11,9 +11,11 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { intlLocale, t } from "@/i18n";
 import { httpHref } from "@/lib/http-href";
+import { codeLocation } from "@/lib/integrations";
 import { integrationsApi } from "@/lib/integrations-api";
 import type { FindingImportSource, FindingIntegrations, FindingTicket, TicketTracker } from "@/lib/types";
 
+import { LaneBadge } from "../_components/lane-badge";
 import { PushToTrackerSelect } from "../_components/push-to-tracker";
 
 function fmtTime(ts: string) {
@@ -125,6 +127,20 @@ function ImportSource({ source }: { source: FindingImportSource }) {
       <dl className="mt-1 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-xs">
         <dt className="text-muted-foreground">{t("Tool")}</dt>
         <dd>{source.tool}</dd>
+        {source.lane && (
+          <>
+            <dt className="text-muted-foreground">{t("Lane")}</dt>
+            <dd>
+              <LaneBadge lane={source.lane} />
+            </dd>
+          </>
+        )}
+        {codeLocation(source) && (
+          <>
+            <dt className="text-muted-foreground">{t("Location")}</dt>
+            <dd className="font-mono break-all">{codeLocation(source)}</dd>
+          </>
+        )}
         <dt className="text-muted-foreground">{t("Rule")}</dt>
         <dd className="font-mono break-all">{source.rule_id || "—"}</dd>
         <dt className="text-muted-foreground">{t("Import")}</dt>

@@ -1,0 +1,21 @@
+{
+  "version": "2.1.0",
+  "runs": [
+    {
+      "tool": {"driver": {"name": "Trivy", "version": "0.50.1", "rules": [
+        {"id": "CVE-2022-24999", "shortDescription": {"text": "qs: prototype pollution"}, "properties": {"security-severity": "7.5", "tags": ["vulnerability", "security", "HIGH"]}},
+        {"id": "aws-s3-enable-versioning", "shortDescription": {"text": "S3 bucket versioning"}, "properties": {"security-severity": "4.0", "tags": ["misconfiguration"]}}
+      ]}},
+      "results": [
+        {"ruleId": "CVE-2022-24999", "level": "error", "message": {"text": "Package: qs\nInstalled Version: 6.5.2\nFixed Version: 6.5.3"}, "locations": [{"physicalLocation": {"artifactLocation": {"uri": "web/package-lock.json"}, "region": {"startLine": 1}}}]},
+        {"ruleId": "aws-s3-enable-versioning", "level": "warning", "message": {"text": "Bucket does not have versioning enabled"}, "locations": [{"physicalLocation": {"artifactLocation": {"uri": "infra/main.tf"}, "region": {"startLine": 12}}}]}
+      ]
+    },
+    {
+      "tool": {"driver": {"name": "osv-scanner", "rules": [{"id": "PYSEC-2023-74"}]}},
+      "results": [
+        {"ruleId": "PYSEC-2023-74", "level": "warning", "message": {"text": "requests leaks Proxy-Authorization"}, "locations": [{"physicalLocation": {"artifactLocation": {"uri": "requirements.txt"}}}]}
+      ]
+    }
+  ]
+}

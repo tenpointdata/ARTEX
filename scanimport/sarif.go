@@ -276,7 +276,7 @@ func (c *collector) sarifResult(raw json.RawMessage, run *sarifRun) {
 	cwe := parseCWE(tags...)
 	title := firstNonEmpty(rule.Short.Text.s(), rule.Name.s(), r.Message.Text.s())
 	c.finding(Finding{Tool: run.tool, RuleID: ruleID, Severity: sev, Target: target, Location: loc,
-		Line: line, Title: title, CWE: cwe, Record: rec}, map[string]any{
+		Line: line, Title: title, CWE: cwe, Record: rec, Lane: codeLane(run.tool, ruleID, loc)}, map[string]any{
 		"message":           r.Message.Text.s(),
 		"rule_name":         rule.Name.s(),
 		"level":             level,
