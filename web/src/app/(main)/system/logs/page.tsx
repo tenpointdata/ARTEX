@@ -1,22 +1,60 @@
 "use client";
 
 import * as React from "react";
-import { Input } from "@/components/ui/input";
+
 import { Button } from "@/components/ui/button";
-import { sseUrl } from "@/lib/sse";
+import { Input } from "@/components/ui/input";
+import { useCan } from "@/hooks/use-session";
+import { t } from "@/i18n";
 import { MOCK } from "@/lib/mock/enabled";
+import { sseUrl } from "@/lib/sse";
 import type { LogLine } from "@/lib/types";
 import { cn } from "@/lib/utils";
-import { t } from "@/i18n";
 
 // Mock demo: no backend SSE, so stuff in a few sample log lines.
 const MOCK_LOGS: LogLine[] = [
-  { seq: 1, ts: "2026-11-14T03:55:00Z", level: "info", tag: "engine", text: "ARTEX v0.6.0 backend listening on :8787 (workers=3)" },
-  { seq: 2, ts: "2026-11-14T03:55:01Z", level: "info", tag: "config", text: "LLM configured from DB: anthropic / claude-opus-4-8" },
-  { seq: 3, ts: "2026-11-14T03:56:10Z", level: "info", tag: "planner", text: "task t-acme-web: planning round 3, generated intent i-4" },
-  { seq: 4, ts: "2026-11-14T03:57:00Z", level: "warn", tag: "guard", text: "block bash: target out of bounds, out.evil.example is not in scope" },
-  { seq: 5, ts: "2026-11-14T03:57:30Z", level: "info", tag: "work#1", text: "report_finding: Default Credentials (high) saved to database" },
-  { seq: 6, ts: "2026-11-14T03:58:20Z", level: "error", tag: "work#3", text: "intercept: mysqldump matched a destructive rule, awaiting manual approval" },
+  {
+    seq: 1,
+    ts: "2026-11-14T03:55:00Z",
+    level: "info",
+    tag: "engine",
+    text: "ARTEX v0.6.0 backend listening on :8787 (workers=3)",
+  },
+  {
+    seq: 2,
+    ts: "2026-11-14T03:55:01Z",
+    level: "info",
+    tag: "config",
+    text: "LLM configured from DB: anthropic / claude-opus-4-8",
+  },
+  {
+    seq: 3,
+    ts: "2026-11-14T03:56:10Z",
+    level: "info",
+    tag: "planner",
+    text: "task t-acme-web: planning round 3, generated intent i-4",
+  },
+  {
+    seq: 4,
+    ts: "2026-11-14T03:57:00Z",
+    level: "warn",
+    tag: "guard",
+    text: "block bash: target out of bounds, out.evil.example is not in scope",
+  },
+  {
+    seq: 5,
+    ts: "2026-11-14T03:57:30Z",
+    level: "info",
+    tag: "work#1",
+    text: "report_finding: Default Credentials (high) saved to database",
+  },
+  {
+    seq: 6,
+    ts: "2026-11-14T03:58:20Z",
+    level: "error",
+    tag: "work#3",
+    text: "intercept: mysqldump matched a destructive rule, awaiting manual approval",
+  },
 ];
 
 const levelTone: Record<LogLine["level"], string> = {
@@ -38,6 +76,7 @@ function fmtTime(ts: string) {
 }
 
 export default function LogsPage() {
+  const canOperate = useCan("operate"); // /api/logs (stream and history) is operate-level
   const [lines, setLines] = React.useState<LogLine[]>([]);
   const [q, setQ] = React.useState("");
   const [level, setLevel] = React.useState<"all" | LogLine["level"]>("all");
@@ -65,6 +104,7 @@ export default function LogsPage() {
       setLines(MOCK_LOGS);
       return;
     }
+    if (!canOperate) return;
     const es = new EventSource(sseUrl("/api/logs/stream?since=0"));
     es.onmessage = (e) => {
       if (pausedRef.current) return;
@@ -76,7 +116,7 @@ export default function LogsPage() {
       }
     };
     return () => es.close();
-  }, []);
+  }, [canOperate]);
 
   // Mark "has more" once we have any db_id in view.
   React.useEffect(() => {
@@ -90,7 +130,7 @@ export default function LogsPage() {
       const params = minDbId > 0 ? `?before=${minDbId}&limit=200` : `?limit=200`;
       const res = await fetch(`/api/logs/history${params}`);
       if (!res.ok) return;
-      const data = await res.json() as { items: LogLine[]; has_more: boolean };
+      const data = (await res.json()) as { items: LogLine[]; has_more: boolean };
       if (data.items?.length) {
         // Assign synthetic seq numbers below current minimum to keep dedup working.
         setLines((prev) => {
@@ -140,12 +180,26 @@ export default function LogsPage() {
     return { warn, error, total: lines.length };
   }, [lines]);
 
+  const header = (
+    <div>
+      <h1 className="text-xl font-semibold tracking-tight">{t("System logs")}</h1>
+      <p className="text-muted-foreground text-sm">
+        {t("Live backend log stream (planner / worker / database / traffic …)")}
+      </p>
+    </div>
+  );
+  if (!canOperate && !MOCK) {
+    return (
+      <div className="flex flex-1 flex-col gap-3">
+        {header}
+        <p className="text-muted-foreground text-sm">{t("System logs are only available to operators.")}</p>
+      </div>
+    );
+  }
+
   return (
     <div className="flex flex-1 flex-col gap-3">
-      <div>
-        <h1 className="text-xl font-semibold tracking-tight">{t("System logs")}</h1>
-        <p className="text-muted-foreground text-sm">{t("Live backend log stream (planner / worker / database / traffic …)")}</p>
-      </div>
+      {header}
       <div className="flex flex-1 flex-col gap-3">
         <div className="flex flex-wrap items-center gap-2">
           <Input
@@ -180,8 +234,8 @@ export default function LogsPage() {
           </Button>
           <span className="ml-auto text-xs text-muted-foreground">
             {t("{count} lines", { count: counts.total })} ·{" "}
-            <span className="text-amber-600 dark:text-amber-400">{t("{count} warnings", { count: counts.warn })}</span> ·{" "}
-            <span className="text-red-600 dark:text-red-400">{t("{count} errors", { count: counts.error })}</span>
+            <span className="text-amber-600 dark:text-amber-400">{t("{count} warnings", { count: counts.warn })}</span>{" "}
+            · <span className="text-red-600 dark:text-red-400">{t("{count} errors", { count: counts.error })}</span>
           </span>
         </div>
 
@@ -210,9 +264,7 @@ export default function LogsPage() {
           ) : (
             filtered.map((l) => {
               const body =
-                l.tag && l.text.startsWith("[" + l.tag + "]")
-                  ? l.text.slice(l.tag.length + 2).trimStart()
-                  : l.text;
+                l.tag && l.text.startsWith("[" + l.tag + "]") ? l.text.slice(l.tag.length + 2).trimStart() : l.text;
               return (
                 <div key={l.seq} className="flex items-start gap-2 px-1 py-0.5 hover:bg-muted/40">
                   <span className={cn("mt-1.5 size-1.5 shrink-0 rounded-full", levelDot[l.level])} />

@@ -2939,5 +2939,6 @@
   "No engagements for this company yet.": "Bu şirket için henüz çalışma yok.",
   "Conversation messages are only available to operators.": "Sohbet mesajları yalnızca operatörler tarafından görüntülenebilir.",
   "Select a conversation to view it. Starting and reading conversations requires the operator role.": "Görüntülemek için bir sohbet seçin. Sohbet başlatmak ve okumak operatör rolü gerektirir.",
-  "Select {name}": "{name} öğesini seç"
+  "Select {name}": "{name} öğesini seç",
+  "System logs are only available to operators.": "Sistem günlükleri yalnızca operatörler tarafından görüntülenebilir."
 }
