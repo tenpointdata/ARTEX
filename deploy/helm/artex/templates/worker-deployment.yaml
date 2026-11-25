@@ -9,6 +9,7 @@ metadata:
     app.kubernetes.io/component: worker
 spec:
   replicas: {{ $w.replicas }}
+  strategy: {{ toYaml $w.updateStrategy | nindent 4 }}
   selector:
     matchLabels:
       {{- include "artex.selector" (dict "ctx" . "component" "worker") | nindent 6 }}

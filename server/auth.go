@@ -144,20 +144,41 @@ func migrateJWTKey(dst, dataDir string) error {
 	return nil
 }
 
-// writeNewJWTKey creates path with mode 0600, failing if it already exists.
+// writeNewJWTKey creates path with mode 0600 holding data, failing if it already
+// exists. The key is written and synced to a temporary file first and then
+// hard-linked into place: link fails when path exists, so an existing key is
+// never overwritten, and a crash mid-write (a killed pod whose key volume
+// survives) never leaves an empty or partial key that the never-overwrite rule
+// would then refuse at every start.
 func writeNewJWTKey(path string, data []byte) error {
-	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	dir := filepath.Dir(path)
+	f, err := os.CreateTemp(dir, ".jwt.key.tmp-*")
 	if err != nil {
+		return err
+	}
+	tmp := f.Name()
+	defer os.Remove(tmp)
+	if err := f.Chmod(0o600); err != nil {
+		f.Close()
 		return err
 	}
 	if _, err := f.Write(data); err != nil {
 		f.Close()
-		_ = os.Remove(path)
+		return err
+	}
+	if err := f.Sync(); err != nil {
+		f.Close()
 		return err
 	}
 	if err := f.Close(); err != nil {
-		_ = os.Remove(path)
 		return err
+	}
+	if err := os.Link(tmp, path); err != nil {
+		return err
+	}
+	if d, err := os.Open(dir); err == nil {
+		_ = d.Sync()
+		d.Close()
 	}
 	return nil
 }

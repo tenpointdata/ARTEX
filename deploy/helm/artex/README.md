@@ -68,6 +68,30 @@ unprivileged executor uid. All other capabilities are dropped except the small s
 do that only if you enforce egress with a NetworkPolicy or firewall. The optional
 `networkPolicy.enabled` allows worker ingress only on the health port.
 
+### Agent egress inside the cluster
+
+`egress.sh` blocks the pod's own API port, cloud metadata and the gateway. In a cluster an agent
+process could still reach ARTEX's PostgreSQL and the control API over the pod network. By default
+(`egress.denyClusterServices: true`) every ARTEX pod also denies, for the executor uid only, the
+addresses of the PostgreSQL host, the `<release>-control` Service and the API port on the control
+pod's own IP (headless `<release>-control-pods`), all through `ARTEX_EGRESS_DENY_HOSTS`. The worker's
+own database connection runs as root and is unaffected; the `<release>-control-proxy` Service stays
+open, since tool traffic goes through it.
+
+The names are re-resolved every `egress.refreshSeconds` (default 10, `ARTEX_EGRESS_REFRESH`). When
+an answer changes, for example after the database pod is rescheduled, `egress.sh` rewrites the
+executor chain in one `iptables-restore` commit; the pod is not restarted. A name that stops
+resolving keeps its last addresses. The PostgreSQL and control-pods Services publish not-ready
+addresses, so a new pod's IP is known before it serves. A moved pod can be reached for at most
+about `refreshSeconds` plus the cluster DNS cache TTL (CoreDNS: 5 s for cluster names).
+
+A pod-wide NetworkPolicy cannot do this: the server and its agent processes share the pod, and the
+server needs PostgreSQL. For a strict deployment with no re-resolution window set `egress.clusterCIDRs` to the
+cluster's pod and Service CIDRs; the proxy Service is then allowed by name
+(`ARTEX_EGRESS_ALLOW_HOSTS`), DNS (port 53) to the pod's resolvers stays open, and in-cluster
+lab targets need `egress.allow`. `deploy/lab/` reproduces the recorded install on kind. Check what was
+installed with `kubectl logs <pod> | grep egress:`.
+
 ## TLS between workers and the control node
 
 On by default (`controlTLS.enabled=true`). The control API serves TLS, and workers reach

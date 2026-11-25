@@ -69,6 +69,26 @@ egress:
   filter: ""                # ARTEX_EGRESS_FILTER ("0" disables the filter)
   deny: ""                  # ARTEX_EGRESS_DENY extra CIDRs
   allow: ""                 # ARTEX_EGRESS_ALLOW CIDRs allowed despite default denies
+  # Agent processes (the executor uid) must not reach ARTEX's own database or API. A
+  # NetworkPolicy cannot express that: it applies to the whole pod, and the root server
+  # process in the same pod needs PostgreSQL. So the deny is in the uid-scoped iptables
+  # filter. true = ARTEX_EGRESS_DENY_HOSTS gets the PostgreSQL host (the bundled Service
+  # is headless, so this is the database pod's own IP), the control API Service, and the
+  # API port on the control pod's own IP (headless <release>-control-pods). The names are
+  # re-resolved every refreshSeconds, so a rescheduled pod is denied at its new IP. The
+  # control node's recording proxy stays reachable.
+  denyClusterServices: true
+  # Seconds between re-resolutions of the deny/allow names (ARTEX_EGRESS_REFRESH). A moved
+  # pod can be reached for at most about this long plus the cluster DNS cache TTL;
+  # clusterCIDRs leaves no such window. 0 resolves once at pod start.
+  refreshSeconds: 10
+  # Strict mode: the cluster's pod and Service CIDRs (for example ["10.244.0.0/16",
+  # "10.96.0.0/12"]). Denied for agent processes on every ARTEX pod: every in-cluster
+  # address, with no re-resolution window; the recording proxy Service is allowed by name. In-cluster lab
+  # targets in these ranges then need egress.allow.
+  clusterCIDRs: []
+  denyHosts: ""             # extra ARTEX_EGRESS_DENY_HOSTS names (space/comma separated)
+  allowHosts: ""            # extra ARTEX_EGRESS_ALLOW_HOSTS names
 
 # Extra environment for all ARTEX pods (name: value). Use for settings not modelled above.
 extraEnv: {}
@@ -184,6 +204,12 @@ worker:
   # "soft" = preferred; "none" = no anti-affinity (set your own under affinity).
   antiAffinity: hard
   topologyKey: kubernetes.io/hostname
+  # maxSurge 0: with hard anti-affinity and as many hosts as replicas, a surge pod has no
+  # host to land on and the rollout never progresses. Replace one worker at a time; its
+  # claims are retaken after the 90s lease.
+  updateStrategy:
+    type: RollingUpdate
+    rollingUpdate: {maxSurge: 0, maxUnavailable: 1}
   # Health endpoint (plaintext, GET /healthz). Workers serve no API.
   healthPort: 8790
   # A worker finishes or abandons its claim; a lost claim is retaken after 90s.
