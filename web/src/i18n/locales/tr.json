@@ -2936,5 +2936,18 @@
   "Reports": "Raporlar",
   "Engagements for {company}": "{company} için çalışmalar",
   "Pick a company in the sidebar to see its engagements.": "Çalışmalarını görmek için kenar çubuğundan bir şirket seçin.",
-  "No engagements for this company yet.": "Bu şirket için henüz çalışma yok."
+  "No engagements for this company yet.": "Bu şirket için henüz çalışma yok.",
+  "Running tasks": "Çalışan görevler",
+  "Newest findings": "En yeni bulgular",
+  "Updated {time}": "Güncellendi: {time}",
+  "Show these findings": "Bu bulguları göster",
+  "Triage this finding": "Bu bulguyu değerlendir",
+  "Verdict": "Karar",
+  "Skip": "Atla",
+  "Open a finding, then press a verdict key; the next finding opens on its own.": "Bir bulgu açın, ardından bir karar tuşuna basın; sonraki bulgu kendiliğinden açılır.",
+  "next / previous": "sonraki / önceki",
+  "close": "kapat",
+  "Copied {count} URLs": "{count} URL kopyalandı",
+  "Copy URLs": "URL'leri kopyala",
+  "Delete targets of selection": "Seçimin hedeflerini sil"
 }

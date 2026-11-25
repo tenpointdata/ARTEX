@@ -2,19 +2,14 @@
 
 import * as React from "react";
 
-import { BellIcon, PlusIcon, SendIcon, Trash2Icon } from "lucide-react";
+import { BellIcon, PlusIcon, Trash2Icon } from "lucide-react";
 import { toast } from "sonner";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Textarea } from "@/components/ui/textarea";
 import { t } from "@/i18n";
 import { api } from "@/lib/api";
 import { buildConfig as buildConfigFromFields } from "@/lib/config-form";
@@ -27,23 +22,18 @@ import {
   KIND_LABEL,
   parseIDs,
   parseKeywords,
-  SEVERITY_OPTIONS,
 } from "./_components/channel-fields";
-import { ConfigField, FilterSummary } from "./_components/channel-form";
+import { FilterSummary } from "./_components/channel-form";
+import { ChannelSheet } from "./_components/channel-sheet";
 import { DeliveryList } from "./_components/delivery-list";
+import {
+  ASSETS_LIMIT_MAX,
+  GlobalSettingsCard,
+  limitInvalid,
+  SUMMARY_LIMIT_MAX,
+} from "./_components/global-settings-card";
 import { formatBacklog, StatTile } from "./_components/stat-tile";
-
 // Upper bounds of the two message render limits. They mirror the backend, which answers 400 outside [0, max].
-const SUMMARY_LIMIT_MAX = 4000;
-const ASSETS_LIMIT_MAX = 50;
-
-// limitInvalid reports whether a limit input holds anything other than a whole number in [0, max].
-// Empty is valid: it is not submitted, so the stored value stays as it is.
-function limitInvalid(raw: string, max: number): boolean {
-  if (raw.trim() === "") return false;
-  const n = Number(raw);
-  return !Number.isInteger(n) || n < 0 || n > max;
-}
 
 // This page only orchestrates: loading data, holding form state, calling the API.
 // Field definitions and parsing live in _components/channel-fields.ts, controls and the filter summary in
@@ -254,17 +244,15 @@ export default function NotifyPage() {
     }
   }
 
-  const fields = CHANNEL_FIELDS[form.kind] ?? [];
-  const secretKeys = new Set(meta?.kinds.find((k) => k.kind === form.kind)?.secret_keys ?? []);
-  const defaultRate = meta?.kinds.find((k) => k.kind === form.kind)?.default_rate_per_min ?? 0;
-
   return (
     <div className="flex flex-1 flex-col gap-4 md:gap-6">
       <div className="flex items-start justify-between gap-4">
         <div>
           <h1 className="text-xl font-semibold tracking-tight">{t("Notifications")}</h1>
           <p className="text-muted-foreground text-sm">
-            {t("Push findings to DingTalk / Feishu / WeCom and other channels · each channel has its own delivery timing and filter rules")}
+            {t(
+              "Push findings to DingTalk / Feishu / WeCom and other channels · each channel has its own delivery timing and filter rules",
+            )}
           </p>
         </div>
         {meta && (
@@ -284,10 +272,18 @@ export default function NotifyPage() {
 
       {meta && (
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
-          <StatTile label={t("Channels")} value={`${meta.stats.channels_on} / ${meta.stats.channels}`} hint={t("On / total")} />
+          <StatTile
+            label={t("Channels")}
+            value={`${meta.stats.channels_on} / ${meta.stats.channels}`}
+            hint={t("On / total")}
+          />
           <StatTile label={t("Sent today")} value={String(meta.stats.sent_today)} />
           <StatTile label={t("Pending")} value={String(meta.stats.pending)} />
-          <StatTile label={t("Failed")} value={String(meta.stats.failed)} tone={meta.stats.failed > 0 ? "red" : undefined} />
+          <StatTile
+            label={t("Failed")}
+            value={String(meta.stats.failed)}
+            tone={meta.stats.failed > 0 ? "red" : undefined}
+          />
           <StatTile
             label={t("Oldest backlog")}
             value={formatBacklog(meta.stats.backlog_age_ms)}
@@ -298,75 +294,18 @@ export default function NotifyPage() {
         </div>
       )}
 
-      <Card className="gap-3">
-        <CardHeader>
-          <CardTitle className="text-base">{t("Global settings")}</CardTitle>
-        </CardHeader>
-        <CardContent className="grid gap-4 sm:grid-cols-2">
-          <div className="grid gap-2">
-            <Label htmlFor="n-base">{t("Link-back URL")}</Label>
-            <Input
-              id="n-base"
-              placeholder="https://artex.example.com"
-              value={baseURL}
-              onChange={(e) => setBaseURL(e.target.value)}
-            />
-            <p className="text-muted-foreground text-xs">{t("The address the \"View details\" button in messages points to. Leave empty to omit the button.")}</p>
-          </div>
-          <div className="grid gap-2">
-            <Label htmlFor="n-digest">{t("Digest interval (minutes)")}</Label>
-            <Input
-              id="n-digest"
-              type="number"
-              min={1}
-              max={1440}
-              placeholder="30"
-              value={digestMin}
-              onChange={(e) => setDigestMin(e.target.value)}
-            />
-            <p className="text-muted-foreground text-xs">{t("Only applies to channels in \"digest\" mode.")}</p>
-          </div>
-          <div className="grid gap-2">
-            <Label htmlFor="n-summary-max">{t("Summary length (characters)")}</Label>
-            <Input
-              id="n-summary-max"
-              type="number"
-              min={0}
-              max={SUMMARY_LIMIT_MAX}
-              step={1}
-              placeholder="120"
-              value={summaryMax}
-              onChange={(e) => setSummaryMax(e.target.value)}
-              aria-invalid={limitInvalid(summaryMax, SUMMARY_LIMIT_MAX)}
-            />
-            <p className="text-muted-foreground text-xs">
-              {t("Longest finding summary shown in a message, 0–{max}. 0 = no truncation.", { max: SUMMARY_LIMIT_MAX })}
-            </p>
-          </div>
-          <div className="grid gap-2">
-            <Label htmlFor="n-assets-max">{t("Assets listed per finding")}</Label>
-            <Input
-              id="n-assets-max"
-              type="number"
-              min={0}
-              max={ASSETS_LIMIT_MAX}
-              step={1}
-              placeholder="3"
-              value={assetsMax}
-              onChange={(e) => setAssetsMax(e.target.value)}
-              aria-invalid={limitInvalid(assetsMax, ASSETS_LIMIT_MAX)}
-            />
-            <p className="text-muted-foreground text-xs">
-              {t("Most asset names listed for a finding, 0–{max}. 0 = no truncation (all assets listed).", { max: ASSETS_LIMIT_MAX })}
-            </p>
-          </div>
-          <div className="sm:col-span-2">
-            <Button onClick={saveGlobal} disabled={globalSaving}>
-              {t("Save global settings")}
-            </Button>
-          </div>
-        </CardContent>
-      </Card>
+      <GlobalSettingsCard
+        baseURL={baseURL}
+        setBaseURL={setBaseURL}
+        digestMin={digestMin}
+        setDigestMin={setDigestMin}
+        summaryMax={summaryMax}
+        setSummaryMax={setSummaryMax}
+        assetsMax={assetsMax}
+        setAssetsMax={setAssetsMax}
+        globalSaving={globalSaving}
+        saveGlobal={saveGlobal}
+      />
 
       <Tabs value={tab} onValueChange={(v) => setTab(v as "channels" | "deliveries")} className="flex flex-col gap-4">
         <TabsList>
@@ -440,196 +379,19 @@ export default function NotifyPage() {
         </TabsContent>
       </Tabs>
 
-      <Sheet open={open} onOpenChange={setOpen}>
-        <SheetContent side="right" className="w-full data-[side=right]:sm:max-w-lg">
-          <SheetHeader>
-            <SheetTitle>{editing ? editing.name : t("Add notification channel")}</SheetTitle>
-            <SheetDescription>
-              {KIND_LABEL[form.kind] ?? form.kind}
-              {" · "}
-              {defaultRate > 0 ? t("default rate limit {rate}/min", { rate: defaultRate }) : t("no rate limit")}
-            </SheetDescription>
-          </SheetHeader>
-
-          <div className="flex min-h-0 flex-1 flex-col overflow-y-auto px-4">
-            <div className="grid gap-4 py-4">
-              <div className="grid gap-2">
-                <Label>{t("Channel type")}</Label>
-                <Select
-                  value={form.kind}
-                  onValueChange={(v) => {
-                    // Switching type means switching to a different set of credential fields; the old config cannot be merged in.
-                    setF({ kind: v, config: {} });
-                  }}
-                  disabled={!!editing}
-                >
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {(meta?.kinds ?? []).map((k) => (
-                      <SelectItem key={k.kind} value={k.kind}>
-                        {KIND_LABEL[k.kind] ?? k.kind}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                {editing && (
-                  <p className="text-muted-foreground text-xs">
-                    {t("The channel type cannot be changed — a different type means a different set of credentials; create a new channel instead.")}
-                  </p>
-                )}
-              </div>
-
-              <div className="grid gap-2">
-                <Label htmlFor="n-name">{t("Channel name")}</Label>
-                <Input
-                  id="n-name"
-                  placeholder={t("Incident response group / Daily broadcast group")}
-                  value={form.name}
-                  onChange={(e) => setF({ name: e.target.value })}
-                />
-              </div>
-
-              {fields.length === 0 ? (
-                <p className="text-muted-foreground text-sm">
-                  {t("The form for this channel type is not defined yet (the frontend is missing a CHANNEL_FIELDS entry); add it and retry.")}
-                </p>
-              ) : (
-                fields.map((d) => (
-                  <ConfigField
-                    key={d.key}
-                    def={d}
-                    value={form.config[d.key]}
-                    isSecret={secretKeys.has(d.key)}
-                    onChange={(v) => setCfg(d.key, v)}
-                  />
-                ))
-              )}
-
-              <div className="grid gap-2">
-                <Label>{t("Delivery timing")}</Label>
-                <Select value={form.mode} onValueChange={(v) => setF({ mode: v as "realtime" | "digest" })}>
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="realtime">{t("Realtime · one message per finding")}</SelectItem>
-                    <SelectItem value="digest">{t("Digest · merged into one message per interval")}</SelectItem>
-                  </SelectContent>
-                </Select>
-                <p className="text-muted-foreground text-xs">
-                  {t("For \"realtime for High, digest for the rest\", create two channels: one realtime with a High threshold, one digest with no severity limit.")}
-                </p>
-              </div>
-
-              <div className="grid gap-2">
-                <Label htmlFor="n-rate">{t("Rate limit (messages/min)")}</Label>
-                <Input
-                  id="n-rate"
-                  type="number"
-                  min={0}
-                  placeholder={defaultRate > 0 ? String(defaultRate) : t("0 = unlimited")}
-                  value={form.ratePerMin}
-                  onChange={(e) => setF({ ratePerMin: e.target.value })}
-                />
-                <p className="text-muted-foreground text-xs">
-                  {t("Leave empty to use the channel default; 0 means no limit. Going over the limit never drops messages, only delays them.")}
-                </p>
-              </div>
-
-              <div className="border-t pt-4">
-                <p className="mb-3 text-sm font-medium">{t("Filter rules (empty = no filtering)")}</p>
-                <div className="grid gap-4">
-                  <div className="grid gap-2">
-                    <Label>{t("Minimum severity")}</Label>
-                    <Select
-                      value={form.minSeverity || "all"}
-                      onValueChange={(v) => setF({ minSeverity: v === "all" ? "" : v })}
-                    >
-                      <SelectTrigger>
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {SEVERITY_OPTIONS.map((o) => (
-                          <SelectItem key={o.value || "all"} value={o.value || "all"}>
-                            {o.label}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div className="grid gap-2">
-                    <Label htmlFor="n-inc">{t("Only these vulnerability types")}</Label>
-                    <Textarea
-                      id="n-inc"
-                      placeholder={"SQL injection\ncommand execution"}
-                      value={form.includeText}
-                      onChange={(e) => setF({ includeText: e.target.value })}
-                    />
-                    <p className="text-muted-foreground text-xs">
-                      {t("One keyword per line, matched case-insensitively as a substring. Leave empty for all types.")}
-                    </p>
-                  </div>
-                  <div className="grid gap-2">
-                    <Label htmlFor="n-exc">{t("Exclude these vulnerability types")}</Label>
-                    <Textarea
-                      id="n-exc"
-                      placeholder={"Information disclosure"}
-                      value={form.excludeText}
-                      onChange={(e) => setF({ excludeText: e.target.value })}
-                    />
-                    <p className="text-muted-foreground text-xs">{t("Exclusion beats inclusion: an item matching both is excluded.")}</p>
-                  </div>
-                  <div className="grid gap-2">
-                    <Label htmlFor="n-tasks">{t("Restrict to task IDs")}</Label>
-                    <Input
-                      id="n-tasks"
-                      placeholder="1, 2, 3"
-                      value={form.taskIDsText}
-                      onChange={(e) => setF({ taskIDsText: e.target.value })}
-                    />
-                  </div>
-                  <div className="grid gap-2">
-                    <Label htmlFor="n-assets">{t("Restrict to asset IDs")}</Label>
-                    <Input
-                      id="n-assets"
-                      placeholder="10, 11"
-                      value={form.assetIDsText}
-                      onChange={(e) => setF({ assetIDsText: e.target.value })}
-                    />
-                    <p className="text-muted-foreground text-xs">{t("Empty task/asset = no restriction; when filled, the finding must intersect them.")}</p>
-                  </div>
-                  <div className="flex items-center gap-2 text-sm">
-                    <Switch
-                      checked={form.onStatusChange}
-                      onCheckedChange={(v) => setF({ onStatusChange: v })}
-                      aria-label={t("Include status changes")}
-                    />
-                    {t("Also push when a finding's status changes (realtime mode only)")}
-                  </div>
-                </div>
-              </div>
-
-              <div className="flex items-center gap-2 text-sm">
-                <Switch checked={form.enabled} onCheckedChange={(v) => setF({ enabled: v })} aria-label={t("Enable")} />
-                {t("Enable this channel")}
-              </div>
-            </div>
-
-            <div className="flex gap-2 pt-2 pb-6">
-              <Button onClick={saveForm} disabled={saving}>
-                {editing ? t("Save") : t("Add")}
-              </Button>
-              {editing && (
-                <Button variant="outline" onClick={testChannel} disabled={testing}>
-                  <SendIcon /> {t("Send test message")}
-                </Button>
-              )}
-            </div>
-          </div>
-        </SheetContent>
-      </Sheet>
+      <ChannelSheet
+        open={open}
+        setOpen={setOpen}
+        editing={editing}
+        form={form}
+        setF={setF}
+        setCfg={setCfg}
+        meta={meta}
+        saving={saving}
+        testing={testing}
+        saveForm={saveForm}
+        testChannel={testChannel}
+      />
     </div>
   );
 }

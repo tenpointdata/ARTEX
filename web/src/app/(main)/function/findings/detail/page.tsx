@@ -21,10 +21,10 @@ import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger } from "@
 import { Separator } from "@/components/ui/separator";
 import { SidebarTrigger } from "@/components/ui/sidebar";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { intlLocale, t } from "@/i18n";
 import { api } from "@/lib/api";
 import { statusMeta } from "@/lib/status";
 import type { Finding, FindingReportState, FindingStatus, Severity } from "@/lib/types";
-import { intlLocale, t } from "@/i18n";
 
 import {
   FINDING_REPORT_STATES,
