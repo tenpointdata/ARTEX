@@ -139,7 +139,7 @@ const must = (name, ok, detail) => {
     check("imports list pages (limit=1, total)", latest.imports.length === 1 && latest.total >= 1, `total ${latest.total}`);
 
     // ---- Past imports → that import's findings ----
-    await page.locator(`#import-${importId}`).getByRole("link", { name: String(newCount) }).click();
+    await page.locator(`#import-${importId}`).getByRole("link", { name: `Show the ${newCount} new findings of import #${importId}` }).click();
     await page.waitForURL((u) => u.searchParams.get("import_id") === String(importId), { timeout: 30000 });
     await page.waitForLoadState("networkidle");
     check("import filter chip shown", await page.getByText(`Import #${importId}`).isVisible());
