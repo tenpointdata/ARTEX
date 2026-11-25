@@ -109,6 +109,7 @@ var rbacPolicy = []policyRule{
 	{http.MethodGet, "/api/workspace/read", false, permOperate},
 	{http.MethodGet, "/api/llm/records", true, permOperate},
 	{http.MethodGet, "/api/logs", true, permOperate},
+	{http.MethodGet, "/api/settings/nodes", false, permOperate}, // node host names (E7)
 	// Raw recorded traffic carries the Authorization headers and cookies the
 	// agents used; conversation messages echo them. Host and list summaries stay read.
 	{http.MethodGet, "/api/traffic/exchange", false, permOperate},
@@ -122,8 +123,9 @@ var rbacPolicy = []policyRule{
 
 	// --- read: live retests across every client ---
 	{http.MethodGet, "/api/exploration/findings/retests/active", false, permRead},
-	// A finding's tracker tickets and raw scanner record are operator data, not
-	// the client summary: kept out of the client_read findings prefix below.
+	// --- read: a finding's tracker tickets and scanner-import provenance are
+	// internal (tracker URLs, import files); the client_read findings prefix
+	// below must not reach them (E2 × E5). ---
 	{http.MethodGet, "/api/exploration/findings/{id}/integrations", false, permRead},
 
 	// --- client_read: the allowlist for the client-facing role. Each route

@@ -1,6 +1,6 @@
 # HANDOFF.md — ARTEX
 
-**Last updated:** 2026-11-24 15:58 MST, by claude-code: c-2d91eb (E2 UI follow-ups, now in review; board cards c-1198a2 and c-119206 opened) on a branch that merges the unmerged E2 UI + backend branch (ej/20261124-132955-7aef3f), so landing it lands all of E2. Earlier hand-offs are under Deltas and in `ej handoff log`.
+**Last updated:** 2026-11-24 18:20 MST, by claude-code: c-620510 (E7, blocked on a human): real-cluster values, runbook and check-table script ready; the install itself needs a cluster and an LLM key. Earlier hand-offs are under Deltas and in `ej handoff log`.
 
 > Single entry point for whoever picks this up next (any agent or human), with no access to the
 > originating conversation. Read this first, then the sections of the code it points at.
@@ -59,6 +59,64 @@ See `docs/ARCHITECTURE.md` for the code-level map. Summary:
 
 ## Current state
 
+**2026-11-24 — Real-cluster install kit (`c-620510`, E7; blocked on a human).** On `ej/20261124-173856-b39c78`. `deploy/lab/values-multihost.yaml` (renders/lints), runbook
+`deploy/lab/README.md` "Real cluster", and `scripts/k8s-install-checks.sh NS [RELEASE]`, which prints the check
+table. Not run on any cluster.
+
+**2026-11-24 — E7 kind install (`c-8cfbfe`) + cluster egress deny re-resolved (`c-d4946f`); in review on
+`ej/20261124-172839-c17308`, which merges the c-8cfbfe branch.** `egress.sh` re-resolves the deny/allow names
+every 10 s and swaps the chain atomically; verified live on kind. Detail: `docs/handoff/2026-11-24-e7-kind-install-egress.md`.
+
+**2026-11-24 — Stale `worker_nodes` rows pruned (`c-597b06`, E7; in review).** Under Kubernetes the
+node id is the pod name, so each rollout left dead rows. `db.NodeRetention` (20 × NodeTTL = 15 min):
+`ListNodes` hides older rows and every node heartbeat runs `PruneNodes` (`db/worker_nodes.go`,
+`server/node.go`). Test `db/worker_nodes_test.go` passes on Postgres 18; documented in
+`docs/DISTRIBUTED.md` ("Node registry"). Not re-run on a kind cluster.
+
+**2026-11-24 — TLS between worker nodes and the control node by default (`c-548e8b`, E7; in review).**
+Worker nodes reach the control API (node RPC) over **TLS with the CA pinned**: `ARTEX_CONTROL_CA`
+(`server/node_tls.go`) makes the worker accept only `https://` and trust only that CA, never the system
+roots; without it an `http://` API still works with a start-up WARNING. The control listener rereads a
+renewed `ARTEX_TLS_CERT`/`KEY` within 30 s (`cmd/artex/certreload.go`). Helm: `controlTLS.enabled=true`
+by default, `source` = `generate` (chart-made CA via `lookup`) | `secret` | `certManager`; HTTPS probes,
+`appProtocol: https`, nginx backend-protocol annotation; worker pods mount only the CA key. Compose
+overlay: one-shot `artex-tls-init` runs the new `artex node-tls` subcommand (CA + pair, CA key
+discarded) into separate volumes. Docs: `docs/DISTRIBUTED.md` "Transport", chart README.
+**This branch merges the unmerged c-3b781a branch (`ej/20261124-155351-f5bfb9`), which carries E7, so
+landing it lands E7 + c-3b781a.** Verified: `TestWorkerNodeFindingBindsControlCapture` now runs its
+control API over pinned TLS (Postgres 16, passes); `TestControlRPCPinnedCA` (wrong CA and system roots
+refused), cert reload and `node-tls` tests; `helm lint` and `helm template` in all three sources plus
+disabled and the error cases; a chart-generated cert verified by the pinned Go client;
+`docker compose config` of the overlay; `scripts/verify.sh` passed. Full `go test ./server` with
+Postgres: only the known macOS SOCKS5 test and the order-dependent
+`TestFindingWorkflowAutoHintToPlannerAndSetting` (passes alone) failed. **Not checked:** a live
+`helm install` (c-8cfbfe) or a live compose run with a built image. **Still clear text:** the
+worker→control recording-proxy hop (plain-HTTP targets and the scope token), carded `c-677166`.
+
+**2026-11-24 — Worker-node findings carry their captured proof (`c-3b781a`, E7; in review).** A
+worker-node finding binds the control capture through a signed node RPC (`POST /api/node/rpc/{op}`,
+`server/node_rpc.go`, HMAC under `db.NodeRPCKey`); design in `docs/DISTRIBUTED.md` "Evidence on worker
+nodes", verification in Deltas. Gap `c-7ad4da` (capture switch read at start-up) is closed by c-8cfbfe.
+
+**2026-11-24 — E10 code-security lane + its UI and exports (`c-72dd9d`, `c-d059ae`; in review)** on
+`ej/20261124-170322-736db7`, which merges the unlanded E10 branch `ej/20261124-150533-1ba29e` and main
+(E2 backend + UI are on main as migration 0015). **Land this branch, not the E10 branch alone.**
+- E10: SARIF imports get a lane (`runtime`/`sast`/`sca`); a task import with `asset_ids` writes an
+  exploration fact yielding a finding node per new finding; `GET /api/report` shows a Source line and
+  per-lane counts. Migration `0024_code_security_lane.sql` (E10's renumber of E2 to 0023 is dropped).
+- c-d059ae: `?lane=runtime|sast|sca` in the shared findings filter (list, groups, tree, export;
+  runtime = worker findings + runtime-scanner imports); finding DTOs carry `source` (lane, tool, rule,
+  path:line, import id; no raw record); findings Markdown exports get the Source line and CSV gets
+  Lane/Source Tool/Source Rule/Source Location/Import ID; import rows carry `lane_counts`.
+- Web: lane badge + `path:line` on the findings table and detail, a lane dropdown (URL `?lane=`), an
+  anchor-asset picker on Scanner imports (enabled once a task is chosen; lists `GET /assets?task_id=`),
+  and Lanes + Fact node columns on Past imports.
+- Verified on Postgres 16: `TestFindingFilterByLane`, `TestCodeScanJoinsTaskGraphAndReport` (now also
+  lane filter, DTO source, CSV/MD exports, unknown anchor leaves no import row), `report` tests;
+  `scripts/verify.sh` (only the known macOS SOCKS5 test fails) and `--web-only` pass. Not checked in a
+  browser. Gaps: `c-7651e5` (stat cards ignore lane/import filters; fact node has no deep link).
+- Detail of E2 and E10 (formats, decisions, verification): `docs/handoff/2026-11-24-e2-e10-integrations.md`.
+
 **2026-11-24 — SSE 401 after console login (`c-13e86c`, fixed; pre-E5).** Streams are same-origin only
 (`web/src/lib/sse.ts`), dev gzip off, `openSSE` writes `: open`. Test `server/activity_stream_auth_pg_test.go`;
 browser-checked on the E5 stack.
@@ -87,11 +145,7 @@ Browser-checked in headless Chromium against a real backend + Postgres 17: a cli
 companies lands on Reports, sees only Reports + Findings and a switcher with just its two companies,
 switches between them and reads each one's findings and report; all 51 `/api` responses were 200.
 
-**2026-11-24 — E5 web UI (`c-869050`, in review)** on `ej/20261124-132958-94f4bf` (carries E5 + client_read).
-`/system/users`, task **Authorization** tab, Approval Records **Chain** tab with Verify; sidebar filtered by
-`useCan` (`web/src/hooks/use-session.tsx`); 403 never logs out (`web/src/lib/api-errors.ts`); login takes any
-username. Browser-tested as admin, reviewer and client_read against a real backend. Open: `c-92bb52`,
-`c-7c4715`, `c-601ec6`.
+**2026-11-24 — E5 web UI (`c-869050`, in review).** Detail moved to `docs/handoff/2026-11-24-e5-web-ui.md`.
 
 **2026-11-24 — E5 web UI (`c-869050`, then `c-92bb52`)** — `/system/users`, task **Authorization** tab,
 Approval Records **Chain** tab; sidebar filtered by `useCan` (`web/src/hooks/use-session.tsx`); a 403 never
@@ -137,36 +191,9 @@ the backend `ej/20261124-055326-6bcfa9`, so landing it lands all of E2. See `doc
 - Local `./server` failures that are environment, not code: `TestConnectWithoutPasswordRealPG` (trust-auth Postgres)
   and the SOCKS5 test that needs a `127.0.0.2` alias.
 
-**2026-11-24 (c-d25ff9, E3)** — The `RSI.md` Loop C benchmark gate and Loop B lesson graduation are built,
-flag off (`ARTEX_RSI_LOOP`, default off, read per request). Pure core `rsi/` (search-space allowlist:
-`prompt_body` for goals/planner/worker and `lesson`; immutable and git-reviewed surfaces refused;
-annealed budget 4,2,1,1…; `Evaluate` recomputes per-gate and paired results from raw E8 arm records,
-binds them to the exact body sha / lesson set, refuses proposed-from targets, net regressions and
-gains on fewer than 2 targets). API `/api/rsi/*` (`server/rsi_loop.go`); migration **0020**
-(`rsi_proposals`, `rsi_proposal_evidence`, append-only `rsi_adoption_log`). Adoption = owner
-password + newest passing evidence id + evidence baseline equal to the live prompt; it appends an
-`agent_prompts` version; rollback is a pointer change (refused if an owner edited since, open
-with the flag off). `ARTEX_RSI_LESSONS` gains `adopted` (only graduated lessons) and `bench` (a
-pinned set, `PUT /api/rsi/bench-lessons`). This branch merges the unmerged E8 suite branch
-(`ej/20261124-084655-ccdab2`); harness gains lesson arms and `scripts/benchmark/rsi_submit.py`.
-An adversarial review (opus) found real-upload breakage (string task ids) and replay/forgery
-paths; fixed here: task ledger across proposals, `suite_run` invariant, 3 uploads per proposal,
-crashed candidate runs count as losses, rendered + normalized marker checks, ≤4 open proposals
-with forward-only rounds, split agent lock, lesson block sha and unedited-role shas re-checked at
-adoption. Remaining findings: `c-0d277f`. Verified: `go test ./rsi`, the RSI DB and server tests
-against Postgres 16, 65 benchmark Python tests, `scripts/verify.sh`. Not verified: any live suite run through the gate (`c-772190`); no UI
-(`c-936308`).
+**2026-11-24 (c-d25ff9, E3)** — RSI Loop C gate and Loop B lesson graduation built, flag off (`ARTEX_RSI_LOOP`). Detail moved to `docs/handoff/2026-11-24-e3-rsi-loops.md`.
 
-**2026-11-24 (c-c0bb07, E4)** — Methodology-driven coverage: OWASP WSTG 4.2 (97 tests) and the OWASP
-API Security Top 10 2023 are typed checklists in `methodology/` (data in `methodology/data/*.json`,
-embedded and validated). A task's applicable checklists come from its goal and description (no
-column). `db/coverage_methodology.go` scores them from the coverage ledger, findings (vulnclass)
-and intents citing an item (`payload.methodology_item`). The planner gets a `[Methodology coverage]`
-block each round, and `add_intent` takes `methodology_item`, which is validated and stored as the
-canonical item id. `GET /api/tasks/{id}/coverage` returns `methodologies`, and the task overview's
-coverage card shows a filterable table of the items. Verified by the methodology, agent and
-db unit tests, a Postgres integration test (`TestMethodologyCoverage`), `tsc` and `scripts/verify.sh`.
-The UI was not checked in a browser.
+**2026-11-24 (c-c0bb07, E4)** — OWASP WSTG 4.2 and API Top 10 2023 checklists drive coverage (`methodology/`). Detail moved to `docs/handoff/2026-11-24-e4-methodology-coverage.md`.
 
 **2026-11-24 (c-75c593)** — The benchmark subject instance (`docker-compose.bench.yml`) now builds from a
 clean clone: production `Dockerfile`, a sibling Postgres, named volumes, committed `bench/.env.example`
@@ -182,21 +209,7 @@ is hash-chained by deferred row triggers (migrations 0016, 0018); `/api/intercep
 With `ARTEX_PG_DSN`, `go test ./...` fails only `TestGateOffTaskIsUnchanged` (`c-3157b4`),
 `TestConnectWithoutPasswordRealPG` (trust auth) and the macOS SOCKS5 UDP test.
 
-**2026-11-24 — client_read bound to companies (card `c-5b5421`, in review)** is on branch
-`ej/20261124-110647-182fa9`. That branch merged the E5 branch (PR #16) in, so it carries E5 too.
-- A `client_read` user sees only the companies in `artex_user_companies` (migration **0019**, audited at
-  commit). Admins set them with `GET/PUT /api/users/{id}/companies`. An unbound client gets 403.
-- `server/client_scope.go`: every route open to `client_read` has a binder that runs after the role
-  check. Findings routes go through the #425 company filter with `StrictCompany`, which ignores
-  agent-added `task_scope` rows. Tasks and ids outside the binding answer 404. A route without a binder
-  is refused, and `TestClientBindersCoverClientRoutes` enforces that. The test found
-  `findings/{id}/traffic` and its body route open to clients without a binder, so both are now bound.
-- A client's report counts only its own companies' assets, and its `/api/stats` drops the global
-  traffic and asset totals. `findings/retests/active` now needs `read`.
-- Tests: `server/client_scope_pg_test.go`, checked by mutation. `go test ./db ./server` with PG passes
-  except `TestConnectWithoutPasswordRealPG` (trust auth) and the SOCKS5 UDP test (macOS). verify.sh passes.
-- **Migration order:** 0016 (E5), 0018, 0019 (this branch), with E1 holding 0017. The loader refuses a
-  pending version older than an applied one, so renumber E1 above 0019 if it lands later.
+**2026-11-24 — client_read bound to companies (card `c-5b5421`, in review).** Detail (branch, verification, gaps) moved to `docs/handoff/2026-11-24-client-read-company-bindings.md`.
 
 **2026-11-23** — Fixes for the High and Medium findings from the 2026-11-23 security audit are on
 `main` (PR #1, branch `ej/20261123-145205-6a3af6`); the Linux/Docker verification fixes come from
@@ -244,28 +257,40 @@ body, through the versioned prompt API, and the starting bodies are restored aft
 ## Triage (next handful)
 
 **Agents' lane**
-1. *(unclaimed)* — **SEC: per-task uid follow-ups** (S each): `c-12df03` (single-uid start-up fails on a
+1. *(unclaimed)* — **E7: worker nodes miss other runtime control-node state** (M), card `c-6bcdd3`: LLM profiles,
+   MCP servers, custom tools and similar are rebuilt only at start. Done = each one is followed or listed in
+   DISTRIBUTED.md Limits.
+2. *(unclaimed)* — **SEC: per-task uid follow-ups** (S each): `c-12df03` (single-uid start-up fails on a
    socket; MCP uid not egress-filtered), `c-e70e5c` (release ended tasks at start-up; per-key lock). The "Done when" is on each card.
-2. *(unclaimed)* — **E5 UI: role probe of unreached pages** (S), card `c-80fe4e` (stream-messages view, detail
+3. *(unclaimed)* — **E5 UI: role probe of unreached pages** (S), card `c-80fe4e` (stream-messages view, detail
    pages, client_read). Then `c-601ec6` (chain newest-first paging, S). (`c-7c4715`, the client_read console, is in review on `ej/20261124-144554-67afc9`.)
-3. *(unclaimed)* — **SEC: gorilla/websocket bump, GO-2026-6278** (XS), card `c-c10f2c`; needs network.
+4. *(unclaimed)* — **SEC: gorilla/websocket bump, GO-2026-6278** (XS), card `c-c10f2c`; needs network.
    Done = govulncheck clean.
-4. *(unclaimed)* — **SEC: upstream-gate residuals** (M), card `c-5a6f96`: task-scoped rules on proxy
+5. *(unclaimed)* — **SEC: upstream-gate residuals** (M), card `c-5a6f96`: task-scoped rules on proxy
    dials, go-mitmproxy keep-alive host pinning, and the global-egress-proxy bypass. Done = a test or a decision for each.
-5. *(unclaimed)* — **SEC: logout revocation** (S), card `c-a0af33`. Done = a token replayed after
+6. *(unclaimed)* — **SEC: logout revocation** (S), card `c-a0af33`. Done = a token replayed after
    logout or a password change gets 401, by a test.
-6. *(unclaimed)* — **SEC: Docker Desktop named volumes** (S), card `c-775dc2`. Done = `docker compose up`
+7. *(unclaimed)* — **SEC: Docker Desktop named volumes** (S), card `c-775dc2`. Done = `docker compose up`
    starts on a Mac with the isolation self-test passing; Linux bind-mount path documented.
-7. *(unclaimed)* — **E1 Client-grade reporting & deliverables** (M). Turn `report/` into
+8. *(unclaimed)* — **E1 Client-grade reporting & deliverables** (M). Turn `report/` into
    CVSS/EPSS-scored, remediation-bearing, standards-mapped deliverables (OWASP ASVS/WSTG, MITRE
    ATT&CK). Done = a report export with per-finding CVSS vector + remediation + framework tags,
    covered by tests. Card `c-8f9cca`.
-8. *(unclaimed)* — **E2 UI: gate integrations controls by role** (S), card `c-119206`; the Integrations and
+9. *(unclaimed)* — **E2 UI: gate integrations controls by role** (S), card `c-119206`; the Integrations and
    imports pages are done (c-4ee114). Left: finding-detail Tickets/Push for reviewer, client_read check.
+
+10. *(unclaimed)* — **E2×E5 tracker RBAC** (S), card `c-5c4009`. Done = tracker create/update/delete
+   need admin (like notify channels), push/sync stay operator; RBAC tests pass.
+11. *(unclaimed)* — **Findings stat cards honour lane/import filters; fact-node deep link** (S), card
+   `c-7651e5`. Done = stat cards match the filtered list under `lane=`/`import_id=` (db test); the
+   Past imports fact node opens the task graph on that node.
 
 - *(unclaimed)* — **RSI gate hardening** (M), card `c-0d277f`: server-side per-task arm ledger, suite
   pre-registration, adopted-lesson retire sync. Done = Postgres tests for each.
 - *(unclaimed)* — **RSI gate web UI** (M), card `c-936308`. Done = adopt/rollback from a proposals table in ≤2 clicks + password.
+
+- *(unclaimed)* — **E7: TLS on the worker→control proxy hop** (M), card `c-677166`. Done = a plain-HTTP
+  target request from a worker crosses the network inside TLS; Helm/compose default to it.
 
 **Human lane**
 - **First live run through the RSI gate** (card `c-772190`, after `c-f1518c`): propose → held-out
@@ -282,6 +307,10 @@ body, through the versioned prompt API, and the starting bodies are restored aft
   whether tasks with an artifact must have the target gate forced on (card `c-f4115c` item 2), and
   whether the extra admin-only routes in `server/rbac_policy.go` (tools, MCP, agents, LLM config,
   notify) suit how operators work.
+
+- **E7 on a real multi-machine cluster with a real model** (card `c-620510`): separate hosts, a real CNI
+  with `networkPolicy.enabled`, an LLM key and an Ingress with TLS. Follow `deploy/lab/README.md` "Real cluster";
+  `scripts/k8s-install-checks.sh` prints the table to paste into docs/DISTRIBUTED.md.
 
 **Blocked**
 - **E2 browser e2e as a CI job** (S), card `c-1198a2`: blocked on c-cc25b6's SHA-pinned ci.yml landing. Done = a
@@ -332,6 +361,10 @@ Card ids in brackets:
 - **TEST** [`c-3157b4`] `TestGateOffTaskIsUnchanged` fails on main with Postgres (also fails before E5).
 - **E6** [`c-cb0093`] Cost/observability dashboard + OpenTelemetry export, building on existing context telemetry.
 - **E7** [`c-d60149`] Distributed/remote workers (queue-backed intents) for larger engagements; Helm chart.
+  Follow-ups: `c-3b781a` and `c-548e8b` (TLS to the control API) in review; `c-677166` (TLS on the
+  proxy hop), `c-29ff19`, `c-18f7a8`; `c-8cfbfe` (kind install recorded, in review; `c-7ad4da` closed by it).
+  From the install: `c-6bcdd3` (other state workers read only at start), `c-d4946f` (egress deny re-resolved;
+  in review), `c-597b06` (stale node rows; in review), `c-620510` (real multi-machine cluster, human).
 - **E8** [`c-5487e8`] Planner/worker evaluation suite (regression targets, prompt-version A/B via the benchmark gate).
 - **E9** [`c-73af97`] Frontend/UX pass (tables over cards, fewer-clicks triage workflow, live engagement dashboard).
 - **SEC** [`c-517c2d`] Live Playwright task check of the scope relay (human/bench: needs an LLM key and an authorized target).
@@ -356,16 +389,27 @@ Card ids in brackets:
   is on main (origin/main's has no `github-actions` entry).
 - **E8 follow-ups** [`c-f1518c`] first live run, [`c-75c593`] bench
   image from a clean clone, [`c-d73308`] optional provider sampling seed per LLM profile.
-- **E10** [`c-72dd9d`] Code-security testing lane (SAST/dependency ingest) feeding the same dual-graph + evidence model.
+- **E10** [`c-72dd9d`] Code-security lane: built 2026-11-24, in review (see Current state). Follow-ups:
+  [`c-d059ae`] lane in UI and exports (built, in review on `ej/20261124-170322-736db7`);
+  [`c-7651e5`] stat cards + fact-node link; [`c-c978e3`] SAST-guided runtime verification;
+  [`c-5c4009`] tracker RBAC (E2×E5).
 
 ## Known issues and gotchas
 
+- **bbot `portscan` (masscan) cannot run as the executor**: it needs raw sockets and fails setup with
+  `No such file or directory: 'sudo'`. This is by design (see Decisions, c-18c9c6); use `nmap -sT`.
 - **`next dev` writes `web/AGENTS.md`** (Next 16 agent rules) on start. Delete it before committing; it
   is not this repo's file.
 - **SSE in dev goes through the Next rewrite** (`/api/*` → `AUTOPENTEST_API`, default :8787). Keep
   `compress: false` in the dev branch of `web/next.config.mjs` and the `: open` comment in `openSSE`, or
   streams buffer or stay unopened in the browser.
 
+- **E2's migration is 0015 (on main); E10's lane columns are 0024.** The E10 branch
+  (`ej/20261124-150533-1ba29e`) had renumbered E2 to `0023_integrations.sql`, but E2 landed on main as
+  0015 and main's 0023 is `0023_distributed_workers.sql`, so c-d059ae's branch drops the renumber. Do
+  not land the E10 branch alone: land c-d059ae's branch (it carries E10). A dev database that applied
+  E10's `0023_integrations` refuses to start: `DELETE FROM schema_migrations WHERE version IN (23,24)`
+  (0015 and 0024 are idempotent) or drop it. Server tests use per-package databases (`artex_server`, `artex_db`, …).
 - **Migration 0020 (RSI) vs other branches' 0015–0019:** the runner refuses a pending migration older
   than the newest applied one, so merge 0015–0019 (E2, E5, E1, c-ba9f64, c-5b5421) before this branch
   reaches a database, or renumber 0020 forward at merge. `db/migrate_test.go` lists 0020 explicitly.
@@ -411,6 +455,55 @@ Card ids in brackets:
 
 ## Decisions
 
+- **2026-11-24** — c-8cfbfe / c-d4946f (cluster egress deny in `egress.sh`, re-resolved, atomic rebuild) and the socket-LB CNI gotcha: `docs/handoff/2026-11-24-e7-kind-install-egress.md`.
+- **2026-11-24** — c-18c9c6: bbot's `portscan` (masscan) stays **unsupported** for the executor
+  (option a); masscan does not get `cap_net_raw` (option b rejected). Two reasons. (1) It would not
+  work without weakening an invariant: the executor runs under no_new_privs (Docker's
+  `no-new-privileges` and ARTEX's own `setNoNewPrivs` in `server/execpriv_nnp_linux.go`), which
+  ignores file capabilities on execve. Making it work means lifting NNP or granting ambient caps to
+  the executor. (2) It would bypass the egress governor: masscan transmits through libpcap/AF_PACKET
+  with its own TCP/IP stack, and packet-socket frames skip netfilter's OUTPUT chain, so
+  `egress.sh`'s `-m owner --uid-owner` rules never see them. Cloud metadata, the host gateway and the
+  API port would be reachable, and raw sockets also allow forged source addresses. The bbot-recon
+  skill now says to use `nmap -sT` instead. Revisit only with a server-side (root) port-scan service
+  that applies the scope gate and egress denies itself, never by giving the executor raw sockets.
+- **2026-11-24** — c-548e8b: the worker pins the control API's CA (`ARTEX_CONTROL_CA`) rather than
+  trusting system roots, so a publicly valid certificate for the same name cannot impersonate the
+  control node. TLS covers the control API only; the recording-proxy hop stays HTTP for now because
+  agent tools cannot use a TLS proxy (needs a worker-side relay, c-677166). Plain `http://` still works
+  with a warning, for existing single-network deployments. Compose uses a new `artex node-tls`
+  subcommand because the runtime image has no openssl; it discards the CA key so nothing else can be
+  signed with it.
+
+- **2026-11-24** — c-3b781a: worker nodes reach the capture and evidence stores through a control-node
+  RPC (option a), not a Postgres capture index (c) or after-the-fact matching (b). (c) is a large
+  migration of the sqlite capture and its blob store. (b) binds by guesswork, which the evidence model
+  forbids. The RPC authenticates with a sub-key of `ARTEX_SECRET_KEY`, not the scope token: the token
+  rides in agent processes' proxy URL, so an agent's shell could have recorded or bound evidence past
+  the tool-layer checks. Record/bind/assess run the unchanged control-side code; every agent-side check
+  still runs on the worker first.
+- **2026-11-24 E10:**
+  - Code findings come in through the E2 SARIF import, not a new ingest path: one parser, and one
+    provenance table with a `lane` column, instead of a SAST-specific store.
+  - A task import writes into the task's exploration graph (a fact for the scan run that `yields`
+    finding nodes, `findings.node_id` set), so the existing report, planner tools and exports read one
+    record. No new node kind or edge relation, so no CHECK migration.
+  - Code is not a new asset type. Code findings anchor to existing runtime assets the operator
+    names (`asset_ids`), which is where a SAST and a runtime finding on one application meet. A
+    `repository` asset type can come later if a consumer needs it.
+  - Imported findings stay unverified leads: excluded from `findings_total`, and `prove_goal`
+    refuses them (no verified traffic). Only a reproduced worker finding proves a goal.
+  - SCA is classified from typed fields only (tool, advisory-style rule id, manifest file name).
+- **2026-11-24 E2:**
+  - Imported findings are scanner claims: `unverified`, POE 0, `worker=import:<tool>`. A known dedup
+    key leaves the existing finding untouched.
+  - Imports register no notification events, so bulk uploads do not flood the channels.
+  - Scanner free text goes only into quoted evidence; summary and name come from typed tokens.
+  - When both sides changed, the ticket sync lets the tracker win, because remediation is tracked
+    there.
+  - A tracker destination change drops its ticket links.
+  - Evidence goes into a ticket only when `include_evidence` is on, and then with credentials
+    redacted.
 - **2026-11-24 c-2d91eb (E2 follow-ups):**
   - This branch merges the unmerged E2 UI branch (which carries the backend) instead of waiting, as c-597eb6
     did. Landing it lands E2.
@@ -457,14 +550,7 @@ Card ids in brackets:
     Delete keeps its confirmation.
   - Integrations and Imports are System sidebar entries (the settings area), each one click away.
 - **2026-11-24 E2:**
-  - Imported findings are scanner claims: `unverified`, POE 0, `worker=import:<tool>`. A known dedup
-    key leaves the existing finding untouched.
-  - Imports register no notification events, so bulk uploads do not flood the channels.
-  - Scanner free text goes only into quoted evidence; summary and name come from typed tokens.
-  - When both sides changed, the ticket sync lets the tracker win, because remediation is tracked
     there.
-  - A tracker destination change drops its ticket links.
-  - Evidence goes into a ticket only when `include_evidence` is on, and then with credentials
     redacted.
   - Migration 0015 was edited in place before any release, because it was never on main.
 
@@ -595,22 +681,22 @@ Card ids in brackets:
 ## Deltas
 
 <!-- composite:deltas · newest first; Composite rewrites this block on every merge (ej handoff merge / merge_handoff) -->
-- **2026-11-24 15:58 MST** · claude-code · `ej/20261124-150516-d78c96` `f1ec47a`→`9fdfa3b` (4 commits) · `h-0548f2` — c-2d91eb (E2 UI follow-ups, now in review; board cards c-1198a2 and c-119206 opened) on a branch that merges the unmerged E2 UI + backend branch (ej/20261124-132955-7aef3f), so landing it lands all of E2. (1) Findings filter by import: db.FindingFilter.ImportID (an EXISTS on the finding_import_sources primary key), parsed from ?import_id= in the shared filter, so it applies to the list, groups, asset tree and export. The findings page shows an "Import #N" chip that clears it, and each Past imports row's New findings count links to its findings. (2) A committed browser e2e: scripts/e2e/integrations.sh (throwaway Postgres, the backend, a Next production build, Playwright) runs integrations-e2e.js against fake-github.js. 24/24 checks passed locally, including exactly the import's findings (3 of 7). (3) The imports list pages: limit/offset → {imports, total}, with TablePagination. Also fixed an E2×E5 merge gap: GET /findings/{id}/integrations was open to client_read with no binder; it now needs read, and tracker CRUD needs admin. Verified: db and server PG tests (only the known environment failures), verify.sh --web-only, and the e2e. **Next:** Land ej/20261124-150516-d78c96 (it carries the E2 backend, UI and these follow-ups). c-119206: role-gate the E2 UI controls. c-1198a2: wire scripts/e2e/integrations.sh into CI after c-cc25b6's pinned ci.yml lands. The E2 backend follow-ups c-da9198 and c-ea60a0 are unchanged. **Decided:** Merged the unmerged E2 UI branch rather than waiting. import_id matches the findings an import created; a dedup re-match does not claim them. Migration 0015 was not edited for an index (its checksum is enforced); the EXISTS on the primary key is enough. The import filter lives in the URL, not in saved preferences. E2 under E5: finding integrations need read, and tracker CRUD needs admin like notification channels; push, sync and import stay operate. The e2e uses next build + next start instead of embedding the UI. The CI job is deferred until the SHA-pinning branch lands.
-- **2026-11-24 15:56 MST** · claude-code · `ej/20261124-141024-67b6b6` at `81edb00`, no commits · `h-f62f2d` — c-4c8fd6 (E6 live check, now in review): built the E6 branch into an isolated compose stack (local Ollama with prices, nginx target on its own network, OTel collector via host.docker.internal). The cost page in headless Chromium lists tasks with a correct EUR cost; Task/Provider/Role/Model regroup without a reload; the URL keeps by/days. The collector got 51 spans = 51 ledger rows, one trace per task, and all four metrics. The egress filter refuses the collector to uid 10001 while the server exports. Gap: no single trace with planner and worker together (the local model never finished a planner intent). No code changed. **Next:** Land ej/20261124-123231-b78990 (E6, not on main yet) with c-f4a69d. c-990198: fix wall time (first_ts = min(ts - latency)). c-7361b4: goals role calling after a terminal status and 32k runaway outputs. Optionally repeat the trace check with a hosted model to see planner+worker spans in one trace. **Decided:** Ran the check from the unmerged E6 branch in an isolated stack (artex-e6check, port 18797), not on the running artex-artex-1 instance and without merging E6 into this branch: E6 is in review, and merging it here would land it on main uncontrolled. Used the local Ollama (keyless) after reading the blend gateway key from the keychain was denied. The target was an nginx container the stack itself ran, the only scope entry. The stack, volumes and image were removed afterwards. **Issues:** opened #c-7361b4, #c-990198.
-- **2026-11-24 15:30 MST** · claude-code · `ej/20261124-145313-129188` `f70fe41`→`33e6d6e` (1 commit) · `h-124b6f` — c-f4a69d (E6 follow-up, now in review; card c-888292 opened): the Cost & efficiency view now includes archived tasks. Archives record aggregate_stats.cost_cells (per profile, worker, model and UTC day: calls, errors, tokens, latency, first/last call), and db.CostBreakdown folds them in, so archived tasks appear in every dimension and day window. Older archives (token_profiles only) count under All by task/profile and are reported as archived_omitted elsewhere; the page says how many. GET /api/llm/cost returns a distinct `tasks` total, which the totals row uses instead of summing. New web test npm run test:cost (cost-metrics helpers) is in verify.sh; biome is clean on the cost files. This branch merges the unmerged E6 branch ej/20261124-123231-b78990, so landing it lands E6. The 2026-11-23 audit verification detail moved from Current state to docs/handoff/security-audit-2026-11-23.md to fit the size limit. Verified: TestCostBreakdownIncludesArchivedTasks and the archive round-trip on Postgres 16, verify.sh (only the known macOS 127.0.0.2 SOCKS5 test fails), the web tests, tsc and i18n. **Next:** c-4c8fd6: check the cost page in a browser against real LLM traffic, including an archived task. c-888292 (low): backfill cost_cells for archives made before this change. c-9ca57a (RBAC on cost routes) can rebase on main once this lands. **Decided:** Archived cost comes from a new additive archive aggregate (cost_cells) instead of reading cold archive files, so the view stays one DB read. Old archives are not backfilled: their per-profile totals are used where they fit and counted as omitted elsewhere, which the UI states. The server computes the distinct task total, because only it can dedupe a task across groups. first_ts/last_ts are nullable for groups with no call times.
+- **2026-11-24 17:39 MST** · claude-code · `ej/20261124-172839-c17308` `9c6a6a7`→`4d5d6e4` (1 commit) · `h-2932ac` — c-d4946f (E7, in review): the cluster egress deny now follows moved pods. egress.sh re-resolves ARTEX_EGRESS_DENY_HOSTS/ALLOW_HOSTS every ARTEX_EGRESS_REFRESH s (chart egress.refreshSeconds, default 10) in a loop start.sh starts. When an answer changes it rewrites ARTEX_EGRESS in one iptables-restore --noflush commit (also used at start). A name that stops resolving keeps its last addresses; NAME:PORT denies one TCP port. Chart: new headless <release>-control-pods (API port on the control pod IP); the PostgreSQL Service publishes not-ready addresses. Verified live on kind (own namespace, removed): after deleting artex-postgresql-0 (.13 → .14) and the control pod (.12 → .15), k8s-egress-probe.sh showed the executor refused at the new IPs, with 0 restarts. scripts/verify.sh passed. The branch merges the unlanded c-8cfbfe branch ej/20261124-155353-b1c60a. **Next:** Land ej/20261124-172839-c17308; it carries c-8cfbfe. Optionally test on a socket-LB CNI such as Cilium KPR, where denying the control pod IP may also refuse the proxy Service (gotcha in docs/handoff/2026-11-24-e7-kind-install-egress.md). **Decided:** The re-resolve loop is in egress.sh rather than the Go server, so one code path writes the executor rules for Docker and Kubernetes. Rebuilds are atomic through iptables-restore --noflush. Unresolvable names keep their last addresses (fail closed). CIDR auto-detection was rejected: a pod has no portable source for the pod and Service CIDRs. Strict clusterCIDRs stays opt-in.
 - _Older hand-offs, a line each; `ej handoff log` has them whole:_
-- **2026-11-24 15:29 MST** · claude-code · `h-0c292e` — E9 (c-73af97). **Next:** Land this branch. **Issues:** opened #c-45c921, #c-4b7989, #c-f729e8.
-- **2026-11-24 15:21 MST** · claude-code · `h-683872` — c-92bb52 (E5 UI follow-up, closed; c-4ee114 opened): every existing web page now hides or disables the mutating controls the session's role lacks, per server/rbac_policy.go. **Next:** c-4ee114: re-probe with seeded rows (MCP, channels, LLM profiles, pending approvals, traffic exchange sheet, files, skills, hooks), hide the assets checkboxes without operate, switch credentials-tab…
-- **2026-11-24 14:52 MST** · claude-code · `h-6ea377` — c-13e86c fixed: the activity stream 401 after a console login predates E5. **Next:** Land with or after the E5 stack branches (c-f4115c, c-01377e).
-- **2026-11-24 14:24 MST** · claude-code · `h-8a2866` — c-ca2bd0 (E4 follow-up, now in review; board card c-aed5fd opened): an operator can choose a task's methodologies. **Next:** Land the E4 branch (ej/20261124-123222-d3dc8a) and this branch together.
-- **2026-11-24 13:51 MST** · claude-code · `h-ed4135` — c-597eb6 (now in review; follow-up card c-2d91eb opened): built the E2 web UI, and merged the unmerged E2 backend branch ej/20261124-055326-6bcfa9 so both land together. **Next:** c-2d91eb: an import_id filter on the findings list so each import links to its findings; commit the browser e2e scenario as a script; pagination for the imports list.
-- **2026-11-24 13:50 MST** · claude-code · `h-2d8bcf` — c-f4115c (now in review): closed the six E5 artifact lifecycle gaps on a branch that merges the E5 + client_read branch (ej/20261124-110647-182fa9, PR #16). **Next:** Land PR #16 (E5) and c-5b5421's branch first, then this branch.
-- **2026-11-24 13:46 MST** · claude-code · `h-7f6f23` — c-869050 (now in review): web UI for E5. **Next:** c-92bb52: gate mutating controls on existing pages by role (reviewer currently sees Interception Rules edit controls). **Issues:** opened #c-601ec6, #c-7c4715, #c-92bb52.
-- **2026-11-24 13:36 MST** · claude-code · `h-59bfe6` — c-9b48b7: confirmed go-mitmproxy keep-alive host pinning is still unfixed through v1.9.5 (= upstream main 07e0ca5), and no upstream report exists. **Next:** Ian: approve filing (human lane).
-- **2026-11-24 13:26 MST** · claude-code · `h-4efcbc` — c-965b0e done and c-775dc2 landed: merged the unmerged branch ej/20261123-192351-fab3f4 (named volumes, exit 78, start.sh idle hold e1d7a27) and added an image HEALTHCHECK that is unhealthy while start.sh holds on an isolation refusal (root-only marker /run/a… **Next:** Run docker-compose.bind.yml on a real Linux host (human lane).
-- **2026-11-24 13:25 MST** · me · `h-7df71f` — c-7e0087 (now in review): each ARTEX server's agent egress floor has its own chain, ARTEX_AGENT_FLOOR_<exec uid>, with jumps tagged artex-floor-<exec uid>. **Next:** Land c-b73542 (ej/20261124-113533-f16c00), then c-02e554 (ej/20261124-122709-d136a7), then this branch.
-- **2026-11-24 13:13 MST** · claude-code · `h-7925fc` — c-9ca57a built and verified on branch ej/c-9ca57a-llm-cost-rbac (pushed, commit 7d6b4cf, no PR), stacked on the client_read branch ej/20261124-110647-182fa9 (carries E5 / PR #16) and E6 (PR #28), because neither has landed on main. **Next:** After PR #16, the c-5b5421 branch and PR #28 land: merge main into ej/c-9ca57a-llm-cost-rbac (only HANDOFF.md should conflict; the stacked branch kept stale HANDOFF copies), run scripts/verify.sh and…
-- **2026-11-24 13:03 MST** · claude-code · `h-ce7d36` — E3 (c-d25ff9, now in review): built the RSI.md Loop C benchmark gate and Loop B lesson graduation, with ARTEX_RSI_LOOP off by default. **Next:** c-0d277f (hardening: a server-side per-task arm ledger, suite pre-registration, sync for retired adopted lessons). **Issues:** opened #c-0d277f, #c-772190, #c-936308, #c-c89f5b.
+- **2026-11-24 17:39 MST** · claude-code · `h-50b1c4` — c-81193b (now in review): the finding detail hides controls the role is refused. **Next:** Land this branch (it carries c-119206).
+- **2026-11-24 17:30 MST** · claude-code · `h-8ce710` — c-597b06 (E7, in review): stale worker_nodes rows no longer pile up under Kubernetes. **Next:** Land this branch with E7.
+- **2026-11-24 17:28 MST** · claude-code · `h-1cba84` — c-45c921 (now in review), on a branch that merges the unlanded E9 branch (ej/20261124-145257-79147f), so landing it lands E9 too. **Next:** Land ej/20261124-170157-3aeba5; it carries E9.
+- **2026-11-24 17:26 MST** · claude-code · `h-1e1166` — c-c18f43 (mechanism landed on this branch; renumbering stays open per landing): scripts/check-migration-versions.sh (+ self-test, verify.sh step, PR-only CI job migration-versions) fails a migration not numbered above main's newest, duplicates, and edited/rem… **Next:** As each branch lands, renumber its migration above main's newest (Known issues lists them: 0017_finding_classification, 0021_lesson_scope_scrub, 0023_finding_import_links, 0023_change_notify, one of…
+- **2026-11-24 17:21 MST** · claude-code · `h-c66079` — c-cea6ac (now in review): explained and fixed why c-4c8fd6 task 2 was `done` mid-decomposition. **Next:** Land ej/20261124-170856-f6245f.
+- **2026-11-24 17:21 MST** · claude-code · `h-585760` — c-119206 (now in review; card c-81193b opened): E2 integrations UI gates its controls by role with useCan, matching server/rbac_policy.go — tracker add/edit/delete/enable admin; Sync, Push to tracker (bulk + detail) and the scanner import form operate; the fi… **Next:** c-81193b: hide Start retest, Link traffic and the severity/status/report-stage pickers on the finding detail for client_read (extend roles-e2e.js client block).
+- **2026-11-24 17:18 MST** · claude-code · `h-5e6f9c` — c-d059ae (now in review; card c-7651e5 opened): the E10 lane is visible and filterable outside the task report. **Next:** Land ej/20261124-170322-736db7 (it carries E10); do not land the E10 branch alone.
+- **2026-11-24 17:17 MST** · claude-code · `h-adc4a6` — c-0d277f (RSI gate hardening, now in review; card closed): evidence is checked against the server's own records. **Next:** c-936308 (RSI gate web UI: show suite runs and the new log actions).
+- **2026-11-24 17:14 MST** · claude-code · `h-917e8c` — c-1d3e0a (E7, now in review; cards c-c18f43 and c-20c400 opened), on a branch that merges the unmerged E7 branches ej/20261124-164948-393f2a (c-18f7a8 stack) and ej/20261124-155353-b1c60a (c-8cfbfe). **Next:** Land the E7 stack with this branch on top.
+- **2026-11-24 16:45 MST** · claude-code · `h-aa4a90` — c-7361b4 (in review): the goals runtime refuses LLM calls on a terminal task, and an in-flight decomposition is cancelled when its task ends, so it writes no fallback goal. **Next:** c-83ae7b: per-role default output caps for planner/worker/mainagent/compactor. **Issues:** opened #c-83ae7b.
+- **2026-11-24 16:43 MST** · me · `h-c93187` — c-18f7a8 (E7 smaller gaps, now in review; branch merges the unmerged E7 branch ej/20261124-150525-1a95b3): browser MCP on worker nodes goes through a loopback credential relay (traffic.StartCredentialRelay) to ARTEX_CONTROL_PROXY with the run's scope token, c… **Next:** c-1d3e0a: worker delete-drain ack and LLM profile reload. **Issues:** opened #c-1d3e0a.
+- **2026-11-24 16:40 MST** · claude-code · `h-97338f` — c-548e8b (E7, now in review): worker nodes reach the control API (node RPC) over TLS with the CA pinned by default. **Next:** Land this branch (it carries E7 and c-3b781a). **Issues:** opened #c-677166.
+- **2026-11-24 16:40 MST** · claude-code · `h-55d7e2` — c-990198 (now in review): Cost & efficiency wall time now includes the first call's latency. **Next:** Land ej/c-990198-wall-time in place of (or after) ej/20261124-145313-129188; it lands E6 + c-f4a69d with it.
+- **2026-11-24 16:33 MST** · claude-code · `h-a38b70` — c-2af578 (card, now in review; follow-up card c-1229ff opened): the Docker image no longer runs `bbot --install-all-deps`. **Next:** c-1229ff: make the pinned tools and bbot.yml visible to executor-run scans (per-run HOME).
 <!-- /composite:deltas -->
 
 _(written by `merge_handoff`)_

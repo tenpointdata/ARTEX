@@ -13,5 +13,8 @@ func TestMain(m *testing.M) {
 	db.SuffixTestDatabase("intercept")
 	// A short poll keeps the cross-instance tests fast; production uses 2 s.
 	targetPollInterval = 50 * time.Millisecond
+	// Check the rules revision on every read, so a change made through a
+	// second Interceptor is seen on the next call (rules_cache.go).
+	rulesRevisionTTL = 0
 	os.Exit(m.Run())
 }

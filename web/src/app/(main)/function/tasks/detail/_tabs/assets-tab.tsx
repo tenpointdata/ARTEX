@@ -40,8 +40,9 @@ import { useCan } from "@/hooks/use-session";
 import { t } from "@/i18n";
 import { api } from "@/lib/api";
 import { errorText } from "@/lib/api-errors";
+import { parseCompanyScopeText } from "@/lib/company-scope";
 import { setVisibleInterval } from "@/lib/polling";
-import { taskAssetSourceLabel } from "@/lib/task-assets";
+import { assetLabel, firstText, taskAssetSourceLabel } from "@/lib/task-assets";
 import type { Asset, NewAssetType } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
@@ -67,29 +68,6 @@ const TABS: { key: NewAssetType; label: string; icon: LucideIcon }[] = [
   { key: "service", label: t("Service"), icon: LayoutTemplateIcon },
   { key: "endpoint", label: t("Endpoint"), icon: LinkIcon },
 ];
-
-function firstText(values: Array<string | undefined>, fallback: string): string {
-  return values.find((value) => value?.trim()) ?? fallback;
-}
-
-function assetLabel(asset: Asset): string {
-  switch (asset.type) {
-    case "root_domain":
-    case "subdomain":
-      return firstText([asset.domain], `#${asset.id}`);
-    case "ip":
-      return firstText([asset.ip], `#${asset.id}`);
-    case "app":
-      return firstText([asset.app_name, asset.url], `#${asset.id}`);
-    case "service": {
-      const host = firstText([asset.ip, asset.domain], "");
-      const address = [host, asset.port].filter((value) => value !== undefined && value !== "").join(":");
-      return firstText([asset.url, address, asset.service_name], `#${asset.id}`);
-    }
-    case "endpoint":
-      return firstText([[asset.method, asset.url].filter(Boolean).join(" ")], `#${asset.id}`);
-  }
-}
 
 function MethodBadge({ method }: { method: string }) {
   const normalized = method.toUpperCase();

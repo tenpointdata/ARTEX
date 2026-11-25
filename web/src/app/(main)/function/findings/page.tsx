@@ -78,6 +78,7 @@ import {
   VERIFICATION_STATUSES,
 } from "./_components/findings-table";
 import { ImportFilterChip, useImportFilter } from "./_components/import-filter";
+import { LaneFilterSelect, useLaneFilter } from "./_components/lane-filter";
 import { PushToTrackerSelect, useEnabledTrackers } from "./_components/push-to-tracker";
 import { errorText } from "@/lib/api-errors";
 
@@ -162,6 +163,8 @@ function FindingsPageInner() {
   const company = useActiveCompany();
   // Scanner imports → Past imports link here with ?import_id=N: only that import's findings.
   const { importId, clear: clearImportFilter } = useImportFilter();
+  // ?lane=runtime|sast|sca narrows every view, the export and the asset tree to one lane.
+  const { lane, setLane } = useLaneFilter();
   const [view, setView] = React.useState<FindingView>("flat");
   const [severity, setSeverity] = React.useState<"all" | Severity>("all");
   const [status, setStatus] = React.useState<"all" | FindingStatus>("all");
@@ -208,6 +211,7 @@ function FindingsPageInner() {
     query,
     company,
     importId,
+    lane,
   ]);
   const activeFilterFingerprint = React.useRef(filterFingerprint);
   activeFilterFingerprint.current = filterFingerprint;
@@ -362,6 +366,7 @@ function FindingsPageInner() {
           assetScope: activeAssetScope ?? undefined,
           company,
           importId,
+          lane,
         },
         ids: [...selectedIds],
       });
@@ -419,6 +424,7 @@ function FindingsPageInner() {
         assetScope: activeAssetScope ?? undefined,
         company,
         importId,
+        lane,
       });
       if (request !== flatRequest.current || activeFilterFingerprint.current !== requestFilter) return;
       setFlat({ items: result.items, total: result.total, loaded: true, loading: false });
@@ -431,6 +437,7 @@ function FindingsPageInner() {
     activeAssetScope,
     company,
     importId,
+    lane,
     filterFingerprint,
     flatPage,
     flatPageSize,
@@ -463,6 +470,7 @@ function FindingsPageInner() {
         sort,
         company,
         importId,
+        lane,
       });
       if (request !== assetTreeRequest.current || activeFilterFingerprint.current !== requestFilter) return;
       setAssetTree({
@@ -481,6 +489,7 @@ function FindingsPageInner() {
   }, [
     company,
     importId,
+    lane,
     filterFingerprint,
     reportState,
     severity,
@@ -510,6 +519,7 @@ function FindingsPageInner() {
         sort,
         company,
         importId,
+        lane,
       });
       if (request !== groupsRequest.current || activeFilterFingerprint.current !== requestFilter) return;
       setGroups(result.items);
@@ -521,6 +531,7 @@ function FindingsPageInner() {
   }, [
     company,
     importId,
+    lane,
     filterFingerprint,
     page,
     pageSize,
@@ -565,6 +576,7 @@ function FindingsPageInner() {
           sort,
           company,
           importId,
+          lane,
         });
         if (groupRequests.current[key] !== request || activeFilterFingerprint.current !== requestFilter) return;
         setGroupFindings((current) => ({
@@ -595,7 +607,19 @@ function FindingsPageInner() {
         }));
       }
     },
-    [company, filterFingerprint, importId, reportState, severity, status, verificationStatus, vulnclass, query, sort],
+    [
+      company,
+      filterFingerprint,
+      importId,
+      lane,
+      reportState,
+      severity,
+      status,
+      verificationStatus,
+      vulnclass,
+      query,
+      sort,
+    ],
   );
 
   React.useEffect(() => {
@@ -1082,6 +1106,7 @@ function FindingsPageInner() {
 
         <div className="flex flex-wrap items-center gap-2">
           <ImportFilterChip importId={importId} onClear={clearImportFilter} />
+          <LaneFilterSelect lane={lane} onChange={setLane} />
           <InputGroup className="w-full sm:w-72">
             <InputGroupInput
               type="search"

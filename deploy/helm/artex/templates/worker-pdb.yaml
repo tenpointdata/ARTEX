@@ -1,0 +1,13 @@
+{{- if and .Values.worker.enabled .Values.worker.pdb.enabled }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "artex.fullname" . }}-worker
+  labels:
+    {{- include "artex.labels" . | nindent 4 }}
+spec:
+  maxUnavailable: {{ .Values.worker.pdb.maxUnavailable }}
+  selector:
+    matchLabels:
+      {{- include "artex.selector" (dict "ctx" . "component" "worker") | nindent 6 }}
+{{- end }}

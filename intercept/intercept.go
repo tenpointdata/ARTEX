@@ -16,7 +16,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
 	"net"
 	"regexp"
 	"strconv"
@@ -209,12 +208,19 @@ type Completer func(ctx context.Context, profileID int64, system, user string) (
 type Interceptor struct {
 	db           *db.DB
 	mu           sync.RWMutex
-	cached       []compiledRule  // sorted by priority DESC; nil means not loaded yet
-	enabledTools map[string]bool // nil means not loaded yet
+	cached       []compiledRule  // sorted by priority DESC; valid only while loaded
+	enabledTools map[string]bool // valid only while loaded
+	loaded       bool            // cached and enabledTools hold a load (rules_cache.go)
 	loadFailed   bool            // the last load failed; its error has been logged
-	pending      *pendingManager
-	reviewer     Reviewer  // nil = freeform LLM fallback judge not wired
-	completer    Completer // nil = closed-question judge not wired
+	// The revision state of the cache (rules_cache.go). revision reads the
+	// shared rules revision; nil on a store-less interceptor.
+	revision  func() (int64, error)
+	cachedRev int64     // the revision the cache was loaded at
+	checkedAt time.Time // when cachedRev was last confirmed against the store
+	loadedAt  time.Time // when the cache was last loaded from the store
+	pending   *pendingManager
+	reviewer  Reviewer  // nil = freeform LLM fallback judge not wired
+	completer Completer // nil = closed-question judge not wired
 	// upstreamProxy reports whether target traffic leaves through an upstream
 	// egress proxy (nil = no). Injected by the server layer.
 	upstreamProxy func() bool
@@ -282,18 +288,12 @@ var defaultEnabledTools = []string{
 // New creates an Interceptor backed by d. The rule cache is lazy-loaded on
 // first use.
 func New(d *db.DB) *Interceptor {
-	return &Interceptor{db: d, pending: newPendingManager(),
+	i := &Interceptor{db: d, pending: newPendingManager(),
 		targets: dbTargetStore{d}, resolve: newResolveCache(systemResolver{}), dial: baseDial}
-}
-
-// Invalidate clears the in-memory rule cache and the enabled-tools cache.
-// The next call to Match or IsToolEnabled will reload from the database.
-// Call this after any CRUD operation on rules or tool config.
-func (i *Interceptor) Invalidate() {
-	i.mu.Lock()
-	i.cached = nil
-	i.enabledTools = nil
-	i.mu.Unlock()
+	if d != nil {
+		i.revision = d.InterceptRulesRevision
+	}
+	return i
 }
 
 // loadLocked reads the rules and the enabled-tools setting. It installs both or,
@@ -307,10 +307,7 @@ func (i *Interceptor) loadLocked() error {
 		val, ok, err = i.db.GetSetting("intercept_enabled_tools")
 	}
 	if err != nil {
-		if !i.loadFailed {
-			i.loadFailed = true
-			log.Printf("[intercept] the rule store cannot be read; every tool call is denied until it can: %v", err)
-		}
+		i.storeFailedLocked(err)
 		return err
 	}
 	i.loadFailed = false
@@ -334,6 +331,7 @@ func (i *Interceptor) loadLocked() error {
 
 	// Enabled-tools set from settings, falling back to hard-coded defaults.
 	i.enabledTools = enabledToolsFromSetting(val, ok)
+	i.loaded = true
 	return nil
 }
 
@@ -366,46 +364,21 @@ func enabledToolsFromSetting(val string, ok bool) map[string]bool {
 }
 
 func (i *Interceptor) rules() ([]compiledRule, error) {
-	i.mu.RLock()
-	if i.cached != nil {
-		out := i.cached
-		i.mu.RUnlock()
-		return out, nil
-	}
-	i.mu.RUnlock()
-
-	i.mu.Lock()
-	defer i.mu.Unlock()
-	if i.cached != nil {
-		return i.cached, nil
-	}
-	if err := i.loadLocked(); err != nil {
-		return nil, err
-	}
-	return i.cached, nil
+	rules, _, err := i.current()
+	return rules, err
 }
 
 // IsToolEnabled returns true if the named tool is in the intercept-enabled set
-// (i.e. it should enter the rule-matching path). Uses the same double-check lock
-// pattern as rules(). When the set cannot be loaded it answers true for every
-// tool, so the call reaches the rule path, where Match denies it.
+// (i.e. it should enter the rule-matching path). It reads the same revision-
+// checked cache as rules(). When the set cannot be loaded, or its revision
+// cannot be read, it answers true for every tool, so the call reaches the rule
+// path, where Match denies it.
 func (i *Interceptor) IsToolEnabled(name string) bool {
-	i.mu.RLock()
-	if i.enabledTools != nil {
-		v := i.enabledTools[name]
-		i.mu.RUnlock()
-		return v
+	_, tools, err := i.current()
+	if err != nil {
+		return true
 	}
-	i.mu.RUnlock()
-
-	i.mu.Lock()
-	defer i.mu.Unlock()
-	if i.enabledTools == nil {
-		if err := i.loadLocked(); err != nil {
-			return true
-		}
-	}
-	return i.enabledTools[name]
+	return tools[name]
 }
 
 // GetEnabledTools returns the ordered list of tool names that are currently
@@ -429,7 +402,9 @@ func (i *Interceptor) GetEnabledTools() ([]string, error) {
 }
 
 // SetEnabledTools persists the list of tool names that should enter the intercept
-// rule system, then invalidates the cache so the next call picks up the new list.
+// rule system, then invalidates the cache so the next call of every process
+// picks up the new list. An error from the invalidation is returned: the list
+// is saved, but other processes may not see it yet.
 func (i *Interceptor) SetEnabledTools(tools []string) error {
 	b, err := json.Marshal(tools)
 	if err != nil {
@@ -438,8 +413,7 @@ func (i *Interceptor) SetEnabledTools(tools []string) error {
 	if err := i.db.SetSetting("intercept_enabled_tools", string(b)); err != nil {
 		return err
 	}
-	i.Invalidate()
-	return nil
+	return i.Invalidate()
 }
 
 // Decision is the outcome of a successful rule match.
@@ -749,7 +723,7 @@ const builtinRulePrefix = "[built-in]"
 // rules matches nothing. When the rules cannot be loaded it returns a deny.
 func (i *Interceptor) MatchBuiltin(toolName string, input []byte) (Decision, bool) {
 	i.mu.RLock()
-	loaded := i.cached != nil
+	loaded := i.loaded
 	i.mu.RUnlock()
 	if !loaded && i.db == nil {
 		return Decision{}, false
@@ -800,9 +774,7 @@ func (i *Interceptor) SetRulesForTest(rules []db.InterceptRule) {
 	for _, n := range defaultEnabledTools {
 		tools[n] = true
 	}
-	i.mu.Lock()
-	i.cached, i.enabledTools = out, tools
-	i.mu.Unlock()
+	i.installForTest(out, tools)
 }
 
 func ruleMatches(r compiledRule, toolName string, input []byte) bool {
@@ -896,7 +868,7 @@ func (i *Interceptor) HandleAsk(ctx context.Context, convID int64, dec Decision,
 	// registered. Re-read after registration so that decision cannot be lost;
 	// later decisions will be delivered through ch.
 	if saved, err := i.db.GetInterceptDetail(pendingID); err == nil && saved != nil && saved.Status != "pending" {
-		return saved.Status == "allowed" || (saved.Audit != nil && saved.Audit.EffectiveAction == "allow")
+		return askAllowed(saved)
 	}
 
 	detail, _ := json.Marshal(map[string]any{
@@ -919,28 +891,23 @@ func (i *Interceptor) HandleAsk(ctx context.Context, convID int64, dec Decision,
 		taskEmit(activity)
 	}
 
-	if !dec.TimeoutEnabled {
-		// No timeout: wait indefinitely until user decides or worker stops.
-		select {
-		case allowed := <-ch:
-			return allowed
-		case <-ctx.Done():
-			_, _ = i.db.ResolveIntercept(pendingID, "denied", "deny", "work cancelled", "system")
-			_ = i.db.CompleteIntercept(pendingID, audit.RunID, audit.ToolUseID, "not_executed", "work cancelled before execution", false)
-			return false
+	// The decision arrives on ch when it is taken in this process, or is read
+	// from the row when another process (the control node) took it.
+	var timeout <-chan time.Time // nil: no timeout, wait until decided or cancelled
+	if dec.TimeoutEnabled {
+		secs := dec.TimeoutSeconds
+		if secs <= 0 {
+			secs = 60
 		}
+		timer := time.NewTimer(time.Duration(secs) * time.Second)
+		defer timer.Stop()
+		timeout = timer.C
 	}
-
-	secs := dec.TimeoutSeconds
-	if secs <= 0 {
-		secs = 60
-	}
-	timer := time.NewTimer(time.Duration(secs) * time.Second)
-	defer timer.Stop()
-	select {
-	case allowed := <-ch:
+	allowed, end := i.awaitAsk(ctx, pendingID, ch, timeout)
+	switch end {
+	case askDecided:
 		return allowed
-	case <-timer.C:
+	case waitRuleTimeout:
 		allowed := dec.TimeoutAction == "allow"
 		action := "deny"
 		if allowed {
@@ -952,12 +919,14 @@ func (i *Interceptor) HandleAsk(ctx context.Context, convID int64, dec Decision,
 		}
 		if !resolved {
 			detail, err := i.db.GetInterceptDetail(pendingID)
-			return err == nil && detail != nil && (detail.Status == "allowed" || (detail.Audit != nil && detail.Audit.EffectiveAction == "allow"))
+			return err == nil && detail != nil && askAllowed(detail)
 		}
 		return allowed
-	case <-ctx.Done():
+	case waitCancelled:
 		_, _ = i.db.ResolveIntercept(pendingID, "denied", "deny", "work cancelled", "system")
 		_ = i.db.CompleteIntercept(pendingID, audit.RunID, audit.ToolUseID, "not_executed", "work cancelled before execution", false)
+		return false
+	default: // waitGone: the row was deleted, nothing can approve it
 		return false
 	}
 }

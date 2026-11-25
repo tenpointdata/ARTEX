@@ -319,3 +319,28 @@ func TestValidatePassword(t *testing.T) {
 		})
 	}
 }
+
+// writeNewJWTKey never overwrites a key and leaves no temporary file behind.
+func TestWriteNewJWTKeyAtomicNoOverwrite(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, jwtKeyFilename)
+	key := []byte(strings.Repeat("k", 32))
+	if err := writeNewJWTKey(path, key); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeNewJWTKey(path, []byte(strings.Repeat("x", 32))); !os.IsExist(err) {
+		t.Fatalf("second write: %v, want an exists error", err)
+	}
+	got, err := os.ReadFile(path)
+	if err != nil || string(got) != string(key) {
+		t.Fatalf("key %q, %v", got, err)
+	}
+	fi, err := os.Stat(path)
+	if err != nil || fi.Mode().Perm() != 0o600 {
+		t.Fatalf("mode %v, %v", fi.Mode(), err)
+	}
+	entries, _ := os.ReadDir(dir)
+	if len(entries) != 1 {
+		t.Fatalf("dir holds %d entries, want only the key", len(entries))
+	}
+}

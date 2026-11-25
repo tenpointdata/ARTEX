@@ -1,0 +1,77 @@
+{{- $s := .Values.settings }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "artex.fullname" . }}
+  labels:
+    {{- include "artex.labels" . | nindent 4 }}
+data:
+  ARTEX_PG_HOST: {{ include "artex.pgHost" . | quote }}
+  ARTEX_PG_PORT: {{ include "artex.pgPort" . | quote }}
+  ARTEX_PG_USER: {{ include "artex.pgUser" . | quote }}
+  ARTEX_PG_DBNAME: {{ include "artex.pgDb" . | quote }}
+  ARTEX_PG_SSLMODE: {{ include "artex.pgSslmode" . | quote }}
+  ARTEX_JWT_KEY_DIR: /app/keys
+  {{- with .Values.llm.provider }}
+  ARTEX_LLM_PROVIDER: {{ . | quote }}
+  {{- end }}
+  {{- with .Values.llm.model }}
+  ARTEX_LLM_MODEL: {{ . | quote }}
+  {{- end }}
+  {{- with .Values.llm.baseUrl }}
+  ARTEX_LLM_BASE_URL: {{ . | quote }}
+  {{- end }}
+  {{- with .Values.llm.proxy }}
+  ARTEX_LLM_PROXY: {{ . | quote }}
+  {{- end }}
+  {{- with .Values.llm.privateEndpoints }}
+  ARTEX_LLM_PRIVATE_ENDPOINTS: {{ . | quote }}
+  {{- end }}
+  {{- with .Values.egress.filter }}
+  ARTEX_EGRESS_FILTER: {{ . | quote }}
+  {{- end }}
+  {{- with include "artex.egressDeny" . }}
+  ARTEX_EGRESS_DENY: {{ . | quote }}
+  {{- end }}
+  {{- with .Values.egress.allow }}
+  ARTEX_EGRESS_ALLOW: {{ . | quote }}
+  {{- end }}
+  {{- with include "artex.egressDenyHosts" . }}
+  ARTEX_EGRESS_DENY_HOSTS: {{ . | quote }}
+  {{- end }}
+  {{- if or (include "artex.egressDenyHosts" .) (include "artex.egressAllowHosts" .) }}
+  ARTEX_EGRESS_REFRESH: {{ .Values.egress.refreshSeconds | toString | quote }}
+  {{- end }}
+  {{- with include "artex.egressAllowHosts" . }}
+  ARTEX_EGRESS_ALLOW_HOSTS: {{ . | quote }}
+  {{- end }}
+  {{- with $s.trustedProxies }}
+  ARTEX_TRUSTED_PROXIES: {{ . | quote }}
+  {{- end }}
+  {{- with $s.untrustedBoundary }}
+  ARTEX_UNTRUSTED_BOUNDARY: {{ . | quote }}
+  {{- end }}
+  {{- with $s.updateCheck }}
+  ARTEX_UPDATE_CHECK: {{ . | quote }}
+  {{- end }}
+  {{- with $s.noiseProfile }}
+  ARTEX_NOISE_PROFILE: {{ . | quote }}
+  {{- end }}
+  {{- with $s.targetUserAgent }}
+  ARTEX_TARGET_USER_AGENT: {{ . | quote }}
+  {{- end }}
+  {{- with $s.budgets.taskTokens }}
+  ARTEX_TASK_BUDGET_TOKENS: {{ . | quote }}
+  {{- end }}
+  {{- with $s.budgets.taskTurns }}
+  ARTEX_TASK_BUDGET_TURNS: {{ . | quote }}
+  {{- end }}
+  {{- with $s.budgets.intentTokens }}
+  ARTEX_INTENT_BUDGET_TOKENS: {{ . | quote }}
+  {{- end }}
+  {{- with $s.budgets.intentTurns }}
+  ARTEX_INTENT_BUDGET_TURNS: {{ . | quote }}
+  {{- end }}
+  {{- range $k, $v := .Values.extraEnv }}
+  {{ $k }}: {{ $v | quote }}
+  {{- end }}

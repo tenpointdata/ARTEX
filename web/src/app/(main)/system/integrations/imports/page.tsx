@@ -18,9 +18,12 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { useCan } from "@/hooks/use-session";
 import { intlLocale, t } from "@/i18n";
 import { errorText } from "@/lib/api-errors";
-import { detectImportFormat, IMPORT_FORMATS, importFindingsHref } from "@/lib/integrations";
+import { detectImportFormat, IMPORT_FORMATS, importFindingsHref, laneCountEntries } from "@/lib/integrations";
 import { integrationsApi } from "@/lib/integrations-api";
 import type { ScanImport, ScanImportFormat, ScanImportOutcome } from "@/lib/types";
+
+import { LANE_META } from "../../../function/findings/_components/lane-badge";
+import { AnchorAssetPicker } from "./_components/anchor-asset-picker";
 
 const FORMAT_LABEL: Record<ScanImportFormat, string> = {
   "nuclei-jsonl": "Nuclei (JSONL)",
@@ -49,6 +52,7 @@ export default function ScanImportsPage() {
   const [format, setFormat] = React.useState<ScanImportFormat | "">("");
   const [detected, setDetected] = React.useState(false);
   const [taskId, setTaskId] = React.useState("");
+  const [anchorIds, setAnchorIds] = React.useState<number[]>([]);
   const [busy, setBusy] = React.useState(false);
   const [outcome, setOutcome] = React.useState<ScanImportOutcome | null>(null);
   const [imports, setImports] = React.useState<ScanImport[]>([]);
@@ -82,13 +86,15 @@ export default function ScanImportsPage() {
 
   const taskNum = taskId.trim() === "" ? undefined : Number(taskId);
   const taskInvalid = taskNum !== undefined && !(Number.isSafeInteger(taskNum) && taskNum > 0);
+  // Anchor assets belong to the chosen task, so a change of task drops them (the server answers 400 for the rest).
+  const anchorTask = taskNum !== undefined && !taskInvalid ? String(taskNum) : "";
   const tooLarge = (file?.size ?? 0) > MAX_IMPORT_BYTES;
 
   async function runImport() {
     if (!file || !format || taskInvalid || tooLarge) return;
     setBusy(true);
     try {
-      const out = await integrationsApi.importScan(file, format, taskNum);
+      const out = await integrationsApi.importScan(file, format, taskNum, anchorIds);
       setOutcome(out);
       toast.success(
         t("Imported {file}: {assets} assets, {new} new findings", {
@@ -98,6 +104,7 @@ export default function ScanImportsPage() {
         }),
       );
       setFile(null);
+      setAnchorIds([]);
       if (inputRef.current) inputRef.current.value = "";
       // The new import is the newest row: show page one (setPage(1) alone does not reload when already there).
       if (page === 1) load();
@@ -173,8 +180,15 @@ export default function ScanImportsPage() {
                   inputMode="numeric"
                   value={taskId}
                   aria-invalid={taskInvalid}
-                  onChange={(e) => setTaskId(e.target.value)}
+                  onChange={(e) => {
+                    setTaskId(e.target.value);
+                    setAnchorIds([]);
+                  }}
                 />
+              </div>
+              <div className="grid gap-2">
+                <Label>{t("Anchor assets (optional)")}</Label>
+                <AnchorAssetPicker taskId={anchorTask} value={anchorIds} onChange={setAnchorIds} />
               </div>
               <Button type="submit" disabled={!file || !format || taskInvalid || tooLarge || busy}>
                 <UploadIcon /> {busy ? t("Importing…") : t("Import")}
@@ -249,9 +263,11 @@ function ImportsTable({ imports, loaded }: { imports: ScanImport[]; loaded: bool
           <TableHead>{t("File")}</TableHead>
           <TableHead>{t("Tool")}</TableHead>
           <TableHead>{t("Task")}</TableHead>
+          <TableHead>{t("Fact node")}</TableHead>
           <TableHead className="text-right">{t("Records")}</TableHead>
           <TableHead className="text-right">{t("Assets")}</TableHead>
           <TableHead className="text-right">{t("New findings")}</TableHead>
+          <TableHead>{t("Lanes")}</TableHead>
           <TableHead className="text-right">{t("Known")}</TableHead>
           <TableHead className="text-right">{t("Info")}</TableHead>
           <TableHead>{t("By")}</TableHead>
@@ -260,7 +276,7 @@ function ImportsTable({ imports, loaded }: { imports: ScanImport[]; loaded: bool
       <TableBody>
         {imports.length === 0 && (
           <TableRow>
-            <TableCell colSpan={11} className="text-muted-foreground py-8 text-center text-sm">
+            <TableCell colSpan={13} className="text-muted-foreground py-8 text-center text-sm">
               {loaded ? t("No imports yet") : t("Loading…")}
             </TableCell>
           </TableRow>
@@ -287,6 +303,25 @@ function ImportsTable({ imports, loaded }: { imports: ScanImport[]; loaded: bool
             <TableCell className="font-mono text-xs">
               {im.task_id ? <Link href={`/function/tasks/detail?id=${im.task_id}`}>#{im.task_id}</Link> : "—"}
             </TableCell>
+            <TableCell className="font-mono text-xs">
+              {im.fact_node_id ? (
+                im.task_id ? (
+                  <Link
+                    href={`/function/tasks/detail?id=${im.task_id}`}
+                    title={t("Open task #{id}, where this import is recorded as fact node #{node}", {
+                      id: im.task_id,
+                      node: im.fact_node_id,
+                    })}
+                  >
+                    #{im.fact_node_id}
+                  </Link>
+                ) : (
+                  `#${im.fact_node_id}`
+                )
+              ) : (
+                "—"
+              )}
+            </TableCell>
             <TableCell className="text-right tabular-nums">{im.records}</TableCell>
             <TableCell className="text-right tabular-nums">{im.assets}</TableCell>
             <TableCell className="text-right tabular-nums">
@@ -302,6 +337,9 @@ function ImportsTable({ imports, loaded }: { imports: ScanImport[]; loaded: bool
                 im.findings_new
               )}
             </TableCell>
+            <TableCell className="text-xs whitespace-nowrap">
+              <LaneCounts importId={im.id} counts={im.lane_counts} />
+            </TableCell>
             <TableCell className="text-right tabular-nums">{im.findings_existing}</TableCell>
             <TableCell className="text-right tabular-nums">{im.informational}</TableCell>
             <TableCell className="text-xs">{im.imported_by}</TableCell>
@@ -309,5 +347,23 @@ function ImportsTable({ imports, loaded }: { imports: ScanImport[]; loaded: bool
         ))}
       </TableBody>
     </Table>
+  );
+}
+
+// LaneCounts renders "SAST 3 · SCA 1", each lane linking to that import's findings in the lane.
+function LaneCounts({ importId, counts }: { importId: number; counts: ScanImport["lane_counts"] }) {
+  const entries = laneCountEntries(counts);
+  if (entries.length === 0) return <span className="text-muted-foreground">—</span>;
+  return (
+    <>
+      {entries.map(({ lane, count }, i) => (
+        <React.Fragment key={lane}>
+          {i > 0 && <span className="text-muted-foreground"> · </span>}
+          <Link className="hover:underline" href={`${importFindingsHref(importId)}&lane=${lane}`}>
+            {LANE_META[lane].label} {count}
+          </Link>
+        </React.Fragment>
+      ))}
+    </>
   );
 }

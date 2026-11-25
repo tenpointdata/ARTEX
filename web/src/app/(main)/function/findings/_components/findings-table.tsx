@@ -37,6 +37,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Spinner } from "@/components/ui/spinner";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { intlLocale, t } from "@/i18n";
 import { statusMeta, type Tone, toneClasses } from "@/lib/status";
 import type {
   ActiveFindingRetest,
@@ -47,7 +48,8 @@ import type {
   VerificationStatus,
 } from "@/lib/types";
 import { cn } from "@/lib/utils";
-import { intlLocale, t } from "@/i18n";
+
+import { CodeLocation, LaneBadge } from "./lane-badge";
 
 export const SEVERITIES: Severity[] = ["critical", "high", "medium", "low"];
 
@@ -71,13 +73,7 @@ export const VERIFICATION_STATUSES: VerificationStatus[] = [
   "false_positive",
 ];
 
-export const FINDING_REPORT_STATES: FindingReportState[] = [
-  "none",
-  "submitted",
-  "accepted",
-  "rejected",
-  "duplicate",
-];
+export const FINDING_REPORT_STATES: FindingReportState[] = ["none", "submitted", "accepted", "rejected", "duplicate"];
 
 export const REPORT_STATE_META: Record<FindingReportState, { label: string; tone: Tone }> = {
   none: { label: t("Not submitted"), tone: "slate" },
@@ -297,7 +293,9 @@ export function FindingsTable({
                       <span className="truncate font-medium">{f.name || f.vulnclass || t("Uncategorized")}</span>
                     )}
                     <span className="truncate text-xs text-muted-foreground">{f.summary}</span>
+                    <CodeLocation source={f.source} />
                     <div className="flex flex-wrap items-center gap-1">
+                      <LaneBadge lane={f.source?.lane} />
                       <Badge variant="outline">{t("Traffic evidence: {count}", { count: f.traffic_count ?? 0 })}</Badge>
                       <VerificationBadge finding={f} />
                     </div>
