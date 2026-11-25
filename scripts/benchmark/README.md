@@ -266,6 +266,28 @@ python3 rsi_submit.py status
    version (prompt bodies) or the previous lesson status (lessons); neither
    needs a deploy.
 
+Automatic proposals (the critic, RSI.md rule 6). `artex-rsi-propose`
+(`cmd/artex-rsi-propose`, core in `rsi/propose`) drafts step 1 for you from closed
+live tasks. It reads `/api/tasks`, each closed task's `/outcome` and `/lessons`,
+`/api/skill-gaps` and the active goals/planner/worker bodies, and keeps a rule only
+when its signal holds on at least 2 closed tasks that span at least 2 companies or
+categories, and on a quarter of them. Each kept rule appends a fixed guidance
+paragraph (`## Field guidance`) to one role's active body; no live text (lesson
+cues, skill names, titles) enters a body, since live output is untrusted. It
+writes `round-<N>/<name>.json` + `.tmpl` arm files (with `proposed_from` set to
+`task:<id>` and a `rationale`) and `plan.json` (the drafts and every skipped rule
+with its reason), never more than the round's remaining budget from
+`GET /api/rsi/status` and the open-proposal cap. It refuses to run unless the
+server reports the loop on, stays in the newest round unless `--round` names the
+next one, and can only read and `POST /api/rsi/proposals`: it has no adopt path.
+
+```bash
+go build -o artex-rsi-propose ./cmd/artex-rsi-propose
+ARTEX_TOKEN=... ./artex-rsi-propose --artex-url http://localhost:8787 --out rsi-proposals   # dry run: files only
+ARTEX_TOKEN=... ./artex-rsi-propose --out rsi-proposals --post                              # also register them
+# then step 2 with --candidate rsi-proposals/round-<N>/<name>.json
+```
+
 Binding: the server ties evidence to the proposal. For a prompt body,
 `candidate.stamp.prompt_sha[target]` must equal the sha256 (first 16 hex) of the
 proposed body and every other role must match the baseline. For lessons,

@@ -13,6 +13,7 @@ import {
   summarizePush,
   summarizeSync,
   trackerDestination,
+  webhookURL,
 } from "./integrations.ts";
 import assert from "node:assert/strict";
 import fs from "node:fs";
@@ -164,4 +165,9 @@ test("anchorAssetIdsParam joins unique positive integer ids", () => {
   assert.equal(anchorAssetIdsParam([3, 1, 3, 2]), "3,1,2");
   assert.equal(anchorAssetIdsParam([0, -1, 1.5, 4]), "4");
   assert.equal(anchorAssetIdsParam([]), "");
+});
+
+test("webhookURL joins the origin and the tracker id", () => {
+  assert.equal(webhookURL("https://artex.example.com/", 7), "https://artex.example.com/api/hooks/trackers/7");
+  assert.equal(webhookURL("http://localhost:8787", 12), "http://localhost:8787/api/hooks/trackers/12");
 });

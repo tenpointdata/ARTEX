@@ -38,13 +38,7 @@ func rsiLoopOn() bool {
 
 // rsiForbiddenMarkers are strings of the code-owned prompt tails. A proposed
 // body that contains one could imitate or pre-empt a tail, so it is refused.
-var rsiForbiddenMarkers = []string{
-	"## Prior evidence from earlier tasks", // lesson block header (db.RenderLessons)
-	"ARTEX_DATA",                           // data envelope marker stem
-	"Data envelope (code-owned)",
-	"Extra duty: register the test asset scope", // goals scope tail (agent/goals.go)
-	"[Noise profile: ",                          // noise profile tail (agent/noise_profile.go)
-}
+var rsiForbiddenMarkers = agent.CodeOwnedTailMarkers
 
 const (
 	// rsiMaxOpen caps proposals that are open at once (proposed, passed, failed).
@@ -100,6 +94,7 @@ func (s *Server) rsiStatus(w http.ResponseWriter, r *http.Request) {
 		"git_reviewed":         rsi.GitReviewedSurfaces,
 		"immutable_surfaces":   rsi.ImmutableSurfaces,
 		"budget":               rsi.DefaultBudget,
+		"max_open":             rsiMaxOpen,
 		"budget_by_round":      []int{rsi.DefaultBudget.Edits(0), rsi.DefaultBudget.Edits(1), rsi.DefaultBudget.Edits(2), rsi.DefaultBudget.Edits(3)},
 		"policy":               rsi.DefaultPolicy,
 		"adoption_requires":    "owner password, loop on, newest evidence passed, baseline equals the live prompt",

@@ -74,13 +74,18 @@ func TestDialGuardAllowsLoopbackWhenOptedIn(t *testing.T) {
 }
 
 func TestIsBlockedDialIP(t *testing.T) {
+	t.Setenv(AllowLocalTargetsEnv, "")
 	blocked := []string{
 		"127.0.0.1", "127.1.2.3", "::1",
 		"169.254.169.254", // cloud metadata endpoint — the main reason this function exists
 		"169.254.1.1", "fe80::1",
 		"0.0.0.0", "::",
 		"224.0.0.1", "ff02::1",
-		"::ffff:127.0.0.1", // the IPv4-mapped form must be converted back before the check, otherwise it is a bypass
+		"::ffff:127.0.0.1",                                  // the IPv4-mapped form must be converted back before the check, otherwise it is a bypass
+		"10.0.0.5", "172.16.3.4", "192.168.1.10", "fd12::1", // private
+		"100.64.0.1", "198.18.0.1", // CGNAT / shared
+		"100.100.100.200", "fd00:ec2::254", "168.63.129.16", // metadata
+		"64:ff9b::a9fe:a9fe", // NAT64 to 169.254.169.254
 		"",
 	}
 	for _, s := range blocked {
@@ -88,16 +93,47 @@ func TestIsBlockedDialIP(t *testing.T) {
 			t.Errorf("%s should be rejected", s)
 		}
 	}
-	// RFC1918 private networks are **deliberately allowed**: self-hosted
-	// Mattermost / SMTP relays on an intranet are common legitimate uses. This
-	// assertion pins down the trade-off — if someone casually adds a private-net
-	// check in the future, this fails, forcing a conscious decision (instead of
-	// silently killing a batch of deployments).
-	allowed := []string{"10.0.0.5", "172.16.3.4", "192.168.1.10", "8.8.8.8", "2606:4700::1111"}
-	for _, s := range allowed {
+	for _, s := range []string{"8.8.8.8", "2606:4700::1111"} {
 		if isBlockedDialIP(net.ParseIP(s)) {
-			t.Errorf("%s should be allowed (private networks are common legitimate delivery targets)", s)
+			t.Errorf("%s is public and should be allowed", s)
 		}
+	}
+}
+
+// TestOptInAllowsPrivateButNeverMetadata pins the opt-in semantics: both env
+// names admit loopback / private / CGNAT, and neither admits link-local or
+// metadata addresses.
+func TestOptInAllowsPrivateButNeverMetadata(t *testing.T) {
+	for _, env := range []string{AllowLocalTargetsEnv, AllowPrivateTargetsEnv} {
+		t.Setenv(AllowLocalTargetsEnv, "")
+		t.Setenv(AllowPrivateTargetsEnv, "")
+		t.Setenv(env, "1")
+		for _, s := range []string{"127.0.0.1", "10.0.0.5", "192.168.1.1", "100.64.0.1"} {
+			if isBlockedDialIP(net.ParseIP(s)) {
+				t.Errorf("%s: %s=1 should allow %s", env, env, s)
+			}
+		}
+		for _, s := range []string{"169.254.169.254", "fe80::1", "100.100.100.200", "fd00:ec2::254", "0.0.0.0", "224.0.0.1"} {
+			if !isBlockedDialIP(net.ParseIP(s)) {
+				t.Errorf("%s: %s=1 must still reject %s", env, env, s)
+			}
+		}
+	}
+}
+
+// TestDialGuardRejectsHostnameResolvingToLoopback: a name is checked on the
+// resolved address at connect time (the DNS-rebinding defense), not by URL parse.
+func TestDialGuardRejectsHostnameResolvingToLoopback(t *testing.T) {
+	var hit bool
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		hit = true
+	}))
+	defer srv.Close()
+	u, _ := url.Parse(srv.URL)
+	t.Setenv(AllowLocalTargetsEnv, "")
+	_, err := doJSON(context.Background(), "GET", "http://localhost:"+u.Port()+"/", nil, nil)
+	if err == nil || hit {
+		t.Fatalf("localhost must be refused at dial time (err=%v hit=%v)", err, hit)
 	}
 }
 
@@ -117,7 +153,7 @@ func TestValidateHTTPURLRejectsLiteralPrivateTargets(t *testing.T) {
 	}
 	// Public addresses and private-network addresses pass as usual (private
 	// networks are left to the dial phase, which does not block them).
-	for _, raw := range []string{"https://oapi.dingtalk.com/robot/send", "http://10.0.0.9/hook"} {
+	for _, raw := range []string{"https://oapi.dingtalk.com/robot/send", "http://203.0.113.9/hook"} {
 		if err := validateHTTPURL(raw); err != nil {
 			t.Errorf("%s should pass validation: %v", raw, err)
 		}

@@ -353,7 +353,8 @@ func hostWithPort(host, scheme string) string {
 }
 
 // requireAuth wraps h with JWT validation.
-// /api/auth/*, /api/health, /api/ready and the node RPC (/api/node/rpc/) are exempt.
+// /api/auth/*, /api/health, /api/ready, the node RPC (/api/node/rpc/) and the
+// tracker webhooks (/api/hooks/trackers/) are exempt.
 // A state-changing request whose session is the cookie must be same-origin
 // (see sameOrigin), so that a foreign page cannot act with the operator's
 // session. Requests that carry a bearer token, and GET and HEAD, are not checked.
@@ -362,7 +363,10 @@ func (s *Server) requireAuth(h http.Handler) http.Handler {
 		p := r.URL.Path
 		// The node RPC authenticates itself (node_rpc.go: an HMAC under the
 		// deployment's node key, not a user session).
-		if strings.HasPrefix(p, "/api/auth/") || p == "/api/health" || p == "/api/ready" || strings.HasPrefix(p, nodeRPCPrefix) {
+		// A tracker webhook authenticates itself too (ticket_webhook.go: an
+		// HMAC of the body under the tracker's webhook secret).
+		if strings.HasPrefix(p, "/api/auth/") || p == "/api/health" || p == "/api/ready" || strings.HasPrefix(p, nodeRPCPrefix) ||
+			strings.HasPrefix(p, ticketWebhookPrefix) {
 			h.ServeHTTP(w, r)
 			return
 		}

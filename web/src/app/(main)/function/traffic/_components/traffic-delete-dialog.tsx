@@ -18,6 +18,8 @@ interface TrafficDeleteDialogProps {
   mode: DeleteMode | null; // null = closed
   deleting: boolean;
   selectedHosts: string[];
+  /** Number of checked exchanges, for the "exchanges" mode. */
+  exchangeCount: number;
   hostFilter: string;
   recordCount: number;
   onCancel: () => void;
@@ -28,6 +30,7 @@ export function TrafficDeleteDialog({
   mode,
   deleting,
   selectedHosts,
+  exchangeCount,
   hostFilter,
   recordCount,
   onCancel,
@@ -40,6 +43,7 @@ export function TrafficDeleteDialog({
     ? {
         all: t("Purge all traffic records?"),
         selected: t("Delete all traffic for the {count} selected targets?", { count: selectedHosts.length }),
+        exchanges: t("Delete the {count} selected exchanges?", { count: exchangeCount }),
         filter: t("Delete all traffic for this target?"),
       }[mode]
     : "";
@@ -70,6 +74,11 @@ export function TrafficDeleteDialog({
                   count: selectedHosts.length,
                   hosts: `${selectedHosts.slice(0, 3).join(", ")}${selectedHosts.length > 3 ? "…" : ""}`,
                 },
+              )}
+            {mode === "exchanges" &&
+              t(
+                "This will permanently delete exactly the {count} selected exchanges (including raw requests/responses). Other traffic for the same hosts is kept. This action cannot be undone.",
+                { count: exchangeCount },
               )}
             {mode === "filter" &&
               t(

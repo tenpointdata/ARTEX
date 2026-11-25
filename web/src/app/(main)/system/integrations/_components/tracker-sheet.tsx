@@ -13,6 +13,7 @@ import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "
 import { Switch } from "@/components/ui/switch";
 import { t } from "@/i18n";
 import { buildConfig } from "@/lib/config-form";
+import { WEBHOOK_KINDS, webhookURL } from "@/lib/integrations";
 import { integrationsApi } from "@/lib/integrations-api";
 import type { ConfigValues, TicketTracker, TicketTrackerMeta } from "@/lib/types";
 
@@ -140,6 +141,17 @@ export function TrackerSheet({
                 onChange={(v) => setForm((f) => ({ ...f, config: { ...f.config, [def.key]: v } }))}
               />
             ))}
+            {editing && WEBHOOK_KINDS.has(editing.kind) ? (
+              <div className="grid gap-2">
+                <Label htmlFor="tracker-webhook-url">{t("Webhook URL")}</Label>
+                <Input
+                  id="tracker-webhook-url"
+                  readOnly
+                  value={webhookURL(window.location.origin, editing.id)}
+                  onFocus={(e) => e.currentTarget.select()}
+                />
+              </div>
+            ) : null}
             <div className="flex items-center gap-2 text-sm">
               <Switch
                 checked={form.enabled}

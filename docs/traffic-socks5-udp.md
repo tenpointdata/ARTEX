@@ -14,7 +14,7 @@ ARTEX extends the opt-in SOCKS5 inbound listener with **RFC 1928 `UDP ASSOCIATE`
   - With all SOCKS5 flags unset/off, no SOCKS5 listener and no UDP relay socket are started.
   - With SOCKS5 TCP enabled and `ARTEX_SOCKS5_UDP_ENABLED` off, `UDP ASSOCIATE` (`0x03`) is refused with RFC 1928 reply `0x07` (*Command not supported*) and no UDP socket is opened.
 - **Requires traffic recorder**: like P4.1a and P4.1b, the server only starts the SOCKS5 listener when the traffic recorder is enabled (inside the traffic proxy block in `server/manager.go`).
-- **Non-loopback warning**: the same authentication caveat from [docs/traffic-socks5.md](traffic-socks5.md) applies—RFC 1929 username/password accepts any credentials, so keep the listener bound to loopback (`127.0.0.1`) or restrict access at the host firewall.
+- **Authentication**: the UDP ASSOCIATE control connection authenticates exactly like CONNECT (see [docs/traffic-socks5.md](traffic-socks5.md)): a task scope token, the operator credential (`ARTEX_SOCKS5_USER` / `ARTEX_SOCKS5_PASSWORD`), or open loopback mode. Keep the listener on loopback (`127.0.0.1`) or set an operator password.
 
 ## Protocol Scope & Lifetime
 
