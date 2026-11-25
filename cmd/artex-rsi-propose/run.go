@@ -17,10 +17,12 @@ import (
 
 // options are the command-line settings of one run.
 type options struct {
-	Out      string // directory for arm files; round-<N> is appended
-	Round    int    // -1 = the newest round
-	MaxTasks int    // newest closed tasks to read
-	Post     bool   // post the drafts; default is a dry run
+	Out      string          // directory for arm files; round-<N> is appended
+	Round    int             // -1 = the newest round
+	MaxTasks int             // newest closed tasks to read
+	Post     bool            // post the drafts; default is a dry run
+	Drafter  propose.Drafter // optional model that rewrites bodies (--draft-model)
+	Judge    string          // the suite's judge model; the drafter must differ
 }
 
 // ErrLoopOff is returned when the server's RSI loop flag is off.
@@ -57,6 +59,9 @@ type result struct {
 // run is one proposer pass. The flag is checked on every run, before anything
 // is read, and again before posting (RSI.md rule 5).
 func run(c *client, opt options, log io.Writer) (*result, error) {
+	if err := propose.CheckDrafter(opt.Drafter, opt.Judge); err != nil {
+		return nil, err
+	}
 	st, err := loopStatus(c)
 	if err != nil {
 		return nil, err
@@ -99,7 +104,8 @@ func run(c *client, opt options, log io.Writer) (*result, error) {
 		bodies[role] = a.Prompt
 	}
 	plan := propose.Build(propose.Input{Round: round, Slots: slots, Tasks: tasks, Bodies: bodies,
-		Prior: props.Proposals, Rules: propose.DefaultRules(gaps.Gaps), Markers: agent.CodeOwnedTailMarkers}, propose.DefaultConfig)
+		Prior: props.Proposals, Rules: propose.DefaultRules(gaps.Gaps), Markers: agent.CodeOwnedTailMarkers,
+		Drafter: opt.Drafter, Judge: opt.Judge}, propose.DefaultConfig)
 	res.Plan, res.ReadFrom = plan, len(tasks)
 	dir := filepath.Join(opt.Out, "round-"+strconv.Itoa(round))
 	for _, d := range plan.Drafts {
