@@ -76,7 +76,8 @@ unchanged, redelivery of the same id then processed), the ticketing webhook unit
 `test:integrations`. An independent security review found no bypass or leak; its slowloris, timing, dedup-order
 and id-length findings are fixed (10 s read deadline, every refusal hashes the body). `scripts/verify.sh`:
 only the two known environment failures (`TestConnectWithoutPasswordRealPG` on a trust-auth Postgres,
-`TestManagerSOCKS5UDPOptInAndAssetBlockRuleDropsDatagram` without 127.0.0.2). Not verified: a live
+`TestManagerSOCKS5UDPOptInAndAssetBlockRuleDropsDatagram` without 127.0.0.2), plus `TestSOCKS5RemoteScope`, which
+also fails on main (`traffic/` is identical to main; card `c-1a74a4`). Not verified: a live
 GitHub/Jira delivery (needs a publicly reachable instance), the sheet in a browser.
 
 **2026-11-24 — RSI proposer/critic (`c-c89f5b`, in review)** on `ej/20261124-192202-fbe9e3`.
