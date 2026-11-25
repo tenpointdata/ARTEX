@@ -333,29 +333,25 @@ func TestSOCKS5RemoteScope(t *testing.T) {
 	if got := spy.take(); len(got) != 1 || got[0].run != "11" {
 		t.Fatalf("SOCKS5 remote dials %v, want one on 11", got)
 	}
-	// A credential naming no live scope is refused: at RFC 1929 auth (0x01)
-	// when the listener's auth policy rejects it (a junk password, an
-	// unresolvable worker token), else at CONNECT (0x02) by the remote-client
-	// scope requirement (the open-loopback pace marker with no token).
-	for _, pass := range []string{"", "not-a-token", workerToken(8)} {
-		c, status := socks5UserPassAuth(t, addr, egress.PaceUser, pass)
-		if status != 0x00 {
-			_ = c.Close()
-			continue
-		}
-		if _, err := c.Write(socks5BuildRequest(socks5CmdConnect, host, port)); err != nil {
-			_ = c.Close()
-			t.Fatalf("write connect req: %v", err)
-		}
-		rep := socks5ReadReply(t, c)
+	// The bare pace marker passes the loopback listener's open-mode auth, then
+	// the remote-client gate refuses its CONNECT (0x02).
+	if c, rep := socks5DialUserPass(t, addr, egress.PaceUser, "", host, port); rep != socks5RepNotAllowed {
 		_ = c.Close()
-		if rep != socks5RepNotAllowed {
-			t.Fatalf("remote client with password %q: rep 0x%02x, want 0x02", pass, rep)
+		t.Fatalf("remote client with the bare pace marker: rep 0x%02x, want 0x02", rep)
+	}
+	// A credential that is no live scope token, and a token-shaped one the
+	// resolver does not hold, are refused at authentication (RFC 1929 0x01).
+	for _, pass := range []string{"not-a-token", workerToken(8)} {
+		c, status := socks5UserPassAuth(t, addr, egress.PaceUser, pass)
+		_ = c.Close()
+		if status != socks5UserPassFail {
+			t.Fatalf("remote client with password %q: auth status 0x%02x, want 0x01", pass, status)
 		}
 	}
-	if c, status := socks5UserPassAuth(t, addr, egress.ScopeUser, workerToken(8)); status == 0x00 {
+	// The same unresolvable token under the scope user is refused at auth too.
+	if c, status := socks5UserPassAuth(t, addr, egress.ScopeUser, workerToken(8)); status != socks5UserPassFail {
 		_ = c.Close()
-		t.Fatal("an unresolvable worker token passed SOCKS5 auth")
+		t.Fatalf("unresolvable worker token as %s: auth status 0x%02x, want 0x01", egress.ScopeUser, status)
 	} else {
 		_ = c.Close()
 	}

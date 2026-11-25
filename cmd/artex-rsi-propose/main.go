@@ -8,7 +8,13 @@
 // It never adopts: adoption is an owner action with the owner's password.
 // It runs only while the server's ARTEX_RSI_LOOP flag is on.
 //
+// With --draft-model a model rewrites each qualifying body from the same
+// code-owned guidance (counts only, never task text); its output passes the
+// same checks. The drafting model must not be the benchmark judge
+// (--judge-model, default $JUDGE_MODEL); the run refuses otherwise.
+//
 //	ARTEX_TOKEN=... artex-rsi-propose [--artex-url URL] [--out DIR] [--round N] [--post]
+//	    [--draft-model M --draft-provider openai --draft-url URL --judge-model J]  (key in $ARTEX_DRAFT_API_KEY)
 package main
 
 import (
@@ -27,7 +33,14 @@ func main() {
 	fs.IntVar(&opt.Round, "round", -1, "round to propose in; default the newest open round. The next round must be named explicitly")
 	fs.IntVar(&opt.MaxTasks, "max-tasks", 50, "newest closed tasks to read")
 	fs.BoolVar(&opt.Post, "post", false, "register the drafts as proposals (default: dry run, files only)")
+	draftModel := fs.String("draft-model", "", "model that rewrites bodies (default: off, fixed guidance is appended)")
+	draftProvider := fs.String("draft-provider", "openai", "drafter wire format: openai, openai-responses, anthropic, ollama, ...")
+	draftURL := fs.String("draft-url", os.Getenv("ARTEX_DRAFT_BASE_URL"), "drafter API base URL")
+	fs.StringVar(&opt.Judge, "judge-model", os.Getenv("JUDGE_MODEL"), "the benchmark judge model; the drafter must differ")
 	_ = fs.Parse(os.Args[1:])
+	if *draftModel != "" {
+		opt.Drafter = newModelDrafter(*draftProvider, *draftModel, *draftURL, os.Getenv("ARTEX_DRAFT_API_KEY"))
+	}
 	token := os.Getenv("ARTEX_TOKEN")
 	if token == "" {
 		fmt.Fprintln(os.Stderr, "need ARTEX_TOKEN")

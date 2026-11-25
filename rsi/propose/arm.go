@@ -23,6 +23,7 @@ type Arm struct {
 	Target       string                       `json:"target"`
 	BodySHA      string                       `json:"body_sha"`
 	Rationale    string                       `json:"rationale"`
+	DraftedBy    string                       `json:"drafted_by,omitempty"`
 }
 
 var safeName = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,80}$`)
@@ -50,7 +51,7 @@ func WriteArm(dir string, d Draft, markers []string) (string, error) {
 		return "", err
 	}
 	arm := Arm{Name: d.Name, ProposedFrom: d.ProposedFrom, Round: d.Round, Rule: d.Rule, Target: d.Edit.Target,
-		BodySHA: rsi.SHA16(d.Edit.Body), Rationale: d.Rationale,
+		BodySHA: rsi.SHA16(d.Edit.Body), Rationale: d.Rationale, DraftedBy: d.DraftedBy,
 		Prompts: map[string]map[string]string{d.Edit.Target: {"source": "file", "path": tmpl}}}
 	raw, err := json.MarshalIndent(arm, "", "  ")
 	if err != nil {
