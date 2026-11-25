@@ -1,11 +1,13 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Autumn-27/artex/db"
 	"github.com/Autumn-27/artex/ticketing"
@@ -129,5 +131,54 @@ func TestWebhookNeedsConfiguredSecret(t *testing.T) {
 	}
 	if st := f.status(t, f.fid); st == db.FindingFixed {
 		t.Fatal("a delivery to a tracker without a secret changed the finding")
+	}
+}
+
+// TestWebhookDeferredWhileTrackerLocked: while a sync or push holds the
+// tracker lock, a signed delivery answers 202 "deferred" and changes nothing;
+// its delivery id is forgotten, so the sender's redelivery after the lock is
+// free is processed rather than dropped as a duplicate.
+func TestWebhookDeferredWhileTrackerLocked(t *testing.T) {
+	gh, f := newWebhookFixture(t)
+	gh.close(1, "completed")
+	body := closedPayload("acme/app", 1)
+	sig := ticketing.SignHMACSHA256(testWebhookSecret, []byte(body))
+
+	held, release, done := make(chan struct{}), make(chan struct{}), make(chan error, 1)
+	go func() {
+		done <- withTrackerLock(context.Background(), f.pg, f.tracker, func(context.Context) error {
+			close(held)
+			<-release
+			return nil
+		})
+	}()
+	select {
+	case <-held:
+	case <-time.After(10 * time.Second):
+		t.Fatal("could not take the tracker lock")
+	}
+
+	w := deliver(f, f.tracker, "issues", "lock-1", sig, body)
+	var reply ticketWebhookReply
+	_ = json.Unmarshal(w.Body.Bytes(), &reply)
+	if w.Code != 202 || reply.Status != "deferred" {
+		t.Fatalf("delivery under a held lock: %d %s, want 202 deferred", w.Code, w.Body)
+	}
+	if st := f.status(t, f.fid); st == db.FindingFixed {
+		t.Fatal("a deferred delivery changed the finding")
+	}
+
+	close(release)
+	if err := <-done; err != nil {
+		t.Fatalf("lock holder: %v", err)
+	}
+	w = deliver(f, f.tracker, "issues", "lock-1", sig, body)
+	reply = ticketWebhookReply{}
+	_ = json.Unmarshal(w.Body.Bytes(), &reply)
+	if w.Code != 200 || reply.Status != "ok" || reply.Synced != 1 {
+		t.Fatalf("redelivery after the lock is free: %d %s, want 200 ok", w.Code, w.Body)
+	}
+	if st := f.status(t, f.fid); st != db.FindingFixed {
+		t.Fatalf("finding after redelivery: %s, want %s", st, db.FindingFixed)
 	}
 }
