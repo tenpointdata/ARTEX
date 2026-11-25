@@ -59,6 +59,20 @@ See `docs/ARCHITECTURE.md` for the code-level map. Summary:
 
 ## Current state
 
+**2026-11-24 — Cluster egress deny follows moved pods (`c-d4946f`, E7; in review on
+`ej/20261124-172839-c17308`).** This branch merges the unlanded c-8cfbfe branch (`ej/20261124-155353-b1c60a`),
+so landing it lands both. `egress.sh` re-resolves `ARTEX_EGRESS_DENY_HOSTS`/`ALLOW_HOSTS` every
+`ARTEX_EGRESS_REFRESH` s (chart `egress.refreshSeconds`, default 10) in a background loop `start.sh` starts,
+and rewrites `ARTEX_EGRESS` in one `iptables-restore --noflush` commit when an answer changes (also at start).
+A name that stops resolving keeps its last addresses. `NAME:PORT` denies one TCP port; the chart uses it
+for a new headless `<release>-control-pods` (API port on the control pod IP). The PostgreSQL and
+control-pods Services publish not-ready addresses. Verified live on the `artex-e7` kind cluster (own
+namespace, since removed): after `kubectl delete pod artex-postgresql-0` (10.244.1.13 → .14) and a control
+pod delete (.12 → .15), `scripts/k8s-egress-probe.sh` showed the executor refused at the new IPs on both
+pods with 0 restarts, while root, the proxy and the Juice Shop target stayed open. Allow/uid-range paths
+checked in a container. Window left: a moved pod is reachable for about the interval plus the DNS TTL;
+`egress.clusterCIDRs` has none.
+
 **2026-11-24 — E7 follow-up (`c-8cfbfe`, in review on `ej/20261124-155353-b1c60a`).** Built on the E7
 branch before main's #46 squash and merged with main after; the kind run predates `controlTLS`. The chart was installed on a 3-node kind cluster and
 the checks are recorded in `docs/DISTRIBUTED.md` ("Recorded install"): two workers on separate hosts, nodes API,
@@ -250,8 +264,7 @@ body, through the versioned prompt API, and the starting bodies are restored aft
 **Agents' lane**
 0. *(unclaimed)* — **E7: worker nodes miss other runtime control-node state** (M), card `c-6bcdd3`: LLM profiles,
    MCP servers, custom tools and similar are rebuilt only at start. Done = each one is followed or listed in
-   DISTRIBUTED.md Limits. Then `c-d4946f` (re-resolve the cluster egress deny, M) and `c-597b06` (stale
-   worker_nodes rows, S).
+   DISTRIBUTED.md Limits. Then `c-597b06` (stale worker_nodes rows, S).
 1. *(unclaimed)* — **SEC: per-task uid follow-ups** (S each): `c-12df03` (single-uid start-up fails on a
    socket; MCP uid not egress-filtered), `c-e70e5c` (release ended tasks at start-up; per-key lock). The "Done when" is on each card.
 2. *(unclaimed)* — **E5 UI: hide role-lacking actions on existing pages** (M), card `c-92bb52`. Done = as
@@ -355,8 +368,8 @@ Card ids in brackets:
 - **E7** [`c-d60149`] Distributed/remote workers (queue-backed intents) for larger engagements; Helm chart.
   Follow-ups: `c-3b781a` and `c-548e8b` (TLS to the control API) in review; `c-677166` (TLS on the
   proxy hop), `c-29ff19`, `c-18f7a8`; `c-8cfbfe` (kind install recorded, in review; `c-7ad4da` closed by it).
-  From the install: `c-6bcdd3` (other state workers read only at start), `c-d4946f` (re-resolve the egress
-  deny), `c-597b06` (stale node rows), `c-620510` (real multi-machine cluster, human).
+  From the install: `c-6bcdd3` (other state workers read only at start), `c-d4946f` (egress deny re-resolved;
+  in review), `c-597b06` (stale node rows), `c-620510` (real multi-machine cluster, human).
 - **E8** [`c-5487e8`] Planner/worker evaluation suite (regression targets, prompt-version A/B via the benchmark gate).
 - **E9** [`c-73af97`] Frontend/UX pass (tables over cards, fewer-clicks triage workflow, live engagement dashboard).
 - **SEC** [`c-517c2d`] Live Playwright task check of the scope relay (human/bench: needs an LLM key and an authorized target).
@@ -387,6 +400,12 @@ Card ids in brackets:
   [`c-5c4009`] tracker RBAC (E2×E5).
 
 ## Known issues and gotchas
+
+- **Socket-LB CNIs and the executor egress filter.** The filter matches the destination the pod's own
+  netfilter sees. With kube-proxy that is the Service ClusterIP; a CNI that rewrites Services at
+  `connect()` (Cilium kube-proxy replacement) shows the backend pod IP instead, so denying the control pod
+  IP would also refuse the proxy Service. Use `egress.denyClusterServices=false` plus explicit
+  `egress.denyHosts` there. Untested on such a CNI.
 
 - **bbot `portscan` (masscan) cannot run as the executor**: it needs raw sockets and fails setup with
   `No such file or directory: 'sudo'`. This is by design (see Decisions, c-18c9c6); use `nmap -sT`.
@@ -446,6 +465,13 @@ Card ids in brackets:
   `ARTEX_SECRET_KEY`) loses stored secrets.
 
 ## Decisions
+
+- **2026-11-24** — c-d4946f: the re-resolve loop is in `egress.sh` (started by `start.sh`), not in the Go
+  server. One code path writes the executor rules for Docker and Kubernetes, and the loop rebuilds with the
+  same `egress_rules` text as start-up. Rebuilds use `iptables-restore --noflush` so the chain is replaced in
+  one commit, with no unfiltered moment. Unresolvable names keep their last addresses (fail closed). CIDR
+  auto-detection was rejected (no portable source of the pod/Service CIDRs inside a pod); strict mode stays
+  opt-in.
 
 - **2026-11-24** — c-18c9c6: bbot's `portscan` (masscan) stays **unsupported** for the executor
   (option a); masscan does not get `cap_net_raw` (option b rejected). Two reasons. (1) It would not

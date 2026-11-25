@@ -162,7 +162,7 @@ egress_refresh_start() {
 	fi
 	( trap - INT TERM; while sleep "$every"; do egress_refresh; done ) &
 	egress_refresh_pid=$!
-	egress_log "re-resolving ${ARTEX_EGRESS_DENY_HOSTS:-}${ARTEX_EGRESS_ALLOW_HOSTS:+ ${ARTEX_EGRESS_ALLOW_HOSTS}} every ${every}s"
+	egress_log "re-resolving $(echo ${ARTEX_EGRESS_DENY_HOSTS:-} ${ARTEX_EGRESS_ALLOW_HOSTS:-} | tr ',' ' ') every ${every}s"
 }
 
 # egress_apply ARTEX_ARGS...: reads -exec-uid and -addr from the artex arguments.
