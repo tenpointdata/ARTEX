@@ -1,6 +1,6 @@
 # HANDOFF.md — ARTEX
 
-**Last updated:** 2026-11-24 17:39 MST, by claude-code: c-d4946f (E7, in review): the cluster egress deny now follows moved pods. Earlier hand-offs are under Deltas and in `ej handoff log`.
+**Last updated:** 2026-11-24 18:20 MST, by claude-code: c-620510 (E7, blocked on a human): real-cluster values, runbook and check-table script ready; the install itself needs a cluster and an LLM key. Earlier hand-offs are under Deltas and in `ej handoff log`.
 
 > Single entry point for whoever picks this up next (any agent or human), with no access to the
 > originating conversation. Read this first, then the sections of the code it points at.
@@ -59,8 +59,7 @@ See `docs/ARCHITECTURE.md` for the code-level map. Summary:
 
 ## Current state
 
-**2026-11-24 — Real-cluster install kit (`c-620510`, E7; blocked on a human).** On `ej/20261124-173856-b39c78`,
-which merges `ej/20261124-172839-c17308`. `deploy/lab/values-multihost.yaml` (renders/lints), runbook
+**2026-11-24 — Real-cluster install kit (`c-620510`, E7; blocked on a human).** On `ej/20261124-173856-b39c78`. `deploy/lab/values-multihost.yaml` (renders/lints), runbook
 `deploy/lab/README.md` "Real cluster", and `scripts/k8s-install-checks.sh NS [RELEASE]`, which prints the check
 table. Not run on any cluster.
 
