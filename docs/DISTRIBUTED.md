@@ -33,6 +33,12 @@ The work queue is the intent rows already in `exploration_nodes`.
 - **Owner names.** Worker loops on worker nodes are named
   `<ARTEX_NODE_ID>/work#N`, so the owner column says which host ran an intent.
   Local loops on the control node keep the `work#N` name.
+- **Node registry.** Every process upserts its `worker_nodes` row every 10 s
+  and is live for 45 s after (`db.NodeTTL`); a clean shutdown deletes it. A
+  row silent for longer than `db.NodeRetention` (20 × NodeTTL = 15 min) is
+  hidden from `GET /api/settings/nodes` and deleted by the next heartbeat of
+  any node, so pods replaced by a Kubernetes rollout (node id = pod name)
+  do not pile up as dead rows.
 
 ## Identical gating
 
