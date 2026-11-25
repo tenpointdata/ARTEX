@@ -59,6 +59,19 @@ See `docs/ARCHITECTURE.md` for the code-level map. Summary:
 
 ## Current state
 
+**2026-11-24 — RSI proposer/critic (`c-c89f5b`, in review)** on `ej/20261124-192202-fbe9e3`.
+`cmd/artex-rsi-propose` (core `rsi/propose`: `Build` critic + pruner, `Slots` budget, `WriteArm`,
+rule table `rules.go`) reads closed tasks' `/outcome` + `/lessons`, `/api/skill-gaps` and the active
+goals/planner/worker bodies, keeps a rule only when its signal holds on ≥2 tasks across ≥2
+companies/categories (and ≥25% of tasks), and appends a fixed `## Field guidance` paragraph to one role's
+body. Writes `round-N/<name>.json|.tmpl` arms (`proposed_from: task:<id>`, rationale) + `plan.json`, at
+most the round's remaining budget from `GET /api/rsi/status` (now also reports `max_open`). Stops unless
+the server reports the loop on; client can only GET and `POST /api/rsi/proposals` (no adopt). Marker list
+moved to `agent.CodeOwnedTailMarkers` (server uses it). Verified: `rsi/propose` + CLI fake-server tests
+(budget per round 0–4, immutable surfaces/markers/forged drafts refused, loop off reads nothing else, post
+only proposes), generated arms load through `arms.load_arm` + `rsi_submit.proposal_body`,
+`scripts/verify.sh`. Not checked: a real instance (`c-4bbf29`). Model-drafted critic: `c-0aaa24`.
+
 **2026-11-24 — LLM sampling pin (`c-d73308`, E8; on main via #69).** Migration 0028 adds nullable
 `llm_profiles.sampling_seed`/`sampling_temperature`; `agent/sampling.go` splices them into the wire body
 (seed on openai/ollama only; temperature only where the caller set none). Suite stamps `llm_sampling`.
@@ -310,7 +323,7 @@ Card ids in brackets:
   [`c-119206`] role-gate the E2 UI controls; [`c-1198a2`] run `scripts/e2e/integrations.sh` in CI (after c-cc25b6);
   [`c-da9198`] scheduled sync plus a per-tracker lock; [`c-ea60a0`] move agent `scan_ingest` onto
   `scanimport`, normalize default ports, and settle two dedup edge cases.
-- **E3** [`c-d25ff9`] — gate built (in review). Follow-ups: hardening `c-0d277f`, UI `c-936308`, first live run `c-772190`, proposer/critic `c-c89f5b`.
+- **E3** [`c-d25ff9`] — gate built (in review). Follow-ups: hardening `c-0d277f`, UI `c-936308`, first live run `c-772190`, proposer/critic `c-c89f5b` (in review; follow-ups `c-4bbf29` live run, `c-0aaa24` model drafter).
 - **E4** [`c-c0bb07`] Methodology-driven coverage: landed 2026-11-24 (see Current state). Follow-ups:
   [`c-ca2bd0`] an operator-chosen methodology per task (landed, in review; gaps `c-aed5fd`); [`c-ed937d`] checklist completion in the report export (after E1).
 - **E5** [`c-669406`] Engagement governance. The backend is done on `ej/20261124-055929-bd2253`. Follow-ups:
