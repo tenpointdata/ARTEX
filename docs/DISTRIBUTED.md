@@ -221,13 +221,42 @@ These are known and carded on the ARTEX board:
 - **`egress.Share` floors in-flight limits at 1 per node.** With N nodes, up to
   N requests to one host can be in flight at once. The request rate is divided
   exactly.
-- **Agent processes can reach other cluster services.** On a worker host they
-  can reach the network like any target, including the control API and
-  Postgres, just as the bundled compose Postgres is reachable today. Deny those
-  addresses with `ARTEX_EGRESS_DENY` or a NetworkPolicy.
+- **Agent egress inside a cluster is denied by name, resolved once.** The chart
+  default (`egress.denyClusterServices`) denies agent processes the PostgreSQL
+  host and the control API Service, resolved at pod start. A database pod
+  rescheduled later gets a new IP that running pods do not deny; the control
+  pod's own IP is not denied. `egress.clusterCIDRs` closes both (see the chart
+  README). Outside Kubernetes, use `ARTEX_EGRESS_DENY` / `ARTEX_EGRESS_DENY_HOSTS`.
+- **Settings follow by revision.** Traffic capture, the global egress proxy and
+  web search reach worker nodes through `settings.agent_settings_revision`
+  (bumped by `PUT /api/settings`, polled every 2 s). A change written straight
+  into the `settings` table without the bump is not followed until a restart.
 - **The capture-store tools need the control node.** On a worker node they
   are calls to the control node (see "Evidence on worker nodes"). While it is
   down they fail, and so does a finding that carries traffic refs.
-- **The capture switch is read at start-up on a worker node.** A worker node
-  reads `traffic_capture` when it starts, so after the switch is flipped on the
-  control node, restart the worker nodes.
+
+## Recorded install (2026-11-24, kind, 3 nodes)
+
+The chart was installed on a kind v0.30 cluster (Kubernetes 1.34, one
+control-plane node and two worker nodes) with the fixtures in `deploy/lab/`
+(an LLM stub instead of a model, Juice Shop as the lab target). It ran the E7
+branch as it stood before the control-API TLS work merged into `main` (#46), so
+`controlTLS` was not part of it; re-run the checks with TLS on (card `c-620510`).
+
+| Check | Result |
+|---|---|
+| Pods on separate hosts | worker pods on `artex-e7-worker` and `artex-e7-worker2` (required anti-affinity); control on `artex-e7-worker2` |
+| `GET /api/settings/nodes` | control + 2 workers `live: true` (rows of replaced pods stay, `live: false`) |
+| Isolation self-test | failed on the 0777 volume roots until the binary tightened them (`tightenVolumeRoot`); passes on control and both workers |
+| Capability set | `CHOWN,SETUID,SETGID,DAC_OVERRIDE,FOWNER` + `NET_ADMIN` suffices: the executor drop works and `egress.sh` installs IPv4 and IPv6 rules. No change needed |
+| Task run | 6 intents, owners `artex-worker-…-f84dj/work#1..3` and `artex-worker-…-hskhh/work#1..3`; the planner woke on the worker-settled intents and met the goal |
+| Traffic | 12 `GET /rest/products/search` exchanges (two runs) recorded on the control node through its proxy, after capture was turned on at runtime |
+| Agent egress (`scripts/k8s-egress-probe.sh`) | executor refused PostgreSQL (Service and pod IP) and the control API, reaches the control proxy and the target; root reaches PostgreSQL. Same with `egress.clusterCIDRs` set to the pod and Service CIDRs |
+| Rolling upgrade | deadlocked with the default surge (a surge pod has no free host); `worker.updateStrategy` now defaults to `maxSurge: 0` |
+
+Defects found and fixed on the way: the volume-root modes above; worker nodes
+reading traffic capture only at start (now the agent settings revision); the
+planner never waking when a fresh task's first settle poll was empty
+(`settleCursor`); a 0-byte `jwt.key` left by a pod killed mid-write (the key is
+now created atomically); `clusterCIDRs` taking DNS from agents (port 53 to the
+resolvers is now allowed first).

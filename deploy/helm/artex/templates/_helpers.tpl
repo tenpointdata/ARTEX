@@ -49,6 +49,29 @@ app.kubernetes.io/component: {{ .component }}
 {{- if .Values.postgresql.bundled.enabled }}{{ include "artex.fullname" . }}-postgresql
 {{- else }}{{ required "postgresql.external.host is required when postgresql.bundled.enabled=false" .Values.postgresql.external.host }}{{ end }}
 {{- end }}
+{{/* Agent egress filter lists (egress.sh); see egress.* in values.yaml. */}}
+{{- define "artex.egressDeny" -}}
+{{- $l := list -}}
+{{- with .Values.egress.deny }}{{ $l = append $l . }}{{ end -}}
+{{- range .Values.egress.clusterCIDRs }}{{ $l = append $l . }}{{ end -}}
+{{- join " " $l -}}
+{{- end }}
+{{- define "artex.egressDenyHosts" -}}
+{{- $l := list -}}
+{{- if .Values.egress.denyClusterServices }}
+{{- $l = append $l (include "artex.pgHost" .) -}}
+{{- $l = append $l (printf "%s-control" (include "artex.fullname" .)) -}}
+{{- end }}
+{{- with .Values.egress.denyHosts }}{{ $l = append $l . }}{{ end -}}
+{{- join " " $l -}}
+{{- end }}
+{{- define "artex.egressAllowHosts" -}}
+{{- $l := list -}}
+{{- if .Values.egress.clusterCIDRs }}{{ $l = append $l (printf "%s-control-proxy" (include "artex.fullname" .)) }}{{ end -}}
+{{- with .Values.egress.allowHosts }}{{ $l = append $l . }}{{ end -}}
+{{- join " " $l -}}
+{{- end }}
+
 {{- define "artex.pgPort" -}}
 {{ if .Values.postgresql.bundled.enabled }}5432{{ else }}{{ .Values.postgresql.external.port }}{{ end }}
 {{- end }}

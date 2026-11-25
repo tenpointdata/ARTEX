@@ -79,7 +79,13 @@
     },
     "egress": {
       "type": "object",
-      "properties": {"enabled": {"type": "boolean"}}
+      "properties": {
+        "enabled": {"type": "boolean"},
+        "denyClusterServices": {"type": "boolean"},
+        "clusterCIDRs": {"type": "array", "items": {"type": "string"}},
+        "denyHosts": {"type": "string"},
+        "allowHosts": {"type": "string"}
+      }
     }
   }
 }

@@ -59,6 +59,23 @@ See `docs/ARCHITECTURE.md` for the code-level map. Summary:
 
 ## Current state
 
+**2026-11-24 — E7 follow-up (`c-8cfbfe`, in review on `ej/20261124-155353-b1c60a`).** Built on the E7
+branch before main's #46 squash and merged with main after; the kind run predates `controlTLS`. The chart was installed on a 3-node kind cluster and
+the checks are recorded in `docs/DISTRIBUTED.md` ("Recorded install"): two workers on separate hosts, nodes API,
+a task whose 6 intents split across both hosts, traffic recorded on the control node, and the caps set unchanged.
+Five defects were fixed, each with a test:
+- volume-root modes (`server/execpriv_volume_unix.go`);
+- worker nodes follow agent settings (`server/worker_node_settings.go`, `settings.agent_settings_revision`),
+  which closes `c-7ad4da`, the capture switch read at start-up;
+- the planner wakes after an empty first settle poll (`settleCursor`, `server/engine_distributed.go`);
+- `jwt.key` is created atomically (`server/auth.go`);
+- worker rollouts use `maxSurge: 0`.
+
+New chart default: agent egress deny for PostgreSQL and the control API (`egress.denyClusterServices`; the
+`egress.sh` variables are `ARTEX_EGRESS_DENY_HOSTS` and `ARTEX_EGRESS_ALLOW_HOSTS`, and DNS stays allowed),
+plus the strict `egress.clusterCIDRs` mode. The lab fixtures are in `deploy/lab/` (an LLM stub and the kind
+values); `scripts/k8s-egress-probe.sh` runs the egress probe.
+
 **2026-11-24 — TLS between worker nodes and the control node by default (`c-548e8b`, E7; in review).**
 Worker nodes reach the control API (node RPC) over **TLS with the CA pinned**: `ARTEX_CONTROL_CA`
 (`server/node_tls.go`) makes the worker accept only `https://` and trust only that CA, never the system
@@ -82,7 +99,7 @@ worker→control recording-proxy hop (plain-HTTP targets and the scope token), c
 **2026-11-24 — Worker-node findings carry their captured proof (`c-3b781a`, E7; in review).** A
 worker-node finding binds the control capture through a signed node RPC (`POST /api/node/rpc/{op}`,
 `server/node_rpc.go`, HMAC under `db.NodeRPCKey`); design in `docs/DISTRIBUTED.md` "Evidence on worker
-nodes", verification in Deltas. Gap: `c-7ad4da` (capture switch read at start-up).
+nodes", verification in Deltas. Gap `c-7ad4da` (capture switch read at start-up) is closed by c-8cfbfe.
 
 **2026-11-24 — E10 code-security lane + its UI and exports (`c-72dd9d`, `c-d059ae`; in review)** on
 `ej/20261124-170322-736db7`, which merges the unlanded E10 branch `ej/20261124-150533-1ba29e` and main
@@ -231,6 +248,10 @@ body, through the versioned prompt API, and the starting bodies are restored aft
 ## Triage (next handful)
 
 **Agents' lane**
+0. *(unclaimed)* — **E7: worker nodes miss other runtime control-node state** (M), card `c-6bcdd3`: LLM profiles,
+   MCP servers, custom tools and similar are rebuilt only at start. Done = each one is followed or listed in
+   DISTRIBUTED.md Limits. Then `c-d4946f` (re-resolve the cluster egress deny, M) and `c-597b06` (stale
+   worker_nodes rows, S).
 1. *(unclaimed)* — **SEC: per-task uid follow-ups** (S each): `c-12df03` (single-uid start-up fails on a
    socket; MCP uid not egress-filtered), `c-e70e5c` (release ended tasks at start-up; per-key lock). The "Done when" is on each card.
 2. *(unclaimed)* — **E5 UI: hide role-lacking actions on existing pages** (M), card `c-92bb52`. Done = as
@@ -279,6 +300,9 @@ body, through the versioned prompt API, and the starting bodies are restored aft
   whether tasks with an artifact must have the target gate forced on (card `c-f4115c` item 2), and
   whether the extra admin-only routes in `server/rbac_policy.go` (tools, MCP, agents, LLM config,
   notify) suit how operators work.
+
+- **E7 on a real multi-machine cluster with a real model** (card `c-620510`): separate hosts, a real CNI
+  with `networkPolicy.enabled`, an LLM key and an Ingress with TLS. Redo the table in docs/DISTRIBUTED.md.
 
 **Blocked**
 - **E2 browser e2e as a CI job** (S), card `c-1198a2`: blocked on c-cc25b6's SHA-pinned ci.yml landing. Done = a
@@ -330,7 +354,9 @@ Card ids in brackets:
 - **E6** [`c-cb0093`] Cost/observability dashboard + OpenTelemetry export, building on existing context telemetry.
 - **E7** [`c-d60149`] Distributed/remote workers (queue-backed intents) for larger engagements; Helm chart.
   Follow-ups: `c-3b781a` and `c-548e8b` (TLS to the control API) in review; `c-677166` (TLS on the
-  proxy hop), `c-7ad4da`, `c-29ff19`, `c-18f7a8`, `c-8cfbfe` (live install, human).
+  proxy hop), `c-29ff19`, `c-18f7a8`; `c-8cfbfe` (kind install recorded, in review; `c-7ad4da` closed by it).
+  From the install: `c-6bcdd3` (other state workers read only at start), `c-d4946f` (re-resolve the egress
+  deny), `c-597b06` (stale node rows), `c-620510` (real multi-machine cluster, human).
 - **E8** [`c-5487e8`] Planner/worker evaluation suite (regression targets, prompt-version A/B via the benchmark gate).
 - **E9** [`c-73af97`] Frontend/UX pass (tables over cards, fewer-clicks triage workflow, live engagement dashboard).
 - **SEC** [`c-517c2d`] Live Playwright task check of the scope relay (human/bench: needs an LLM key and an authorized target).
@@ -432,6 +458,12 @@ Card ids in brackets:
   API port would be reachable, and raw sockets also allow forged source addresses. The bbot-recon
   skill now says to use `nmap -sT` instead. Revisit only with a server-side (root) port-scan service
   that applies the scope gate and egress denies itself, never by giving the executor raw sockets.
+- **2026-11-24** — c-8cfbfe: the worker-pod egress deny is in the uid-scoped `egress.sh` filter, not a
+  NetworkPolicy. A NetworkPolicy applies to the whole pod, and the root server process in the same pod must
+  reach PostgreSQL. The deny is name-based by default (zero configuration, resolved at start) and CIDR-based
+  as an opt-in, because the pod and Service CIDRs differ per cluster. The volume roots are tightened by the
+  binary rather than by the chart (fsGroup or an initContainer), so bare-metal bind mounts with loose modes
+  are fixed too.
 
 - **2026-11-24** — c-548e8b: the worker pins the control API's CA (`ARTEX_CONTROL_CA`) rather than
   trusting system roots, so a publicly valid certificate for the same name cannot impersonate the
