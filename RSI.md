@@ -1,9 +1,9 @@
 # Recursive self-improvement in ARTEX
 
 Status: measurement, shadow memory, and the benchmark gate (E3). There is no
-automated harness search and no automatic adoption: edits are proposed (by a
-person or a future proposer), measured on a held-out suite, and adopted only by
-an owner action. No code in this repository modifies itself.
+automatic adoption: edits are proposed (by a person, or by the rule-based critic
+`artex-rsi-propose`), measured on a held-out suite, and adopted only by an owner
+action. No code in this repository modifies itself.
 
 This file defines the contract any future harness-optimization work must meet,
 so the first experiment cannot quietly become an unguarded rewrite loop.
@@ -14,7 +14,7 @@ so the first experiment cannot quietly become an unguarded rewrite loop.
 |---|---|---|
 | A. within a task | planner, worker, retester, adversarial gate | exists |
 | B. across tasks | evidence-gated lessons from closed tasks | shadow mode, PR #104 |
-| C. on the harness | prompts, skills, tool guidance | gate built (`rsi/`, `server/rsi_loop.go`), flag off; no proposer |
+| C. on the harness | prompts, skills, tool guidance | gate built (`rsi/`, `server/rsi_loop.go`), rule-based proposer (`rsi/propose`, `cmd/artex-rsi-propose`); flag off |
 
 Loop A produces task gain. Loop B is meant to produce retained gain: a lesson
 must survive a closed task and change a later one. Loop C is the only loop that
@@ -69,7 +69,7 @@ A future Loop C PR is acceptable only with:
 
 ## Benchmark gate (built)
 
-The gate implements the contract above; it has no proposer (critic) of its own.
+The gate implements the contract above. The proposer is a separate client (next section).
 
 | rule | where it is enforced |
 |---|---|
@@ -98,6 +98,36 @@ imitation of a tail, not a body that argues against one in its own words.
 a session (they move toward the owner-approved prior state), by decision. The generic prompt editor (`PUT /api/agents/{key}/prompt`)
 remains an owner path outside the gate, and the benchmark harness uses it on its
 dedicated bench instance to switch arms.
+
+## Proposer (critic, built)
+
+`cmd/artex-rsi-propose` (core: `rsi/propose`) drafts prompt-body edits from
+closed live tasks (rule 1: live tasks propose). It is a client of the gate, not
+part of it:
+
+- **Transfer (rule 6).** A rule is a per-task signal over the outcome card and
+  lessons plus a fixed, code-written guidance paragraph. It is kept only when it
+  holds on at least 2 closed tasks spanning at least 2 scopes (company, else
+  category) and on at least a quarter of the tasks read; the skill-gap rule needs
+  misses in at least 2 task categories. Edits already proposed, or already in the
+  active body, are pruned.
+- **Untrusted output.** No text from a live task enters a drafted body; drafts
+  cite task ids and counts only.
+- **Search space (rule 3).** Every draft passes `rsi.ValidateEdit` with the
+  code-owned tail markers (`agent.CodeOwnedTailMarkers`, shared with the server)
+  twice, when drafted and when written; the server validates again on post.
+- **Budget (rule 6).** At most the round's remaining `rsi.Budget` from
+  `GET /api/rsi/status`, capped by the open-proposal cap (`max_open`). It never
+  opens the next round on its own (`--round` must name it).
+- **Flag and authority (rules 2, 5, 8).** It stops unless the server reports
+  `ARTEX_RSI_LOOP` on, checked at the start and again before posting. Its HTTP
+  client has GET and one POST path (`/api/rsi/proposals`): it cannot adopt,
+  reject, roll back, upload evidence or edit a prompt.
+- Default is a dry run (arm files + `plan.json`); `--post` registers them.
+
+Limits: the guidance paragraphs are a fixed table (`rsi/propose/rules.go`), not
+model-written; a model-drafted critic is a follow-up and must keep the same
+checks.
 
 ## What the current layers do
 
