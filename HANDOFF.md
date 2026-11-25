@@ -150,9 +150,8 @@ image, E8 eval suite) moved to `docs/handoff/2026-11-24-current-state-archive.md
 ## Triage (next handful)
 
 **Agents' lane**
-1. *(unclaimed)* — **E7: worker nodes miss other runtime control-node state** (M), card `c-6bcdd3`: LLM profiles,
-   MCP servers, custom tools and similar are rebuilt only at start. Done = each one is followed or listed in
-   DISTRIBUTED.md Limits.
+1. E7 install follow-ups: `c-6bcdd3` (state workers read only at start) is in review on `ej/20261124-172031-c2bb7b`;
+   `c-d4946f` (re-resolve the egress deny) and `c-597b06` (stale node rows) are in review on their branches.
 2. *(unclaimed)* — **SEC: per-task uid follow-ups** (S each): `c-12df03` (single-uid start-up fails on a
    socket; MCP uid not egress-filtered), `c-e70e5c` (release ended tasks at start-up; per-key lock). The "Done when" is on each card.
 3. *(unclaimed)* — **E5 UI: hide role-lacking actions on existing pages** (M), card `c-92bb52`. Done = as
@@ -300,6 +299,11 @@ Card ids in brackets:
 
 ## Known issues and gotchas
 
+- **A database created from an unmerged E7 branch does not start on `main`.** It already applied
+  `0023_distributed_workers`, and `main` then added `0015_integrations` (E2). The migrator refuses an
+  inserted migration ("migrations must be appended, never inserted"). Only databases from branch builds
+  are affected; use a fresh database (seen in the c-8cfbfe kind lab and in test databases).
+
 - **bbot `portscan` (masscan) cannot run as the executor**: it needs raw sockets and fails setup with
   `No such file or directory: 'sudo'`. This is by design (see Decisions, c-18c9c6); use `nmap -sT`.
 - **`next dev` writes `web/AGENTS.md`** (Next 16 agent rules) on start. Delete it before committing; it
@@ -368,6 +372,12 @@ Card ids in brackets:
   agents are built per task from the Manager's already-updated settings, so dropping them fixes the egress path.
 
 - **2026-11-24** — c-8cfbfe / c-d4946f (cluster egress deny in `egress.sh`, re-resolved, atomic rebuild) and the socket-LB CNI gotcha: `docs/handoff/2026-11-24-e7-kind-install-egress.md`.
+- **2026-11-24** — c-8cfbfe: the worker-pod egress deny is in the uid-scoped `egress.sh` filter, not a
+  NetworkPolicy. A NetworkPolicy applies to the whole pod, and the root server process in the same pod must
+  reach PostgreSQL. The deny is name-based by default (zero configuration, resolved at start) and CIDR-based
+  as an opt-in, because the pod and Service CIDRs differ per cluster. The volume roots are tightened by the
+  binary rather than by the chart (fsGroup or an initContainer), so bare-metal bind mounts with loose modes
+  are fixed too.
 - **2026-11-24** — c-18c9c6: bbot's `portscan` (masscan) stays **unsupported** for the executor
   (option a); masscan does not get `cap_net_raw` (option b rejected). Two reasons. (1) It would not
   work without weakening an invariant: the executor runs under no_new_privs (Docker's
@@ -524,30 +534,18 @@ Card ids in brackets:
   the old `network_mode: host` (no port clashes, works on Docker Desktop). Host-published corpora are
   reached as `host.docker.internal`; the egress filter still denies that to agents until the operator
   sets `ARTEX_EGRESS_ALLOW` in `bench/.env` — documented, not defaulted, since it opens host services.
-- **2026-11-23** — c-dadc14: the security branch's always-on metadata check resolves each name the
-  platform dials (gate on or off); `TestGateOffTaskIsUnchanged` now asserts one lookup per platform
-  connection instead of none, since this is the intended behaviour, not a regression. The isolation
-  probe binary became a test hook (`isolationProbeBinary`) rather than being changed in production.
-  Logout revocation and the Docker Desktop bind-mount problem were filed as cards, not fixed here: both
-  predate the branch and need a design choice.
-- **2026-11-24** — DVGA ground truth bumped to v2 after reading the 2.2.0 source (card `c-085c80`). Every entry
-  now has a `source` field naming its resolver, helper, middleware or template (the judge prompt ignores it;
-  it only changes the content hash). Changes: GT-009 is *signature not verified* (`helpers.get_identity`,
-  `verify_signature: False`), not alg=none in particular. GT-011 is now the GraphiQL `env` cookie bypass,
-  because the deny-list, operation-name and introspection middlewares only run in Expert mode (moved to
-  notes). Added GT-012, stack traces on `/graphiql` (`format_custom_error`). The notes now say that
-  difficulty is server-wide DB state, switched by `X-DVGA-MODE` or `/difficulty/<level>`, not chosen per request.
-
-- _Older settled decisions (project setup, security fail-closed defaults, per-task uids, proxy scope, E5/E8, audit lock, client binding) are in `docs/decisions.md`._
+- Older decisions (security fixes, capture-proxy scope, per-task uids, E5, E8, client binding and others) are in
+  `docs/handoff/decisions-archive-2026-11-24.md`.
 
 ## Deltas
 
 <!-- composite:deltas · newest first; Composite rewrites this block on every merge (ej handoff merge / merge_handoff) -->
+- **2026-11-24 17:47 MST** · claude-code · `h-a90a9e` — c-6bcdd3 (E7, now in review): workers follow the LLM recording switch and agent config saves; DISTRIBUTED.md lists what is per-run, control-only, or a Limit. **Next:** land after c-20c400.
+- **2026-11-24 17:41 MST** · claude-code · `ej/20261124-155353-b1c60a` `001e439`→`587e803` (1 commit) · `h-62b82c` — c-8cfbfe (E7 follow-up, in review): the Helm chart was installed on a 3-node kind cluster (two worker hosts) and every check is recorded in docs/DISTRIBUTED.md ("Recorded install"). The checks ran on the E7 branch and again on the merge with main (control TLS on by default, fresh database). Five defects found live were fixed, each with a test: world-writable volume roots broke the isolation self-test (tightenVolumeRoot); worker nodes read traffic capture, the global proxy and web search only at start (settings.agent_settings_revision; closes card c-7ad4da); the planner never woke when a fresh task's first settle poll was empty (settleCursor); a 0-byte jwt.key was left by a killed pod (atomic create); rollouts deadlocked under hard anti-affinity (maxSurge 0). New chart defaults: egress.denyClusterServices denies agent uids PostgreSQL and the control API (ARTEX_EGRESS_DENY_HOSTS/ALLOW_HOSTS in egress.sh, DNS stays open); the strict egress.clusterCIDRs mode; enableServiceLinks false. Lab fixtures are in deploy/lab (scripted LLM stub, kind values); the egress probe is scripts/k8s-egress-probe.sh. Cards opened: c-597b06, c-d4946f, c-6bcdd3, c-620510. **Next:** Land ej/20261124-155353-b1c60a. Other agents' branches already build on it (c-d4946f, c-597b06, c-20c400): reconcile c-20c400's "one worker settings follower" with server/worker_node_settings.go. c-620510: a real multi-machine cluster with a real model and CNI (human). **Decided:** The worker egress deny lives in the uid-scoped egress.sh filter, not a NetworkPolicy, because a NetworkPolicy is pod-wide and the root server in the same pod needs PostgreSQL. The deny is by name by default (no configuration) and by CIDR as an opt-in, because pod and Service CIDRs vary per cluster. Volume roots are tightened by the binary rather than by an fsGroup or initContainer, so bare-metal bind mounts are covered too. The LLM stub was committed as a lab fixture so the record can be reproduced without a key.
 - **2026-11-24 17:40 MST** · claude-code · `ej/20261124-173106-51fdcc` at `1ef6b71`, no commits · `h-1618d4` — c-20c400 (E7, now in review): one worker settings follower. followAgentSettings (server/worker_node_settings.go) replaces syncSharedEgress/reloadSharedEgress and the agent_settings_revision key and covers c-7ad4da's syncTrafficCapture. It runs first in every dispatch poll and returns a claim-block reason: compares capture/global proxy/web search (incl. brave/tavily/keenable keys) by value every poll via an error-returning loadAgentSettings, follows llm_config_revision for LLM profiles, blocks claims while either read fails, and on a settings change drops task agents and holds claims for that poll. The branch merges the c-1d3e0a branch (whole unmerged E7 stack). Tests on Postgres 16: TestWorkerNodeFollowsAgentSettings, TestWorkerNodeFollowsLLMProfileChange, TestWorkerNodeFollowsTrafficCaptureSwitch (ported from c-7ad4da), new TestWorkerNodeBlocksClaimsWhileAgentSettingsUnreadable; verify.sh passes except the known macOS SOCKS5 127.0.0.2 test. E7 Current state entries and older Decisions moved to docs/handoff/2026-11-24-e7-distributed.md and docs/decisions.md for the size limit. **Next:** Land ej/20261124-173106-51fdcc (carries c-1d3e0a and the E7 stack) instead of ej/20261124-165722-c858f3. Do NOT land c-7ad4da's ej/20261124-161438-32780e; close it. c-c18f43 migration renumbering as branches land. **Decided:** Value comparison every poll, not a revision, for agent-baked settings: the putSettings bump was best-effort and direct writes were missed, either leaving worker agents off the recording proxy; cost is 8 one-row reads per poll. LLM config keeps its revision. An applyLLM failure after a change does not block claims: task agents are rebuilt per task from the Manager's updated settings.
 - **2026-11-24 17:39 MST** · claude-code · `ej/20261124-172839-c17308` `9c6a6a7`→`4d5d6e4` (1 commit) · `h-2932ac` — c-d4946f (E7, in review): the cluster egress deny now follows moved pods. egress.sh re-resolves ARTEX_EGRESS_DENY_HOSTS/ALLOW_HOSTS every ARTEX_EGRESS_REFRESH s (chart egress.refreshSeconds, default 10) in a loop start.sh starts. When an answer changes it rewrites ARTEX_EGRESS in one iptables-restore --noflush commit (also used at start). A name that stops resolving keeps its last addresses; NAME:PORT denies one TCP port. Chart: new headless <release>-control-pods (API port on the control pod IP); the PostgreSQL Service publishes not-ready addresses. Verified live on kind (own namespace, removed): after deleting artex-postgresql-0 (.13 → .14) and the control pod (.12 → .15), k8s-egress-probe.sh showed the executor refused at the new IPs, with 0 restarts. scripts/verify.sh passed. The branch merges the unlanded c-8cfbfe branch ej/20261124-155353-b1c60a. **Next:** Land ej/20261124-172839-c17308; it carries c-8cfbfe. Optionally test on a socket-LB CNI such as Cilium KPR, where denying the control pod IP may also refuse the proxy Service (gotcha in docs/handoff/2026-11-24-e7-kind-install-egress.md). **Decided:** The re-resolve loop is in egress.sh rather than the Go server, so one code path writes the executor rules for Docker and Kubernetes. Rebuilds are atomic through iptables-restore --noflush. Unresolvable names keep their last addresses (fail closed). CIDR auto-detection was rejected: a pod has no portable source for the pod and Service CIDRs. Strict clusterCIDRs stays opt-in.
 - **2026-11-24 17:39 MST** · claude-code · `ej/20261124-173102-01b458` `71c1d47`→`bedb3b5` (1 commit) · `h-50b1c4` — c-81193b (now in review): the finding detail hides controls the role is refused. Severity/triage-status/report-stage pickers need review; Start retest, Link traffic (edit/reorder/remove) and retest session links need operate. FindingRetestPanel and FindingTrafficPanel gate themselves with useCan. roles-e2e.js asserts reviewer keeps the 3 pickers without retest/link and client_read sees none; scripts/e2e/integrations.sh passes 51 checks. Branch merges the c-119206 branch (ej/20261124-171041-463f80), so landing it lands c-119206 too. **Next:** Land this branch (it carries c-119206). c-1198a2: run scripts/e2e/integrations.sh in CI once c-cc25b6's ci.yml lands. **Decided:** Gate inside the shared retest/traffic panels rather than per page, so every consumer is covered. Merged the unlanded c-119206 branch because roles-e2e.js lives there; resolved its imports-page conflict with main's Lanes/anchor work by taking main's version and re-applying the canImport gate, and biome-formatted its 80-column files. Fixed the e2e import-link locator broken by main's Lanes column (aria-label name).
 - **2026-11-24 17:30 MST** · claude-code · `ej/20261124-172040-ead433` `dd269fd`→`0450525` (1 commit) · `h-8ce710` — c-597b06 (E7, in review): stale worker_nodes rows no longer pile up under Kubernetes. db.NodeRetention = 20 × NodeTTL (15 min); ListNodes hides rows silent longer than that and every node heartbeat runs PruneNodes (db/worker_nodes.go, server/node.go). New test db/worker_nodes_test.go (live + recently dead listed, stale hidden then deleted) passes on Postgres 18; existing two-node server tests pass. docs/DISTRIBUTED.md gains a "Node registry" bullet. Moved the E3 and E4 Current state detail to docs/handoff/ to keep HANDOFF.md under 60 KB. **Next:** Land this branch with E7. Optionally confirm on the kind install (c-8cfbfe) that after a few rollouts GET /api/settings/nodes shows only live + recently dead pods once 15 min pass. **Decided:** Retention is a fixed 20 × NodeTTL (15 min) rather than a setting: long enough to see a crashed pod on the nodes page, short enough that rollouts do not accumulate. Both hide in the query (correct even if pruning fails) and delete from the heartbeat (no separate sweeper; any running node cleans up).
-- **2026-11-24 17:47 MST** · claude-code · `h-a90a9e` — c-6bcdd3 (E7, now in review): workers follow the LLM recording switch and agent config saves; DISTRIBUTED.md lists what is per-run, control-only, or a Limit. **Next:** land after c-20c400.
 - _Older hand-offs, a line each; `ej handoff log` has them whole:_
 - **2026-11-24 17:39 MST** · claude-code · `h-50b1c4` — c-81193b (now in review): the finding detail hides controls the role is refused. **Next:** Land this branch (it carries c-119206).
 - **2026-11-24 17:30 MST** · claude-code · `h-8ce710` — c-597b06 (E7, in review): stale worker_nodes rows no longer pile up under Kubernetes. **Next:** Land this branch with E7.
