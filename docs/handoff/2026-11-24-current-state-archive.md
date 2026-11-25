@@ -2,12 +2,6 @@
 
 Older, mostly landed status blocks, moved out to keep HANDOFF.md under its size limit. HANDOFF.md's Current state holds what is in flight; `ej handoff log` has the full history.
 
-**2026-11-24 (c-75c593)** — The benchmark subject instance (`docker-compose.bench.yml`) now builds from a
-clean clone: production `Dockerfile`, a sibling Postgres, named volumes, committed `bench/.env.example`
-with `ARTEX_RSI_LESSONS=off`. Verified on Docker Desktop arm64: `up --build` brings both containers up,
-isolation self-test passes, egress filter installed, UI 200, `ARTEX_RSI_LESSONS=off` in the container.
-No benchmark run was made against it.
-
 **2026-11-24 — E5 engagement governance (card `c-669406`)** is on `main` (#31); see `docs/GOVERNANCE.md`.
 Roles `admin`/`operator`/`reviewer`/`client_read` over the JWT (`artex_users`, `/api/users`, policy in
 `server/rbac_policy.go`, enforced in `requireAuth`; `ARTEX` is the break-glass admin). The per-task
@@ -16,21 +10,7 @@ is hash-chained by deferred row triggers (migrations 0016, 0018); `/api/intercep
 With `ARTEX_PG_DSN`, `go test ./...` fails only `TestGateOffTaskIsUnchanged` (`c-3157b4`),
 `TestConnectWithoutPasswordRealPG` (trust auth) and the macOS SOCKS5 UDP test.
 
-**2026-11-24 — client_read bound to companies (card `c-5b5421`, in review)** is on branch
-`ej/20261124-110647-182fa9`. That branch merged the E5 branch (PR #16) in, so it carries E5 too.
-- A `client_read` user sees only the companies in `artex_user_companies` (migration **0019**, audited at
-  commit). Admins set them with `GET/PUT /api/users/{id}/companies`. An unbound client gets 403.
-- `server/client_scope.go`: every route open to `client_read` has a binder that runs after the role
-  check. Findings routes go through the #425 company filter with `StrictCompany`, which ignores
-  agent-added `task_scope` rows. Tasks and ids outside the binding answer 404. A route without a binder
-  is refused, and `TestClientBindersCoverClientRoutes` enforces that. The test found
-  `findings/{id}/traffic` and its body route open to clients without a binder, so both are now bound.
-- A client's report counts only its own companies' assets, and its `/api/stats` drops the global
-  traffic and asset totals. `findings/retests/active` now needs `read`.
-- Tests: `server/client_scope_pg_test.go`, checked by mutation. `go test ./db ./server` with PG passes
-  except `TestConnectWithoutPasswordRealPG` (trust auth) and the SOCKS5 UDP test (macOS). verify.sh passes.
-- **Migration order:** 0016 (E5), 0018, 0019 (this branch), with E1 holding 0017. The loader refuses a
-  pending version older than an applied one, so renumber E1 above 0019 if it lands later.
+**2026-11-24 — client_read bound to companies (card `c-5b5421`, in review).** Detail (branch, verification, gaps) moved to `docs/handoff/2026-11-24-client-read-company-bindings.md`.
 
 **2026-11-23** — Fixes for the High and Medium findings from the 2026-11-23 security audit are on
 `main` (PR #1, branch `ej/20261123-145205-6a3af6`); the Linux/Docker verification fixes come from
