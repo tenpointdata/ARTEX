@@ -1,6 +1,6 @@
+import { sseUrl } from "./sse.ts";
 import assert from "node:assert/strict";
 import test from "node:test";
-import { sseUrl } from "./sse.ts";
 
 test("sseUrl keeps a stream on the page's origin so the session cookie is sent", () => {
   const path = "/api/exploration/activity/stream?task=7&since=12";

@@ -33,6 +33,11 @@ type scanImportRequest struct {
 	FileName string
 	TaskID   *int64
 	Data     []byte
+	// AnchorAssetIDs are existing runtime assets the scanned code serves (E10):
+	// code findings anchor to them, so a SAST/SCA result and a runtime finding
+	// on the same application meet on one asset. Runtime findings use them
+	// only when no imported asset matched their host.
+	AnchorAssetIDs []int64
 }
 
 // scanImportOutcome is what the API returns: the stored import row plus the
@@ -65,6 +70,15 @@ func runScanImport(ctx context.Context, pg *db.DB, req scanImportRequest) (*scan
 		// The parser error may quote the file; keep it out of the response.
 		return nil, fmt.Errorf("%w: the file could not be read as %s output", errUnknownImportFormat, req.Format)
 	}
+	// Check the task and anchors before any row is written, so a refused
+	// import leaves nothing behind (E10).
+	if req.TaskID != nil {
+		if err := pg.CheckImportAnchors(ctx, *req.TaskID, req.AnchorAssetIDs); err != nil {
+			return nil, err
+		}
+	} else if len(req.AnchorAssetIDs) > 0 {
+		return nil, errAnchorsNeedTask
+	}
 	sum := sha256.Sum256(req.Data)
 	im := &db.ScanImport{Format: string(req.Format), ToolName: res.Tool.Name, ToolVersion: scanimport.Token(res.Tool.Version),
 		FileName: importFileName(req.FileName), FileSHA256: hex.EncodeToString(sum[:]), TaskID: req.TaskID, ImportedBy: "operator"}
@@ -75,6 +89,11 @@ func runScanImport(ctx context.Context, pg *db.DB, req scanImportRequest) (*scan
 	var task int64
 	if req.TaskID != nil {
 		task = *req.TaskID
+		// A task import joins the task's exploration graph: one fact for the
+		// scan run, yielding a finding node per new finding (E10).
+		if _, err := pg.AddScanImportFact(ctx, im, importFactPayload(im, res), req.AnchorAssetIDs); err != nil {
+			return nil, err
+		}
 	}
 	byHost := map[string][]int64{}
 	as := pg.Assets()
@@ -95,7 +114,11 @@ func runScanImport(ctx context.Context, pg *db.DB, req scanImportRequest) (*scan
 		}
 	}
 	for _, f := range res.Findings {
-		id, created, err := pg.AddImportedFinding(ctx, importedFinding(im, f, byHost[f.Host]))
+		anchors := byHost[f.Host]
+		if len(anchors) == 0 {
+			anchors = req.AnchorAssetIDs
+		}
+		id, created, err := pg.AddImportedFinding(ctx, importedFinding(im, f, anchors))
 		switch {
 		case err != nil:
 			if len(out.FindingError) < 20 {
@@ -198,13 +221,14 @@ func importedFinding(im *db.ScanImport, f scanimport.Finding, assetIDs []int64) 
 	ev.WriteString("detail: " + strconv.Quote(f.Detail) + "\n")
 	return db.ImportedFinding{
 		ImportID: im.ID, TaskID: im.TaskID, VulnClass: f.RuleID, Name: f.RuleID, Severity: f.Severity,
-		Summary:  fmt.Sprintf("%s: %s (severity %s) reported on %s; imported scanner result, not verified", f.Tool, f.RuleID, f.Severity, where),
+		Summary:  fmt.Sprintf("%s: %s (severity %s, %s) reported on %s; imported scanner result, not verified", f.Tool, f.RuleID, f.Severity, laneLabel(f.Lane), where),
 		Evidence: ev.String(), Worker: "import:" + f.Tool, AssetIDs: assetIDs,
-		Tool: f.Tool, RuleID: f.RuleID, DedupKey: f.Key, Record: f.Record, Note: importedFindingNote,
+		Tool: f.Tool, RuleID: f.RuleID, DedupKey: importDedupKey(f.Key, im.TaskID), Record: f.Record, Note: importedFindingNote,
+		Lane: string(f.Lane), Location: f.Location, Line: f.Line, FactNodeID: factNode(im),
 	}
 }
 
-// importScan: POST /api/integrations/imports?format=<fmt>[&task_id=N][&file_name=x]
+// importScan: POST /api/integrations/imports?format=<fmt>[&task_id=N][&asset_ids=1,2][&file_name=x]
 // with the raw scanner file as the body (32 MiB cap).
 func (s *Server) importScan(w http.ResponseWriter, r *http.Request) {
 	pg := s.pg(w)
@@ -230,6 +254,12 @@ func (s *Server) importScan(w http.ResponseWriter, r *http.Request) {
 		}
 		req.TaskID = &id
 	}
+	anchors, err := parseAnchorAssetIDs(q.Get("asset_ids"))
+	if err != nil {
+		writeErr(w, 400, err.Error())
+		return
+	}
+	req.AnchorAssetIDs = anchors
 	raw, err := io.ReadAll(http.MaxBytesReader(w, r.Body, decodeMaxBytes))
 	if err != nil {
 		var tooLarge *http.MaxBytesError
@@ -248,6 +278,14 @@ func (s *Server) importScan(w http.ResponseWriter, r *http.Request) {
 			formats = append(formats, string(f))
 		}
 		writeErr(w, 400, err.Error()+"; formats: "+strings.Join(formats, ", "))
+		return
+	}
+	if errors.Is(err, errAnchorsNeedTask) || errors.Is(err, db.ErrImportAnchor) {
+		writeErr(w, 400, err.Error())
+		return
+	}
+	if errors.Is(err, db.ErrImportGraph) {
+		writeErr(w, 409, err.Error())
 		return
 	}
 	if err != nil {

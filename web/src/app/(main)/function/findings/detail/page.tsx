@@ -21,10 +21,10 @@ import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger } from "@
 import { Separator } from "@/components/ui/separator";
 import { SidebarTrigger } from "@/components/ui/sidebar";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { intlLocale, t } from "@/i18n";
 import { api } from "@/lib/api";
 import { statusMeta } from "@/lib/status";
 import type { Finding, FindingReportState, FindingStatus, Severity } from "@/lib/types";
-import { intlLocale, t } from "@/i18n";
 
 import {
   FINDING_REPORT_STATES,
@@ -32,6 +32,7 @@ import {
   ReportStateBadge,
   VerificationBadge,
 } from "../_components/findings-table";
+import { CodeLocation, LaneBadge } from "../_components/lane-badge";
 import { FindingIntegrationsPanel } from "./integrations-panel";
 import { FindingLineageView } from "./lineage";
 
@@ -174,6 +175,8 @@ function FindingDetailInner() {
           <StatusBadge domain="finding" value={finding.status} dot />
           <ReportStateBadge state={finding.report_state} />
           <VerificationBadge finding={finding} />
+          <LaneBadge lane={finding.source?.lane} />
+          <CodeLocation source={finding.source} className="max-w-xs" />
           {finding.inherited && finding.source_task_id && (
             <Badge variant="outline">{t("Source task #{id} · read-only", { id: finding.source_task_id })}</Badge>
           )}

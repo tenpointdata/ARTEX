@@ -177,6 +177,11 @@ func (s *Server) runNodeHeartbeat(ctx context.Context) {
 			log.Printf("[node %s] heartbeat: %v", row.NodeID, err)
 			return
 		}
+		if gone, err := pg.PruneNodes(); err != nil {
+			log.Printf("[node %s] prune stale nodes: %v", row.NodeID, err)
+		} else if gone > 0 {
+			log.Printf("[node %s] pruned %d node row(s) silent for over %s", row.NodeID, gone, db.NodeRetention)
+		}
 		n, err := pg.LiveNodes()
 		if err != nil {
 			return
