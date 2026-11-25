@@ -841,7 +841,10 @@ func (s *Server) agentsForTask(t *Task) *taskAgentBundle {
 	pl.SetCompactor(agent.NewCompactor(plannerRuntime, "task-router"))
 	// RSI shadow mode: select evidence-backed lessons for this task. Off by
 	// default; shadow logs what would be shown, inject appends the block.
-	s.wireTaskLessons(t, wk, pl)
+	// The arm ledger (card c-0d277f) records what this build runs, so RSI
+	// evidence can be checked against the server's record, not the upload.
+	lessonsMode, lessonIDs, lessonsBlock := s.wireTaskLessons(t, wk, pl)
+	s.recordTaskArm(t, lessonsMode, lessonIDs, lessonsBlock)
 	main := agent.NewMainAgent(mainRuntime, "task-router", s.m.dir, tx, mainRuntime.CompactionWindow(), s.agentMaxTurns("mainagent"))
 	main.SetFindingRecorder(s.evidenceStore())
 	main.SetCompactionWindowResolver(mainRuntime.CompactionWindow)

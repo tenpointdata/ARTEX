@@ -284,8 +284,9 @@ func (d *DB) RSIEvidenceTasksInvalid(ctx context.Context, ids []int64, since tim
 // proposal to passed or failed. Adopted, rejected and rolled-back proposals
 // take no more evidence, and a proposal takes at most maxUploads. The run
 // tasks enter the ledger, so none of them can back other evidence; passing
-// evidence whose tasks are already in the ledger is refused.
-func (d *DB) AddRSIEvidence(ctx context.Context, proposalID int64, passed bool, verdict, baseline, candidate []byte,
+// evidence whose tasks are already in the ledger is refused. The evidence
+// consumes suiteRunID, the open registration it was checked against.
+func (d *DB) AddRSIEvidence(ctx context.Context, proposalID, suiteRunID int64, passed bool, verdict, baseline, candidate []byte,
 	taskIDs []int64, maxUploads int, actor string) (*RSIEvidence, error) {
 	var out RSIEvidence
 	err := d.rsiTx(ctx, func(tx *sql.Tx) error {
@@ -311,6 +312,9 @@ func (d *DB) AddRSIEvidence(ctx context.Context, proposalID int64, passed bool, 
 			Scan(&out.ID, &out.ProposalID, &out.Passed, &out.Verdict, &out.CreatedAt); err != nil {
 			return err
 		}
+		if err := consumeRSISuiteRunTx(ctx, tx, proposalID, suiteRunID, out.ID); err != nil {
+			return err
+		}
 		res, err := tx.ExecContext(ctx, `INSERT INTO rsi_evidence_tasks(task_id, evidence_id)
 			SELECT x, $2 FROM unnest($1::bigint[]) AS x ON CONFLICT DO NOTHING`, nonNilIDs(taskIDs), out.ID)
 		if err != nil {
@@ -326,7 +330,7 @@ func (d *DB) AddRSIEvidence(ctx context.Context, proposalID int64, passed bool, 
 		if err := setRSIStatusTx(ctx, tx, proposalID, status); err != nil {
 			return err
 		}
-		return rsiLogTx(ctx, tx, proposalID, "evidence", actor, map[string]any{"evidence_id": out.ID, "passed": passed})
+		return rsiLogTx(ctx, tx, proposalID, "evidence", actor, map[string]any{"evidence_id": out.ID, "passed": passed, "suite_run_id": suiteRunID})
 	})
 	return &out, err
 }

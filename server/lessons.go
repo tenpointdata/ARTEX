@@ -48,24 +48,25 @@ func rsiLessonsMode() string {
 // attaches the rendered block to the planner and worker. The block is
 // code-owned: it is appended after the rendered prompt and cannot be removed
 // by editing the prompt in the UI. Usage is logged in both modes so a later
-// comparison can tell which tasks saw which lessons.
-func (s *Server) wireTaskLessons(t *Task, wk *agent.Worker, pl *agent.Planner) {
-	mode := rsiLessonsMode()
+// comparison can tell which tasks saw which lessons. It returns the mode, the
+// rendered ids and the block, for the task's arm ledger row.
+func (s *Server) wireTaskLessons(t *Task, wk *agent.Worker, pl *agent.Planner) (mode string, ids []int64, block string) {
+	mode = rsiLessonsMode()
 	if mode == "off" || t == nil {
-		return
+		return mode, nil, ""
 	}
 	taskID, err := strconv.ParseInt(t.ID, 10, 64)
 	if err != nil {
-		return
+		return mode, nil, ""
 	}
 	lessons, err := s.selectTaskLessons(context.Background(), mode, taskID)
 	if err != nil {
 		log.Printf("[rsi] lesson selection failed for task %s: %v", t.ID, err)
-		return
+		return mode, nil, ""
 	}
-	block, ids := db.RenderLessons(lessons, 1800)
+	block, ids = db.RenderLessons(lessons, 1800)
 	if block == "" {
-		return
+		return mode, nil, ""
 	}
 	if mode != "shadow" {
 		wk.SetLessonsBlock(block)
@@ -74,6 +75,7 @@ func (s *Server) wireTaskLessons(t *Task, wk *agent.Worker, pl *agent.Planner) {
 	if err := s.m.PG().LogLessonUsage(context.Background(), taskID, ids, mode); err != nil {
 		log.Printf("[rsi] lesson usage log failed for task %s: %v", t.ID, err)
 	}
+	return mode, ids, block
 }
 
 // taskLessons returns the lessons visible to one task plus the rendered block.

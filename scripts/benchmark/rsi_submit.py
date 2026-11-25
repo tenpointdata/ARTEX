@@ -3,6 +3,7 @@
 
   python3 rsi_submit.py propose --arm arms/planner-v2.json --round 1 --target planner --rationale "..."
   python3 rsi_submit.py propose --arm arms/lessons-v1.json --round 1 --lessons --rationale "..."
+  python3 rsi_submit.py register <proposal_id> --suite suites/heldout-v1.json --run-id <id> --seed 7 --replicates 3
   python3 rsi_submit.py evidence <proposal_id> benchmark-results/suite-<suite>/<run-id>
   python3 rsi_submit.py status
 
@@ -56,6 +57,33 @@ def evidence_body(run_dir: str) -> dict:
         raise SystemExit(f"{run_dir}: need readable baseline.json and candidate.json from an eval_suite run ({exc})")
 
 
+def registration_body(suite: dict, run_id: str, seed: int, replicates: int, target_ids: list[str] | None = None) -> dict:
+    """The POST /api/rsi/proposals/{id}/suite-runs body: what this suite run will execute (pre-registration)."""
+    all_ids = [t["id"] for t in suite["targets"]]
+    ids = list(target_ids) if target_ids else all_ids
+    unknown = sorted(set(ids) - set(all_ids))
+    if unknown:
+        raise SystemExit(f"--targets {unknown} are not in suite {suite['suite']!r} (has {all_ids})")
+    return {"suite_run": run_id, "suite": suite["suite"], "suite_version": suite["version"],
+            "split": suite["split"], "targets": ids, "seed": seed, "replicates": replicates}
+
+
+def register_suite_run(api, proposal_id: int, body: dict) -> dict:
+    """Register a run before it executes; raises SystemExit (nothing has run) when the server refuses."""
+    try:
+        return api.post(f"/api/rsi/proposals/{proposal_id}/suite-runs", body)
+    except SystemExit as exc:
+        raise SystemExit(f"suite-run registration refused, nothing was run: {exc}")
+
+
+def cmd_register(api, opts) -> int:
+    import eval_suite  # lazy: eval_suite imports this module
+    body = registration_body(eval_suite.load_suite(opts.suite), opts.run_id, opts.seed, opts.replicates,
+                             [t for t in opts.targets.split(",") if t])
+    print(json.dumps(register_suite_run(api, opts.proposal_id, body), indent=2))
+    return 0
+
+
 def cmd_propose(api, opts) -> int:
     arm = arms.load_arm(opts.arm)
     res = api.post("/api/rsi/proposals", proposal_body(arm, opts.round, opts.rationale, opts.target))
@@ -86,6 +114,14 @@ def build_parser() -> argparse.ArgumentParser:
     what.add_argument("--target", choices=arms.ROLES, help="propose this role's prompt body (a source: file spec)")
     what.add_argument("--lessons", action="store_true", help="propose the arm's lesson set")
     p.set_defaults(fn=cmd_propose)
+    g = sub.add_parser("register", help="pre-register a held-out suite run for a proposal, before running it")
+    g.add_argument("proposal_id", type=int)
+    g.add_argument("--suite", required=True, help="suite file, e.g. suites/heldout-v1.json")
+    g.add_argument("--run-id", required=True, help="the eval_suite --run-id this registration backs")
+    g.add_argument("--seed", type=int, default=0, help="same as eval_suite --seed")
+    g.add_argument("--replicates", type=int, default=1, help="same as eval_suite --replicates")
+    g.add_argument("--targets", default="", help="comma-separated suite target ids (default: all, as eval_suite runs)")
+    g.set_defaults(fn=cmd_register)
     e = sub.add_parser("evidence", help="attach an eval_suite run to a proposal; exits 1 unless it passed")
     e.add_argument("proposal_id", type=int)
     e.add_argument("run_dir", help="eval_suite output directory holding baseline.json and candidate.json")

@@ -4,8 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/Autumn-27/artex/rsi"
 )
 
 func rsiTestDB(t *testing.T) *DB {
@@ -16,7 +19,7 @@ func rsiTestDB(t *testing.T) *DB {
 	}
 	t.Cleanup(func() { d.Close() })
 	ctx := context.Background()
-	for _, q := range []string{`DELETE FROM rsi_proposal_evidence`, `ALTER TABLE rsi_adoption_log DISABLE TRIGGER USER`,
+	for _, q := range []string{`DELETE FROM rsi_suite_runs`, `DELETE FROM rsi_proposal_evidence`, `ALTER TABLE rsi_adoption_log DISABLE TRIGGER USER`,
 		`DELETE FROM rsi_adoption_log`, `ALTER TABLE rsi_adoption_log ENABLE TRIGGER USER`, `DELETE FROM rsi_proposals`} {
 		if _, err := d.ExecContext(ctx, q); err != nil {
 			t.Fatal(err)
@@ -43,9 +46,29 @@ func rsiAgentBody(t *testing.T, d *DB, key string) (int, string) {
 
 func oneEdit(int) int { return 1 }
 
+var rsiRunSeq atomic.Int64
+
+// openSuiteRun returns the proposal's open suite registration, registering
+// one when there is none (every upload consumes one).
+func openSuiteRun(t *testing.T, d *DB, proposalID int64) int64 {
+	t.Helper()
+	var id int64
+	err := d.QueryRow(`SELECT id FROM rsi_suite_runs WHERE proposal_id=$1 AND evidence_id IS NULL`, proposalID).Scan(&id)
+	if err == nil {
+		return id
+	}
+	reg, err := d.RegisterRSISuiteRun(context.Background(), rsi.SuiteRun{ProposalID: proposalID,
+		SuiteRun: fmt.Sprintf("test-%d-%d", time.Now().UnixNano(), rsiRunSeq.Add(1)), Suite: "heldout", SuiteVersion: "v1",
+		Split: "held-out", Targets: []string{"A", "B"}, Seed: 1, Replicates: 1}, 100, "loop")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return reg.ID
+}
+
 func passEvidence(t *testing.T, d *DB, id int64, passed bool) int64 {
 	t.Helper()
-	ev, err := d.AddRSIEvidence(context.Background(), id, passed, []byte(`{"passed":true}`), []byte(`{"stamp":{}}`), []byte(`{"stamp":{}}`), nil, 10, "loop")
+	ev, err := d.AddRSIEvidence(context.Background(), id, openSuiteRun(t, d, id), passed, []byte(`{"passed":true}`), []byte(`{"stamp":{}}`), []byte(`{"stamp":{}}`), nil, 10, "loop")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -116,7 +139,7 @@ func TestRSIPromptLifecyclePG(t *testing.T) {
 		*got.PromptVersionBefore != beforeVer || *got.PromptVersionAfter != ver {
 		t.Fatalf("adopt: %+v ver=%d body=%q", got, ver, body)
 	}
-	if _, err := d.AddRSIEvidence(ctx, p.ID, true, []byte(`{}`), []byte(`{}`), []byte(`{}`), nil, 10, "loop"); !errors.Is(err, ErrRSIConflict) {
+	if _, err := d.AddRSIEvidence(ctx, p.ID, 0, true, []byte(`{}`), []byte(`{}`), []byte(`{}`), nil, 10, "loop"); !errors.Is(err, ErrRSIConflict) {
 		t.Fatalf("evidence after adoption: %v", err)
 	}
 	if err := d.RejectRSIProposal(ctx, p.ID, "owner", "x"); !errors.Is(err, ErrRSIConflict) {
@@ -148,7 +171,7 @@ func TestRSIPromptLifecyclePG(t *testing.T) {
 	for _, e := range lg {
 		actions = append(actions, e.Action)
 	}
-	if fmt.Sprint(actions) != "[propose evidence evidence evidence adopt rollback]" {
+	if fmt.Sprint(actions) != "[propose register evidence register evidence register evidence adopt rollback]" {
 		t.Fatalf("log %v", actions)
 	}
 	if _, err := d.Exec(`UPDATE rsi_adoption_log SET actor='forged'`); err == nil {
@@ -225,7 +248,7 @@ func TestRSIEvidenceLedgerAndCapPG(t *testing.T) {
 		t.Fatal(err)
 	}
 	add := func(passed bool, tasks []int64, cap int) error {
-		_, err := d.AddRSIEvidence(ctx, p.ID, passed, []byte(`{}`), []byte(`{}`), []byte(`{}`), tasks, cap, "loop")
+		_, err := d.AddRSIEvidence(ctx, p.ID, openSuiteRun(t, d, p.ID), passed, []byte(`{}`), []byte(`{}`), []byte(`{}`), tasks, cap, "loop")
 		return err
 	}
 	if err := add(true, []int64{9001, 9002}, 5); err != nil {

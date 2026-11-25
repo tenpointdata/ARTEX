@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http/httptest"
 	"strconv"
+	"strings"
 	"testing"
 
 	"golang.org/x/crypto/bcrypt"
@@ -67,10 +68,15 @@ func (h rsiHarness) call(method, path string, body any) (int, map[string]any) {
 	return rec.Code, out
 }
 
-// rsiArm builds an eval_suite arm file whose runs pass the GT entries listed
-// per target, on fresh task ids.
-func rsiArm(role string, sha map[string]string, runs map[string][]string, tasks []int64) map[string]any {
-	stamp := map[string]any{"role": role, "arm": role, "split": "held-out", "suite": "heldout-v1",
+const rsiTestSeed = 7
+
+var rsiTestTargets = []string{"A", "B", "C"}
+
+// rsiArm builds an eval_suite arm file of registered run suiteRun whose runs
+// pass the GT entries listed per target, on the given task ids (one per target).
+func rsiArm(role, suiteRun string, sha map[string]string, runs map[string][]string, tasks []int64) map[string]any {
+	stamp := map[string]any{"role": role, "arm": role, "split": "held-out", "suite": "heldout", "suite_version": "v1",
+		"suite_run": suiteRun, "seed": rsiTestSeed, "replicates": 1,
 		"proposed_from": []string{}, "prompt_sha": sha, "lesson_ids": []int64{}}
 	for _, k := range rsi.InvariantStamps {
 		if _, ok := stamp[k]; !ok {
@@ -78,8 +84,7 @@ func rsiArm(role string, sha map[string]string, runs map[string][]string, tasks 
 		}
 	}
 	records := []map[string]any{}
-	i := 0
-	for _, target := range []string{"A", "B", "C"} {
+	for i, target := range rsiTestTargets {
 		verdicts := []map[string]any{}
 		for _, gt := range []string{"GT-1", "GT-2"} {
 			ok := false
@@ -89,11 +94,44 @@ func rsiArm(role string, sha map[string]string, runs map[string][]string, tasks 
 			verdicts = append(verdicts, map[string]any{"gt_id": gt, "detected": ok,
 				"gates": map[string]bool{"component": ok, "class": ok, "keywords": ok, "proof": ok}})
 		}
-		records = append(records, map[string]any{"target": target, "replicate": 0, "run_id": fmt.Sprint(role, target),
+		records = append(records, map[string]any{"target": target, "replicate": 0, "run_id": rsi.RunID(suiteRun, 0, role, target),
 			"payload": map[string]any{"task_status": "done", "verdicts": verdicts, "task": map[string]any{"id": strconv.FormatInt(tasks[i], 10)}}})
-		i++
 	}
 	return map[string]any{"stamp": stamp, "records": records}
+}
+
+// rsiRunArm does what the harness and the server do for one arm: make the
+// planner run body, create one task per target named after its run id, build
+// its ledger row through the real path (recordTaskArm), and finish the task.
+func rsiRunArm(t *testing.T, s *Server, plannerID int64, body, role, suiteRun string) []int64 {
+	t.Helper()
+	pg := s.m.PG()
+	if body != "" {
+		if cur, _ := pg.CurrentPrompt(plannerID); cur != body {
+			if _, err := pg.SavePrompt(plannerID, body, "bench arm "+role, "test"); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	var ids []int64
+	for _, target := range rsiTestTargets {
+		task, err := pg.CreateTaskWithOptions("rsi", "goal", db.TaskCreateOptions{Name: "bench-x-" + rsi.RunID(suiteRun, 0, role, target)})
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = pg.DeleteTask(task.ID) })
+		s.recordTaskArm(&Task{ID: strconv.FormatInt(task.ID, 10)}, rsiLessonsMode(), nil, "")
+		if _, err := pg.Exec(`UPDATE tasks SET status='done' WHERE id=$1`, task.ID); err != nil {
+			t.Fatal(err)
+		}
+		ids = append(ids, task.ID)
+	}
+	return ids
+}
+
+func rsiRegister(suiteRun, split string) map[string]any {
+	return map[string]any{"suite_run": suiteRun, "suite": "heldout", "suite_version": "v1", "split": split,
+		"targets": rsiTestTargets, "seed": rsiTestSeed, "replicates": 1}
 }
 
 func TestRSIGateEndToEndPG(t *testing.T) {
@@ -102,7 +140,7 @@ func TestRSIGateEndToEndPG(t *testing.T) {
 		db.SkipPGUnavailable(t, err)
 	}
 	defer m.Close()
-	for _, q := range []string{`DELETE FROM rsi_proposal_evidence`, `ALTER TABLE rsi_adoption_log DISABLE TRIGGER USER`,
+	for _, q := range []string{`DELETE FROM rsi_suite_runs`, `DELETE FROM rsi_proposal_evidence`, `ALTER TABLE rsi_adoption_log DISABLE TRIGGER USER`,
 		`DELETE FROM rsi_adoption_log`, `ALTER TABLE rsi_adoption_log ENABLE TRIGGER USER`, `DELETE FROM rsi_proposals`} {
 		if _, err := m.pg.Exec(q); err != nil {
 			t.Fatal(err)
@@ -159,54 +197,72 @@ func TestRSIGateEndToEndPG(t *testing.T) {
 	pid := int64(out["proposal"].(map[string]any)["id"].(float64))
 	base := fmt.Sprintf("/api/rsi/proposals/%d", pid)
 
-	var tasks []int64
-	for i := 0; i < 6; i++ {
-		task, err := m.CreateTask("rsi", "goal", nil, 0, 0)
-		if err != nil {
-			t.Fatal(err)
-		}
-		id, _ := strconv.ParseInt(task.ID, 10, 64)
-		tasks = append(tasks, id)
-		defer func() { _ = m.pg.DeleteTask(id) }()
+	run := func(n int) string { return fmt.Sprintf("suite-%d-%d", pid, n) }
+	// Evidence needs a registered run; registration needs held-out and one open at a time.
+	if code, _ := h.call("POST", base+"/suite-runs", rsiRegister(run(1), "dev")); code != 400 {
+		t.Fatalf("dev split registration: %d", code)
+	}
+	if code, out := h.call("POST", base+"/suite-runs", rsiRegister(run(1), "held-out")); code != 201 {
+		t.Fatalf("register: %d %v", code, out)
+	}
+	if code, _ := h.call("POST", base+"/suite-runs", rsiRegister(run(9), "held-out")); code != 409 {
+		t.Fatalf("second open registration: %d", code)
 	}
 	g0, w0 := rsiLiveSHA(m.pg, "goals"), rsiLiveSHA(m.pg, "worker")
 	sha := map[string]string{"goals": g0, "planner": rsi.SHA16(liveBody), "worker": w0}
 	candSHA := map[string]string{"goals": g0, "planner": rsi.SHA16(body), "worker": w0}
-	baseArm := rsiArm("baseline", sha, map[string][]string{"B": {"GT-1"}}, tasks[:3])
-	candArm := rsiArm("candidate", candSHA, map[string][]string{"A": {"GT-1"}, "B": {"GT-1", "GT-2"}}, tasks[3:6])
-
-	code, out = h.call("POST", base+"/evidence", map[string]any{"baseline": baseArm, "candidate": candArm})
-	ev := out["evidence"].(map[string]any)
+	upload := func(suiteRun string, baseTasks, candTasks []int64) (int, map[string]any) {
+		return h.call("POST", base+"/evidence", map[string]any{
+			"baseline":  rsiArm("baseline", suiteRun, sha, map[string][]string{"B": {"GT-1"}}, baseTasks),
+			"candidate": rsiArm("candidate", suiteRun, candSHA, map[string][]string{"A": {"GT-1"}, "B": {"GT-1", "GT-2"}}, candTasks)})
+	}
+	// An unregistered run is refused before anything is stored.
+	if code, _ := upload("never-registered", []int64{1, 2, 3}, []int64{4, 5, 6}); code != 409 {
+		t.Fatalf("unregistered run: %d", code)
+	}
+	bt := rsiRunArm(t, s, planner.ID, liveBody, "baseline", run(1))
+	ct := rsiRunArm(t, s, planner.ID, body, "candidate", run(1))
+	rsiRunArm(t, s, planner.ID, liveBody, "restore", run(0)) // the harness restores the starting body
+	code, out = upload(run(1), bt, ct)
+	ev, _ := out["evidence"].(map[string]any)
 	if code != 200 || ev["passed"] != true {
 		t.Fatalf("evidence: %d %v", code, out)
 	}
-	evID := ev["id"]
-	// The same runs cannot back a second upload (task ledger).
-	if code, out := h.call("POST", base+"/evidence", map[string]any{"baseline": baseArm, "candidate": candArm}); code != 200 ||
-		out["evidence"].(map[string]any)["passed"] != false {
-		t.Fatalf("replayed evidence: %d %v", code, out)
+	// The run is consumed: the same files cannot be uploaded again.
+	if code, _ := upload(run(1), bt, ct); code != 409 {
+		t.Fatalf("replayed run: %d", code)
 	}
-	// The replay is now the newest evidence; only a fresh passing upload re-opens adoption.
-	var fresh []int64
-	for i := 0; i < 6; i++ {
-		task, err := m.CreateTask("rsi", "goal", nil, 0, 0)
-		if err != nil {
-			t.Fatal(err)
-		}
-		id, _ := strconv.ParseInt(task.ID, 10, 64)
-		fresh = append(fresh, id)
-		defer func() { _ = m.pg.DeleteTask(id) }()
+
+	// The forgery the arm ledger stops: candidate files claiming the candidate
+	// body on tasks that ran the baseline body.
+	if code, out := h.call("POST", base+"/suite-runs", rsiRegister(run(2), "held-out")); code != 201 {
+		t.Fatalf("register 2: %d %v", code, out)
 	}
-	baseArm = rsiArm("baseline", sha, map[string][]string{"B": {"GT-1"}}, fresh[:3])
-	candArm = rsiArm("candidate", candSHA, map[string][]string{"A": {"GT-1"}, "B": {"GT-1", "GT-2"}}, fresh[3:])
-	code, out = h.call("POST", base+"/evidence", map[string]any{"baseline": baseArm, "candidate": candArm})
-	if ev = out["evidence"].(map[string]any); code != 200 || ev["passed"] != true {
+	bt = rsiRunArm(t, s, planner.ID, liveBody, "baseline", run(2))
+	ct = rsiRunArm(t, s, planner.ID, liveBody, "candidate", run(2))
+	code, out = upload(run(2), bt, ct)
+	ev, _ = out["evidence"].(map[string]any)
+	if code != 200 || ev["passed"] != false || !strings.Contains(fmt.Sprint(ev["verdict"]), "ran planner body") {
+		t.Fatalf("forged arm: %d %v", code, out)
+	}
+
+	if code, out := h.call("POST", base+"/suite-runs", rsiRegister(run(3), "held-out")); code != 201 {
+		t.Fatalf("register 3: %d %v", code, out)
+	}
+	bt = rsiRunArm(t, s, planner.ID, liveBody, "baseline", run(3))
+	ct = rsiRunArm(t, s, planner.ID, body, "candidate", run(3))
+	rsiRunArm(t, s, planner.ID, liveBody, "restore", run(0))
+	code, out = upload(run(3), bt, ct)
+	if ev, _ = out["evidence"].(map[string]any); code != 200 || ev["passed"] != true {
 		t.Fatalf("fresh evidence: %d %v", code, out)
 	}
-	evID = ev["id"]
-	// A fourth upload is over the per-proposal cap.
-	if code, _ := h.call("POST", base+"/evidence", map[string]any{"baseline": baseArm, "candidate": candArm}); code != 409 {
-		t.Fatalf("upload cap: %d", code)
+	evID := ev["id"]
+	// A fourth run is over the per-proposal cap.
+	if code, _ := h.call("POST", base+"/suite-runs", rsiRegister(run(4), "held-out")); code != 409 {
+		t.Fatalf("suite run cap: %d", code)
+	}
+	if code, out := h.call("GET", base+"/suite-runs", nil); code != 200 || len(out["suite_runs"].([]any)) != 3 {
+		t.Fatalf("list suite runs: %d %v", code, out)
 	}
 
 	// Adoption needs the owner password; the loop's bearer token is not enough.
@@ -245,7 +301,7 @@ func TestRSIGateEndToEndPG(t *testing.T) {
 		t.Fatal("rollback did not restore the previous prompt")
 	}
 	code, out = h.call("GET", base, nil)
-	if code != 200 || len(out["log"].([]any)) != 6 {
+	if code != 200 || len(out["log"].([]any)) != 9 {
 		t.Fatalf("log: %d %v", code, out["log"])
 	}
 }

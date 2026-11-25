@@ -315,6 +315,38 @@ class RunTests(unittest.TestCase):
                 mock.patch.object(run_bench, "run", return_value=payload({"GT-001": True})):
             eval_suite.main(argv)
 
+    def test_rsi_proposal_registers_before_the_first_run_and_refusal_stops(self):
+        tmp, suite = self.suite_files()
+        base, cand = write_arm(tmp, "base", {}), write_arm(tmp, "cand", {})
+        api = FakeArtex()
+        order = []
+        api.post = lambda path, body: order.append(("post", path, body)) or {"suite_run": {}}
+        argv = ["run", "--suite", suite, "--baseline", base, "--candidate", cand, "--subject-model", "m",
+                "--replicates", "2", "--seed", "4", "--out-root", str(tmp / "out"), "--run-id", "R", "--rsi-proposal", "9"]
+
+        def fake_run(args, token):
+            order.append(("run", args.run_id))
+            return payload({"GT-001": True})
+        with mock.patch.object(run_bench, "prepare", return_value="tok"), \
+                mock.patch.object(run_bench, "Api", return_value=api), \
+                mock.patch.object(run_bench, "run", side_effect=fake_run):
+            eval_suite.main(argv)
+        self.assertEqual(order[0], ("post", "/api/rsi/proposals/9/suite-runs", {
+            "suite_run": "R", "suite": "t", "suite_version": "v1", "split": "held-out",
+            "targets": ["dvga"], "seed": 4, "replicates": 2}))
+        self.assertEqual({o[0] for o in order[1:]}, {"run"})
+
+        def refuse(path, body):
+            raise SystemExit("409 conflict")
+        api.post = refuse
+        order.clear()
+        with mock.patch.object(run_bench, "prepare", return_value="tok"), \
+                mock.patch.object(run_bench, "Api", return_value=api), \
+                mock.patch.object(run_bench, "run", side_effect=fake_run):
+            with self.assertRaisesRegex(SystemExit, "registration refused"):
+                eval_suite.main(argv[:-4] + ["--run-id", "R3", "--rsi-proposal", "9"])
+        self.assertEqual(order, [])
+
     def test_baseline_with_lessons_is_rejected(self):
         tmp, suite = self.suite_files()
         base = write_arm(tmp, "base", {}, lessons=[1])

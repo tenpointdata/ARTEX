@@ -95,6 +95,31 @@ class SubmitTests(unittest.TestCase):
         code, _ = self.run_cli(["evidence", "3", str(self.tmp)], FakeApi({"id": 4, "passed": False, "verdict": {}}))
         self.assertEqual(code, 1)
 
+    def suite_file(self):
+        p = self.tmp / "suite.json"
+        p.write_text(json.dumps({"suite": "heldout", "version": "v1", "split": "held-out", "targets": [
+            {"id": "dvga", "type": "image", "ground_truth": "dvga", "image": "x", "port": 1, "container_port": 2},
+            {"id": "juice-shop", "type": "image", "ground_truth": "j", "image": "y", "port": 3, "container_port": 4}]}))
+        return str(p)
+
+    def test_registration_body_defaults_to_all_targets(self):
+        suite = json.loads(pathlib.Path(self.suite_file()).read_text())
+        self.assertEqual(rsi_submit.registration_body(suite, "R", 7, 3), {
+            "suite_run": "R", "suite": "heldout", "suite_version": "v1", "split": "held-out",
+            "targets": ["dvga", "juice-shop"], "seed": 7, "replicates": 3})
+        self.assertEqual(rsi_submit.registration_body(suite, "R", 0, 1, ["dvga"])["targets"], ["dvga"])
+        with self.assertRaisesRegex(SystemExit, "not in suite"):
+            rsi_submit.registration_body(suite, "R", 0, 1, ["nope"])
+
+    def test_register_posts_to_suite_runs(self):
+        api = FakeApi()
+        code, _ = self.run_cli(["register", "5", "--suite", self.suite_file(), "--run-id", "R", "--seed", "7",
+                                "--replicates", "3", "--targets", "juice-shop"], api)
+        self.assertEqual(code, 0)
+        self.assertEqual(api.calls, [("POST", "/api/rsi/proposals/5/suite-runs", {
+            "suite_run": "R", "suite": "heldout", "suite_version": "v1", "split": "held-out",
+            "targets": ["juice-shop"], "seed": 7, "replicates": 3})])
+
     def test_evidence_needs_both_files(self):
         with self.assertRaisesRegex(SystemExit, "baseline.json and candidate.json"):
             self.run_cli(["evidence", "3", str(self.tmp)], FakeApi())

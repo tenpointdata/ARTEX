@@ -23,7 +23,9 @@ import (
 // evidence, adoption log). Live tasks propose, held-out benchmarks adopt:
 //
 //	propose  → POST /api/rsi/proposals                (loop flag on, budget)
-//	evidence → POST /api/rsi/proposals/{id}/evidence  (loop flag on; the server's verdict)
+//	register → POST /api/rsi/proposals/{id}/suite-runs (loop flag on; before the suite runs)
+//	evidence → POST /api/rsi/proposals/{id}/evidence  (loop flag on; the server's verdict
+//	                                                   over a registered run and the arm ledger)
 //	adopt    → POST /api/rsi/proposals/{id}/adopt     (loop flag on; owner password)
 //	reject   → POST /api/rsi/proposals/{id}/reject    (always)
 //	rollback → POST /api/rsi/proposals/{id}/rollback  (always; a pointer change)
@@ -103,6 +105,7 @@ func (s *Server) rsiStatus(w http.ResponseWriter, r *http.Request) {
 		"budget_by_round":      []int{rsi.DefaultBudget.Edits(0), rsi.DefaultBudget.Edits(1), rsi.DefaultBudget.Edits(2), rsi.DefaultBudget.Edits(3)},
 		"policy":               rsi.DefaultPolicy,
 		"adoption_requires":    "owner password, loop on, newest evidence passed, baseline equals the live prompt",
+		"evidence_requires":    "a suite run registered before it ran (POST /api/rsi/proposals/{id}/suite-runs) and tasks whose arm ledger matches the stamps",
 		"rollback_always_open": true,
 	})
 }
@@ -279,26 +282,27 @@ func (s *Server) rsiAddEvidence(w http.ResponseWriter, r *http.Request) {
 		rsiWriteErr(w, "get proposal", err)
 		return
 	}
+	// The arms must be a run registered for this proposal before it ran.
+	suiteRun, _ := base.Stamp.Raw["suite_run"].(string)
+	reg, regAt, err := pg.OpenRSISuiteRun(r.Context(), id, suiteRun)
+	if err != nil {
+		rsiWriteErr(w, "find suite run", err)
+		return
+	}
 	var from []string
 	_ = json.Unmarshal(p.ProposedFrom, &from)
 	v := rsi.Evaluate(base, cand, rsi.Binding{
 		Edit:         rsi.Edit{Surface: rsi.SurfaceKind(p.Surface), Target: p.Target, Body: p.Body, LessonIDs: p.LessonIDs},
 		ProposedFrom: from,
 	}, rsi.DefaultPolicy)
-	// Evidence must be runs this instance made after the proposal existed.
-	if len(v.TaskIDs) > 0 {
-		bad, err := pg.RSIEvidenceTasksInvalid(r.Context(), v.TaskIDs, p.CreatedAt.Add(-time.Second))
-		if err != nil {
-			rsiWriteErr(w, "check evidence tasks", err)
-			return
-		}
-		if len(bad) > 0 {
-			v.Reasons = append(v.Reasons, fmt.Sprintf("tasks %v are unknown here, older than the proposal, or already back other evidence", bad))
-			v.Passed = false
-		}
+	// Evidence must be runs this instance made after the registration, each
+	// running what its arm claims (the task arm ledger).
+	if err := s.rsiBindEvidence(r.Context(), &v, base, cand, *reg, regAt); err != nil {
+		rsiWriteErr(w, "check evidence tasks", err)
+		return
 	}
 	vj, _ := json.Marshal(v)
-	ev, err := pg.AddRSIEvidence(r.Context(), id, v.Passed, vj, req.Baseline, req.Candidate, v.TaskIDs, rsiMaxEvidenceUploads, s.rsiActor(r))
+	ev, err := pg.AddRSIEvidence(r.Context(), id, reg.ID, v.Passed, vj, req.Baseline, req.Candidate, v.TaskIDs, rsiMaxEvidenceUploads, s.rsiActor(r))
 	if err != nil {
 		rsiWriteErr(w, "store evidence", err)
 		return

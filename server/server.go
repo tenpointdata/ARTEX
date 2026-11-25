@@ -809,6 +809,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/rsi/proposals", s.rsiCreateProposal)
 	mux.HandleFunc("GET /api/rsi/proposals/{id}", s.rsiGetProposal)
 	mux.HandleFunc("POST /api/rsi/proposals/{id}/evidence", s.rsiAddEvidence)
+	mux.HandleFunc("GET /api/rsi/proposals/{id}/suite-runs", s.rsiListSuiteRuns)
+	mux.HandleFunc("POST /api/rsi/proposals/{id}/suite-runs", s.rsiRegisterSuiteRun)
 	mux.HandleFunc("POST /api/rsi/proposals/{id}/adopt", s.rsiAdopt)
 	mux.HandleFunc("POST /api/rsi/proposals/{id}/reject", s.rsiReject)
 	mux.HandleFunc("POST /api/rsi/proposals/{id}/rollback", s.rsiRollback)

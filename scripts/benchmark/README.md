@@ -245,9 +245,13 @@ python3 rsi_submit.py propose --arm arms/planner-v2.json --round 1 --target plan
 #    ... or a lesson set (arm: {"name": "lessons-v1", "lessons": [12, 15]}, prompts all "current")
 python3 rsi_submit.py propose --arm arms/lessons-v1.json --round 1 --lessons --rationale "..."
 
-# 2. run the held-out suite for that same arm file against arms/baseline.json
+# 2. register the run BEFORE it executes (pre-registration; see below), then run the
+#    held-out suite for that same arm file against arms/baseline.json
+python3 rsi_submit.py register <proposal_id> --suite suites/heldout-v1.json --run-id r1 --seed 7 --replicates 3
 python3 eval_suite.py run --suite suites/heldout-v1.json --baseline arms/baseline.json \
-    --candidate arms/planner-v2.json --subject-model deepseek-chat --replicates 3 --seed 7
+    --candidate arms/planner-v2.json --subject-model deepseek-chat --replicates 3 --seed 7 --run-id r1
+#    ... or do both in one step: eval_suite.py registers first, and stops if the server refuses
+python3 eval_suite.py run ... --rsi-proposal <proposal_id>
 
 # 3. attach the evidence; exits 1 unless the gate's verdict passed
 python3 rsi_submit.py evidence <proposal_id> benchmark-results/suite-heldout-v1/<run-id>
@@ -260,6 +264,20 @@ python3 rsi_submit.py status
 5. **Rollback**: a one-step pointer change back to the previous `agent_prompts`
    version (prompt bodies) or the previous lesson status (lessons); neither
    needs a deploy.
+
+Pre-registration. The order is propose, register, run the suite, upload evidence.
+`rsi_submit.py register` (or `eval_suite.py run --rsi-proposal ID`) POSTs
+`/api/rsi/proposals/{id}/suite-runs` with the run id, suite name/version/split,
+target ids, seed and replicates; `register` takes `--run-id`, `--seed`,
+`--replicates` and optional `--targets a,b` (default: every suite target, as
+`eval_suite` runs them), and `eval_suite` uses the same values it runs with
+(a generated run id is fine). The server refuses evidence whose stamp (suite_run,
+suite, suite_version, seed, replicates) or set of record targets differs from the
+registration, or whose tasks predate it, so a run cannot be cherry-picked after
+the fact. One registration backs exactly one evidence upload, a proposal has at
+most 3 registrations and only one unconsumed at a time, and a reused run id is
+refused (409, as it is when the proposal is closed or `ARTEX_RSI_LOOP` is off).
+With `--rsi-proposal`, a refused registration stops `eval_suite` before any run.
 
 Binding: the server ties evidence to the proposal. For a prompt body,
 `candidate.stamp.prompt_sha[target]` must equal the sha256 (first 16 hex) of the

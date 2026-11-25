@@ -59,6 +59,19 @@ See `docs/ARCHITECTURE.md` for the code-level map. Summary:
 
 ## Current state
 
+**2026-11-24 (c-0d277f, RSI gate hardening; in review)** — Evidence is now checked against the server's
+own records, not only the upload. Migration **0026** (numbered past 0021/0023–0025, which are on open
+branches): `task_rsi_arm` (per-task arm ledger: prompt sha per goals/planner/worker, injected lesson ids and
+block sha, written in `agentsForTask` via `server/rsi_ledger.go` `recordTaskArm`; marked drifted by a
+different rebuild or a prompt pointer move while the task is live), `rsi_suite_runs` (pre-registration,
+`POST/GET /api/rsi/proposals/{id}/suite-runs`; held-out only, one open per proposal, ≤3, each consumed by
+exactly one upload), and log actions `register`, `lesson_retire`, `lesson_revive` (a graduated lesson retired
+or revived by extraction is logged on its adopted proposal). Pure checks `rsi.CheckRegistration` /
+`rsi.CheckLedger` (`rsi/ledger.go`) also bind each record's task name to its run id (which names the target).
+Harness: `rsi_submit.py register` and `eval_suite.py --rsi-proposal ID`. Verified on a throwaway Postgres 18:
+`go test ./rsi`, the RSI db tests (3 new), `TestRSIGateEndToEndPG` (registration, forged-arm refusal, cap),
+68 benchmark Python tests. Not verified: a live suite run (`c-772190`).
+
 **2026-11-24 — SSE 401 after console login (`c-13e86c`, fixed; pre-E5).** Streams are same-origin only
 (`web/src/lib/sse.ts`), dev gzip off, `openSSE` writes `: open`. Test `server/activity_stream_auth_pg_test.go`;
 browser-checked on the E5 stack.
@@ -249,8 +262,6 @@ body, through the versioned prompt API, and the starting bodies are restored aft
 8. *(unclaimed)* — **E2 UI: gate integrations controls by role** (S), card `c-119206`. Done = as reviewer
    and as client_read, no E2 control the server refuses is shown, and the finding detail has no 403.
 
-- *(unclaimed)* — **RSI gate hardening** (M), card `c-0d277f`: server-side per-task arm ledger, suite
-  pre-registration, adopted-lesson retire sync. Done = Postgres tests for each.
 - *(unclaimed)* — **RSI gate web UI** (M), card `c-936308`. Done = adopt/rollback from a proposals table in ≤2 clicks + password.
 
 **Human lane**
@@ -355,8 +366,10 @@ Card ids in brackets:
 - **Migration 0020 (RSI) vs other branches' 0015–0019:** the runner refuses a pending migration older
   than the newest applied one, so merge 0015–0019 (E2, E5, E1, c-ba9f64, c-5b5421) before this branch
   reaches a database, or renumber 0020 forward at merge. `db/migrate_test.go` lists 0020 explicitly.
-- The RSI gate trusts the judge verdicts inside uploaded arm records (it checks shape, binding, task
-  freshness and uniqueness, not the grading); the owner reads `report.md` before adopting. The generic
+- The RSI gate trusts the judge verdicts inside uploaded arm records (it checks shape, binding, the
+  registered run and the per-task arm ledger, not the grading); the owner reads `report.md` before adopting.
+  A suite run for a proposal must be registered first (`eval_suite.py --rsi-proposal ID`), or its evidence
+  is refused with 409. Changing a goals/planner/worker prompt while a bench task is live drifts that task. The generic
   prompt editor stays an owner path outside the gate and is what the bench harness uses to switch arms.
 
 - go-mitmproxy v1.9.2 has no upstream dial hook. Every capture-proxy upstream dial goes through its
@@ -396,6 +409,22 @@ Card ids in brackets:
   `ARTEX_SECRET_KEY`) loses stored secrets.
 
 ## Decisions
+
+- **2026-11-24 c-0d277f (RSI gate hardening):**
+  - Reject and rollback stay session-only (no owner step-up). Both only move toward the state the owner last
+    approved: reject closes an unadopted proposal, rollback restores the pre-adoption version and refuses if an
+    owner edited since. A stolen session can undo improvements but never introduce a change, and an emergency
+    revert must stay one step. Both are logged with their actor. Recorded in `RSI.md` too.
+  - The arm ledger records the template sha at agent build (the same value the harness stamps), not at each
+    render; mid-task changes are caught by the drift trigger on `agents.current_prompt_id` and by rebuild
+    comparison. Rebuilds after a task ends change nothing, so opening a finished task cannot rewrite it.
+  - Target binding uses the task name (run_bench names a task `bench-<corpus>-<run_id>`, and the run id
+    names suite run, replicate, arm and target) rather than parsing the goal URL, which depends on host rewrites.
+  - An unregistered or consumed suite run is a 409 with nothing stored; a registered run always ends as
+    evidence (passing or not), and only one can be open, so runs cannot be compared privately and the best
+    uploaded.
+  - Adopted-lesson state changes are logged, not reflected in the proposal status: the proposal stays
+    `adopted` (it was), and the log shows what happened to its lessons since.
 
 - **2026-11-24 c-2d91eb (E2 follow-ups):**
   - This branch merges the unmerged E2 UI branch (which carries the backend) instead of waiting, as c-597eb6
@@ -463,7 +492,7 @@ Card ids in brackets:
   the same gate via a scope-free benchmark pin (`ARTEX_RSI_LESSONS=bench`), and the new `adopted` mode
   injects only graduated lessons; `inject` is unchanged. Budget 4·0.6^round (floor 1), rounds forward-only
   one step at a time, ≤4 open proposals. Reject and rollback need only a session (they return toward the
-  owner-approved prior state; open question in `c-0d277f`). Failing uploads also consume their tasks in
+  owner-approved prior state); confirmed in c-0d277f, see the next entry. Failing uploads also consume their tasks in
   the ledger, so a run never backs two uploads.
 
 - **2026-11-24** — c-c0bb07 (E4): methodologies are leaf-package data (`methodology/`), not DB rows,

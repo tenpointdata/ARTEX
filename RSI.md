@@ -73,14 +73,14 @@ The gate implements the contract above; it has no proposer (critic) of its own.
 
 | rule | where it is enforced |
 |---|---|
-| 1. live tasks propose, benchmarks adopt | `rsi.Evaluate`: split must be `held-out`; the proposal's and the arm's `proposed_from` must not be in the evaluated targets; every run's task must exist on this instance and be newer than the proposal, and a task backs at most one evidence upload across all proposals (`rsi_evidence_tasks` ledger); both arms must come from one `suite_run`; at most 3 uploads per proposal |
+| 1. live tasks propose, benchmarks adopt | `rsi.Evaluate`: split must be `held-out`; the proposal's and the arm's `proposed_from` must not be in the evaluated targets; the suite run must be registered for the proposal before it ran (`POST .../suite-runs`: suite_run id, suite, version, targets, seed, replicates; held-out only; one open at a time, at most 3 per proposal, each backs exactly one upload, passing or not) and the arms must be exactly that run (every registered target × replicate, run ids as the harness derives them); every run's task must exist on this instance and be newer than the registration, and a task backs at most one evidence upload across all proposals (`rsi_evidence_tasks` ledger); every judged task must match its arm stamp in the server's per-task arm ledger (`task_rsi_arm`, below) |
 | 2. owner approval per adoption | `POST /api/rsi/proposals/{id}/adopt` needs the owner password (step-up under the login rate limit) and names the exact passing evidence id; a bearer token alone cannot adopt |
 | 3. immutable surfaces | `rsi.ValidateEdit` admits only `prompt_body` for `goals`/`planner`/`worker` and `lesson`; `rsi.ImmutableSurfaces` and git-reviewed surfaces (`skill`, `tool_description`) are refused; a body may not carry a code-owned tail marker (`rsiForbiddenMarkers`), checked on the raw and the rendered template after NFKC, dash, zero-width and whitespace folding. The tails are appended by code after the body, so a body cannot remove them |
 | 4. one-step rollback | adoption appends an `agent_prompts` version and records before/after; `POST .../rollback` moves the pointer back, only while the adopted version is still active (an owner edit since is never overwritten); open with the flag off |
 | 5. flag off by default | `ARTEX_RSI_LOOP=on` is read on every request; off refuses propose, evidence and adopt. Lesson injection keeps its own flag, `ARTEX_RSI_LESSONS` |
 | 6. bounded, annealed budget | `rsi.DefaultBudget`: 4, 2, 1, 1, … proposals per round; rounds move forward one at a time, and at most 4 proposals are open at once. The pruner: paired gain must appear on at least 2 distinct held-out targets |
 | 7. attribution | the server recomputes per-gate rates and paired gained/lost from the raw arm records; the candidate may differ from the baseline in exactly the proposed module (prompt sha per role, lesson set); any gate with net paired loss rejects and is reported as a regression of that module, with its targets (a candidate run that crashed where the baseline ran counts its baseline passes as lost); the baseline must not evolve (no lessons) |
-| 8. no self-approval, no silent state | status moves only through evidence (server verdict), adopt (owner) and rollback; every transition is a row in the append-only `rsi_adoption_log` (trigger refuses UPDATE/DELETE), written in the same transaction |
+| 8. no self-approval, no silent state | status moves only through evidence (server verdict), adopt (owner) and rollback; every transition is a row in the append-only `rsi_adoption_log` (trigger refuses UPDATE/DELETE), written in the same transaction. Registrations are logged (`register`), and a graduated lesson that extraction retires (its evidence withdrawn) or revives as a candidate is logged on its adopted proposal (`lesson_retire`, `lesson_revive`, actor `system`) in the extraction's transaction |
 
 At adoption every role's live prompt must still have the sha the evidence's
 baseline ran, and graduating lessons must still render to the block the
@@ -88,14 +88,32 @@ candidate ran (`lessons_block_sha`), so stale evidence cannot be adopted
 (re-run the suite).
 Workflow and commands: `scripts/benchmark/README.md`, "Benchmark gate".
 
-Known limits (card `c-0d277f` tracks the follow-ups): the judge verdicts and
-the per-run arm identity inside the uploaded records come from the harness, not
-the server, so the server checks their shape, binding, task freshness and
-uniqueness but cannot re-judge them or prove which prompt a given task ran; the
-owner reviews the suite's `report.md` before adopting. Marker checks catch
-imitation of a tail, not a body that argues against one in its own words.
-`proposed_from` is compared as exact target ids. Reject and rollback need only
-a session (they move toward the owner-approved prior state), by decision. The generic prompt editor (`PUT /api/agents/{key}/prompt`)
+**Per-task arm ledger** (`task_rsi_arm`, migration 0026). When a task's agents
+are built (`agentsForTask`), the server records the sha of the body each of
+goals/planner/worker runs (the stored prompt, else the built-in default: the
+value the harness stamps) and the lesson ids and block sha injected into the
+planner and worker. A rebuild with a different arm while the task is live, or a
+prompt pointer move on one of those roles while it is live (trigger on
+`agents.current_prompt_id`), marks the row drifted, and a drifted task backs no
+evidence; a rebuild after the task ended changes nothing. Evidence is checked
+record by record against it: prompt sha per role, lesson ids, block sha, and
+the task's name, which must end with the record's run id (the run id names the
+suite run, replicate, arm and target).
+
+Known limits: the judge verdicts inside the uploaded records come from the
+harness, so the server checks their shape, binding and provenance but cannot
+re-judge them; the owner reviews the suite's `report.md` before adopting. The
+ledger records the template a role was built with; a stored template that
+fails to render falls back to the built-in default at run time, which the
+ledger does not see (proposal bodies are render-checked at propose time).
+Marker checks catch imitation of a tail, not a body that argues against one in
+its own words. `proposed_from` is compared as exact target ids. Reject and
+rollback need only a session, by decision (2026-11-24, card `c-0d277f`): both
+move toward the state the owner last approved (reject closes an unadopted
+proposal; rollback restores the version that was live before adoption, and
+refuses if an owner edited since), so a stolen session can only undo
+improvements, never introduce a change; and rollback must stay one step for an
+emergency revert. Both are logged with their actor. The generic prompt editor (`PUT /api/agents/{key}/prompt`)
 remains an owner path outside the gate, and the benchmark harness uses it on its
 dedicated bench instance to switch arms.
 

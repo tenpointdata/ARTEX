@@ -28,6 +28,7 @@ import time
 
 import arms
 import drost
+import rsi_submit
 import run_bench
 import suite_stats
 
@@ -168,6 +169,10 @@ def cmd_run(opts) -> None:
         "suite_version": suite["version"], "split": suite["split"], "replicates": opts.replicates,
         "ground_truth_versions": ground_truth_versions(suite, opts.drost_repo), "suite_run": suite_run,
     }
+    if opts.rsi_proposal:  # pre-register before anything runs; a refusal stops here
+        rsi_submit.register_suite_run(api, opts.rsi_proposal, rsi_submit.registration_body(
+            suite, suite_run, opts.seed, opts.replicates, target_ids))
+        print(f"[suite] registered run {suite_run} for RSI proposal {opts.rsi_proposal}")
     by_name = {base["name"]: ("baseline", base), cand["name"]: ("candidate", cand)}
     stamps = {name: {**common, "role": role, "arm": name, "arm_file": arm["file"],
                      "proposed_from": arm["proposed_from"], "prompt_sha": {}}
@@ -236,6 +241,8 @@ def build_parser() -> argparse.ArgumentParser:
     r.add_argument("--artex-url", default=run_bench.os.environ.get("ARTEX_BASE", "http://localhost:8787"))
     r.add_argument("--drost-repo", default=run_bench.os.environ.get("DROST_REPO", ""))
     r.add_argument("--run-id", default="")
+    r.add_argument("--rsi-proposal", type=int, default=0,
+                   help="RSI proposal id: pre-register this run with the benchmark gate before it starts")
     r.add_argument("--out-root", default="benchmark-results")
     r.add_argument("--allow-self-judge", action="store_true")
     r.add_argument("--allow-dev-split", action="store_true")

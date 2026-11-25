@@ -310,7 +310,10 @@ func extractLessonsForTaskQ(ctx context.Context, q sqlExecQuerier, taskID int64)
 
 func upsertLessonQ(ctx context.Context, q sqlExecQuerier, key, kind, cue, action string, categoryID, companyID int64) (int64, error) {
 	var id int64
+	var was sql.NullString
+	var now string
 	err := q.QueryRowContext(ctx, `
+		WITH prev AS (SELECT status FROM rsi_lessons WHERE dedupe_key=$1)
 		INSERT INTO rsi_lessons(dedupe_key,kind,cue,action,category_id,company_id)
 		VALUES($1,$2,$3,$4,NULLIF($5,0),NULLIF($6,0))
 		ON CONFLICT (dedupe_key) DO UPDATE SET
@@ -324,7 +327,15 @@ func upsertLessonQ(ctx context.Context, q sqlExecQuerier, key, kind, cue, action
 				THEN 'candidate'
 				ELSE rsi_lessons.status
 			END
-		RETURNING id`, key, kind, cue, action, categoryID, companyID).Scan(&id)
+		RETURNING id, (SELECT status FROM prev), status`, key, kind, cue, action, categoryID, companyID).Scan(&id, &was, &now)
+	if err != nil {
+		return 0, err
+	}
+	// A retired lesson revived as a candidate: if a gate adoption graduated
+	// it, its proposal's trail says so (it is no longer injected as adopted).
+	if was.String == "retired" && now == "candidate" {
+		err = logAdoptedLessonChangeQ(ctx, q, []int64{id}, "lesson_revive", "new evidence revived it as a candidate")
+	}
 	return id, err
 }
 
@@ -404,15 +415,58 @@ func retireLessonsIfEmptyQ(ctx context.Context, q sqlExecQuerier, ids []int64) e
 	if len(ids) == 0 {
 		return nil
 	}
-	_, err := q.ExecContext(ctx, `
+	// The self-join reads each row's status before the update, so a graduated
+	// (adopted) lesson that retires is logged against its proposal.
+	rows, err := q.QueryContext(ctx, `
 		UPDATE rsi_lessons l
 		SET status='retired', updated_at=now()
-		WHERE l.id=ANY($1::bigint[])
+		FROM rsi_lessons old
+		WHERE old.id=l.id
+		  AND l.id=ANY($1::bigint[])
 		  AND l.status<>'retired'
 		  AND NOT EXISTS (
 		      SELECT 1 FROM rsi_lesson_evidence e
 		      WHERE e.lesson_id=l.id AND e.withdrawn_at IS NULL
-		  )`, ids)
+		  )
+		RETURNING l.id, old.status`, ids)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	var adopted []int64
+	for rows.Next() {
+		var id int64
+		var was string
+		if err := rows.Scan(&id, &was); err != nil {
+			return err
+		}
+		if was == "adopted" {
+			adopted = append(adopted, id)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	rows.Close()
+	return logAdoptedLessonChangeQ(ctx, q, adopted, "lesson_retire", "its last live evidence was withdrawn")
+}
+
+// logAdoptedLessonChangeQ writes one rsi_adoption_log row per adopted lesson
+// proposal that graduated one of ids, so a lesson leaving (or re-entering)
+// the adopted set outside the gate is on the proposal's audit trail while
+// the proposal still reads adopted (card c-0d277f).
+func logAdoptedLessonChangeQ(ctx context.Context, q sqlExecQuerier, ids []int64, action, reason string) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	_, err := q.ExecContext(ctx, `
+		INSERT INTO rsi_adoption_log(proposal_id, action, actor, detail)
+		SELECT p.id, $2, 'system',
+		       jsonb_build_object('lesson_ids', to_jsonb(ARRAY(SELECT x FROM unnest(p.lesson_ids) x WHERE x = ANY($1::bigint[]) ORDER BY x)),
+		                          'reason', $3::text)
+		FROM rsi_proposals p
+		WHERE p.surface='lesson' AND p.status='adopted' AND p.lesson_ids && $1::bigint[]
+		ORDER BY p.id`, ids, action, reason)
 	return err
 }
 
