@@ -93,7 +93,7 @@ type Worker struct {
 	// compaction).
 	noaEnabledFn func() bool
 	// maxTokensFn resolves the per-reply output cap in tokens, on the same
-	// per-run basis. nil or 0 = send no cap and let the endpoint decide.
+	// per-run basis. nil or 0 = the role's default cap.
 	maxTokensFn func() int
 	// lessonsBlock is the raw RSI evidence block. Empty = off. Execute() frames
 	// it with a per-run data envelope (field=lessons) and appends it after the
@@ -138,15 +138,12 @@ func (w *Worker) nonStreaming() bool { return w.nonStreamingFn != nil && w.nonSt
 func (w *Worker) SetNoaEnabled(fn func() bool) { w.noaEnabledFn = fn }
 
 // SetMaxTokens wires a resolver for the per-reply output cap. nil/unset or 0 =
-// send no cap and let the endpoint decide. Read per run, like nonStreaming.
+// the role's default cap (DefaultReplyCaps). Read per run, like nonStreaming.
 func (w *Worker) SetMaxTokens(fn func() int) { w.maxTokensFn = fn }
 
-func (w *Worker) maxTokens() int {
-	if w.maxTokensFn == nil {
-		return 0
-	}
-	return w.maxTokensFn()
-}
+// maxTokens is the cap sent per reply: the profile's when set, else the role
+// default (see reply_caps.go; 0 would mean norma's 32768).
+func (w *Worker) maxTokens() int { return resolveReplyCap(ReplyRoleWorker, w.maxTokensFn) }
 
 // SetConstraintInject wires a resolver deciding whether this task's operation
 // constraints get injected into the worker system prompt. nil = inject (default).
@@ -669,7 +666,7 @@ func (w *Worker) execute(ctx context.Context, name string, taskID int64, as *db.
 		Compaction:    compactionConfig(w.compactionWindow()), // long tool-heavy runs stay within the window
 		Todos:         actool.NewTodoStore(),                  // session-level scratch todos (TodoWrite), pure planning, discarded on exit
 		NonStreaming:  w.nonStreaming(),                       // when this profile selects non-streaming, use Provider.Complete
-		MaxTokens:     w.maxTokens(),                          // 0 = send no cap; the server default decides
+		MaxTokens:     w.maxTokens(),                          // profile cap, else the role default (reply_caps.go)
 
 		// On by default; ARTEX_UNTRUSTED_BOUNDARY=0 opts out: nonce-frame tool output as untrusted data.
 		UntrustedOutputBoundary: untrustedBoundaryEnabled(),

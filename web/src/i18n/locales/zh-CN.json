@@ -1199,7 +1199,7 @@
   "Host": "主机",
   "Host is taken from the URL.": "Host 从 URL 中提取。",
   "Hosts, current minute": "当前分钟的主机数",
-  "How many tokens a single reply may generate at most; sent with every request. 0 (default) = the field is not sent, leaving it to the server default. This is not the same thing as the \"context window\" above: that is the model's total capacity, used only locally to compute the compression threshold. Set it too low and a reasoning model gets truncated mid-thinking, unable to emit even a one-word answer.": "单次回复最多生成的 token 数，会随每次请求发送。0（默认）表示不发送该字段，使用服务端默认值。它不同于上方的“上下文窗口”：后者是模型总容量，仅在本地用于计算压缩阈值。设置过低会导致推理模型在思考途中被截断，甚至无法输出一个词的答案。",
+  "How many tokens a single reply may generate at most; sent with every request. 0 (default) = each agent role applies its own built-in cap (8192 for the planner, worker, main agent and chat); a value above 0 replaces it for every role using this profile. This is not the same thing as the \"context window\" above: that is the model's total capacity, used only locally to compute the compression threshold. Set it too low and a reasoning model gets truncated mid-thinking, unable to emit even a one-word answer.": "单次回复最多生成的 token 数，会随每次请求发送。0（默认）表示由各代理角色使用其内置上限（规划器、执行器、主代理和对话均为 8192）；大于 0 的值会替换使用此配置的所有角色的上限。它不同于上方的“上下文窗口”：后者是模型总容量，仅在本地用于计算压缩阈值。设置过低会导致推理模型在思考途中被截断，甚至无法输出一个词的答案。",
   "http (API request)": "http（API 请求）",
   "http (remote)": "http（远程）",
   "HTTP 200 with a normal stop finish_reason, yet not a single content block in the response — gateway empty frames, dropped thinking-field frames and sampling hiccups all look like this.": "HTTP 200、finish_reason 是正常 stop，但整条响应一个内容块都没有——网关空帧、思考字段丢帧、采样打嗝都会长这样。",

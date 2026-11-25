@@ -350,7 +350,7 @@ function ProfileSheet({
   const [priority, setPriority] = React.useState("0"); // pool order; higher = tried earlier
   const [poolExclude, setPoolExclude] = React.useState(false);
   const [streaming, setStreaming] = React.useState(true); // true = streaming (default); false = non-streaming
-  const [maxTokens, setMaxTokens] = React.useState("0"); // per-reply output cap; 0 = not sent
+  const [maxTokens, setMaxTokens] = React.useState("0"); // per-reply output cap; 0 = each role's default cap
   const [maxTokensField, setMaxTokensField] = React.useState(NONE); // which field name carries the cap; NONE = max_tokens
   const [sessionHeaderKey, setSessionHeaderKey] = React.useState(""); // custom session header name; empty = not sent
   const [userAgent, setUserAgent] = React.useState(""); // custom User-Agent; empty = keep the default UA
@@ -821,7 +821,7 @@ function ProfileSheet({
                 </Label>
                 <p className="text-muted-foreground text-xs">
                   {t(
-                    'How many tokens a single reply may generate at most; sent with every request. 0 (default) = the field is not sent, leaving it to the server default. This is not the same thing as the "context window" above: that is the model\'s total capacity, used only locally to compute the compression threshold. Set it too low and a reasoning model gets truncated mid-thinking, unable to emit even a one-word answer.',
+                    'How many tokens a single reply may generate at most; sent with every request. 0 (default) = each agent role applies its own built-in cap (8192 for the planner, worker, main agent and chat); a value above 0 replaces it for every role using this profile. This is not the same thing as the "context window" above: that is the model\'s total capacity, used only locally to compute the compression threshold. Set it too low and a reasoning model gets truncated mid-thinking, unable to emit even a one-word answer.',
                   )}
                 </p>
               </div>

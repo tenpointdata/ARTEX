@@ -291,7 +291,8 @@ func (r *taskLLMRuntime) nonStreaming() bool {
 }
 
 // maxTokens returns the currently-active source's per-reply output cap.
-// Unresolvable → 0, i.e. send no cap, matching the pre-setting behaviour.
+// Unresolvable → 0, which each agent role turns into its own default cap
+// (agent.ReplyCap); 0 never reaches norma, whose own default is 32768.
 func (r *taskLLMRuntime) maxTokens() int {
 	cfg, _ := r.activeCfg() // zero value 0 when no configuration resolves
 	return cfg.MaxTokens

@@ -37,7 +37,7 @@ type ChatAgent struct {
 	guard          *guard.Guard // optional; nil disables intercept hooks for chat
 	nonStreamingFn func() bool  // resolver: use non-streaming (Complete) path? (nil = streaming)
 	noaEnabledFn   func() bool  // resolver: use experimental noa compaction? (nil = off)
-	maxTokensFn    func() int   // resolver: per-reply output cap (nil/0 = send no cap)
+	maxTokensFn    func() int   // resolver: per-reply output cap (nil/0 = role default cap)
 }
 
 func NewChatAgent(prov llm.Provider, model, workDir string, tx *transcript.Store, window int) *ChatAgent {
@@ -56,15 +56,12 @@ func (c *ChatAgent) nonStreaming() bool { return c.nonStreamingFn != nil && c.no
 func (c *ChatAgent) SetNoaEnabled(fn func() bool) { c.noaEnabledFn = fn }
 
 // SetMaxTokens wires a resolver for the per-reply output cap. nil/unset or 0 =
-// send no cap and let the endpoint decide. Read per run, like nonStreaming.
+// the role's default cap (DefaultReplyCaps). Read per run, like nonStreaming.
 func (c *ChatAgent) SetMaxTokens(fn func() int) { c.maxTokensFn = fn }
 
-func (c *ChatAgent) maxTokens() int {
-	if c.maxTokensFn == nil {
-		return 0
-	}
-	return c.maxTokensFn()
-}
+// maxTokens is the cap sent per reply: the profile's when set, else the role
+// default (see reply_caps.go; 0 would mean norma's 32768).
+func (c *ChatAgent) maxTokens() int { return resolveReplyCap(ReplyRoleChat, c.maxTokensFn) }
 
 // SetProxy points the chat agent's WebFetch/Bash at the recording proxy plus the
 // CA cert it trusts (empty addr = direct). Kept for parity with the other agents.
@@ -216,7 +213,7 @@ func (c *ChatAgent) Chat(ctx context.Context, agentKey, sessionID, message strin
 		// (each custom agent gets its own copy; empty/0 uses the generic default: 10 rounds).
 		Settlement:   wrapupSettlement(agentKey, nil),
 		NonStreaming: c.nonStreaming(), // when this profile selects non-streaming, use Provider.Complete
-		MaxTokens:    c.maxTokens(),    // 0 = send no cap, the server's default decides
+		MaxTokens:    c.maxTokens(),    // profile cap, else the role default (reply_caps.go)
 
 		// On by default; ARTEX_UNTRUSTED_BOUNDARY=0 opts out: nonce-frame tool output as untrusted data.
 		UntrustedOutputBoundary: untrustedBoundaryEnabled(),

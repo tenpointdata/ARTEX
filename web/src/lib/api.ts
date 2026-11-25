@@ -1143,7 +1143,7 @@ export const api = {
     priority?: number; // pool order position; higher is used first
     pool_exclude?: boolean; // true = not a failover target
     streaming?: boolean; // true (default) = streaming | false = non-streaming
-    max_tokens?: number; // output cap per reply; 0 = not sent, the server default decides
+    max_tokens?: number; // output cap per reply; 0 = each agent role's default (agent/reply_caps.go)
     max_tokens_field?: string; // ""=max_tokens (default) | "max_completion_tokens" (openai format only)
     session_header_key?: string; // non-empty = send this HTTP header on every request, value = the current session id; "" = not sent
     user_agent?: string; // non-empty = override the User-Agent header on every request; "" = keep the default UA

@@ -34,7 +34,7 @@ type MainAgent struct {
 	steerWork       func(intentID int64, msg string) error // engine callback: steer a running work (nil = off)
 	nonStreamingFn  func() bool                            // resolver: use non-streaming (Complete) path? (nil = streaming)
 	noaEnabledFn    func() bool                            // resolver: use experimental noa compaction? (nil = off)
-	maxTokensFn     func() int                             // resolver: per-reply output cap (nil/0 = send no cap)
+	maxTokensFn     func() int                             // resolver: per-reply output cap (nil/0 = role default cap)
 }
 
 // SetNoaEnabled wires a resolver deciding whether runs use the experimental noa
@@ -49,15 +49,12 @@ func (m *MainAgent) SetNonStreaming(fn func() bool) { m.nonStreamingFn = fn }
 func (m *MainAgent) nonStreaming() bool { return m.nonStreamingFn != nil && m.nonStreamingFn() }
 
 // SetMaxTokens wires a resolver for the per-reply output cap. nil/unset or 0 =
-// send no cap and let the endpoint decide. Read per run, like nonStreaming.
+// the role's default cap (DefaultReplyCaps). Read per run, like nonStreaming.
 func (m *MainAgent) SetMaxTokens(fn func() int) { m.maxTokensFn = fn }
 
-func (m *MainAgent) maxTokens() int {
-	if m.maxTokensFn == nil {
-		return 0
-	}
-	return m.maxTokensFn()
-}
+// maxTokens is the cap sent per reply: the profile's when set, else the role
+// default (see reply_caps.go; 0 would mean norma's 32768).
+func (m *MainAgent) maxTokens() int { return resolveReplyCap(ReplyRoleMainAgent, m.maxTokensFn) }
 
 func NewMainAgent(prov llm.Provider, model, workDir string, tx *transcript.Store, window, maxTurns int) *MainAgent {
 	return &MainAgent{prov: prov, model: model, workDir: workDir, tx: tx, window: window, maxTurns: maxTurns}
@@ -172,7 +169,7 @@ func (m *MainAgent) Chat(ctx context.Context, taskID int64, mainSeg int, as *db.
 		// hitting the budget (steps) → the SDK runs wrap-up: output a one-line progress summary to the user. Prompt and wrap-up rounds are editable in the backend (default 10 rounds).
 		Settlement:   wrapupSettlement("mainagent", nil),
 		NonStreaming: m.nonStreaming(), // when this profile selects non-streaming, use Provider.Complete
-		MaxTokens:    m.maxTokens(),    // 0 = send no cap, the server's default decides
+		MaxTokens:    m.maxTokens(),    // profile cap, else the role default (reply_caps.go)
 
 		// On by default; ARTEX_UNTRUSTED_BOUNDARY=0 opts out: nonce-frame tool output as untrusted data.
 		UntrustedOutputBoundary: untrustedBoundaryEnabled(),

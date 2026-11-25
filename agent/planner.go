@@ -39,7 +39,7 @@ type Planner struct {
 	injectConstraints func() bool                            // resolver: inject task operation constraints into system prompt? (nil = yes)
 	nonStreamingFn    func() bool                            // resolver: use non-streaming (Complete) path? (nil = streaming)
 	noaEnabledFn      func() bool                            // resolver: use experimental noa compaction? (nil = off)
-	maxTokensFn       func() int                             // resolver: per-reply output cap (nil/0 = send no cap)
+	maxTokensFn       func() int                             // resolver: per-reply output cap (nil/0 = role default cap)
 	compactor         *Compactor                             // cold-node compaction (§7); nil = disabled
 	// lessonsBlock is the raw RSI evidence block. Empty = off. Plan() frames it
 	// with a per-run data envelope (field=lessons) and appends it after the
@@ -77,15 +77,12 @@ func (p *Planner) nonStreaming() bool { return p.nonStreamingFn != nil && p.nonS
 func (p *Planner) SetNoaEnabled(fn func() bool) { p.noaEnabledFn = fn }
 
 // SetMaxTokens wires a resolver for the per-reply output cap. nil/unset or 0 =
-// send no cap and let the endpoint decide. Read per run, like nonStreaming.
+// the role's default cap (DefaultReplyCaps). Read per run, like nonStreaming.
 func (p *Planner) SetMaxTokens(fn func() int) { p.maxTokensFn = fn }
 
-func (p *Planner) maxTokens() int {
-	if p.maxTokensFn == nil {
-		return 0
-	}
-	return p.maxTokensFn()
-}
+// maxTokens is the cap sent per reply: the profile's when set, else the role
+// default (see reply_caps.go; 0 would mean norma's 32768).
+func (p *Planner) maxTokens() int { return resolveReplyCap(ReplyRolePlanner, p.maxTokensFn) }
 
 func (p *Planner) compactionWindow() int {
 	if p.windowFn != nil {
@@ -584,7 +581,7 @@ func (p *Planner) Plan(ctx context.Context, taskID int64, as *db.AssetStore, ts 
 		// instead (see wrapupSettlementForTask).
 		Settlement:   settle,
 		NonStreaming: p.nonStreaming(), // when this profile selects non-streaming, use Provider.Complete
-		MaxTokens:    p.maxTokens(),    // 0 = send no cap; the server default decides
+		MaxTokens:    p.maxTokens(),    // profile cap, else the role default (reply_caps.go)
 
 		// On by default; ARTEX_UNTRUSTED_BOUNDARY=0 opts out: nonce-frame tool output as untrusted data.
 		UntrustedOutputBoundary: untrustedBoundaryEnabled(),
