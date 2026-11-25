@@ -13,12 +13,34 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import { useCan } from "@/hooks/use-session";
 import { intlLocale, t } from "@/i18n";
-import { detectImportFormat, IMPORT_FORMATS, importFindingsHref } from "@/lib/integrations";
+import {
+  detectImportFormat,
+  IMPORT_FORMATS,
+  importFindingsHref,
+} from "@/lib/integrations";
 import { integrationsApi } from "@/lib/integrations-api";
-import type { ScanImport, ScanImportFormat, ScanImportOutcome } from "@/lib/types";
+import type {
+  ScanImport,
+  ScanImportFormat,
+  ScanImportOutcome,
+} from "@/lib/types";
 
 const FORMAT_LABEL: Record<ScanImportFormat, string> = {
   "nuclei-jsonl": "Nuclei (JSONL)",
@@ -32,7 +54,9 @@ const MAX_IMPORT_BYTES = 32 * 1024 * 1024; // server/scan_import_api.go decodeMa
 
 function fileHint(tooLarge: boolean, detected: boolean): string {
   if (tooLarge) return t("The file exceeds the 32 MiB import limit");
-  return detected ? t("Format detected from the file") : t("Could not detect the format; pick it above");
+  return detected
+    ? t("Format detected from the file")
+    : t("Could not detect the format; pick it above");
 }
 
 function fmtTime(ts: string) {
@@ -41,7 +65,9 @@ function fmtTime(ts: string) {
 
 // Scanner imports: upload a scanner's output file; assets get provenance and results become
 // unverified POE-0 findings. A re-import never edits or promotes an existing finding.
+// Importing needs operate (server/rbac_policy.go); a read-only role sees the history only.
 export default function ScanImportsPage() {
+  const canImport = useCan("operate");
   const [file, setFile] = React.useState<File | null>(null);
   const [format, setFormat] = React.useState<ScanImportFormat | "">("");
   const [detected, setDetected] = React.useState(false);
@@ -62,7 +88,11 @@ export default function ScanImportsPage() {
         setImports(r.items);
         setTotal(r.total);
       })
-      .catch((e) => toast.error(t("Failed to load imports: {error}", { error: (e as Error).message })))
+      .catch((e) =>
+        toast.error(
+          t("Failed to load imports: {error}", { error: (e as Error).message }),
+        ),
+      )
       .finally(() => setLoaded(true));
   }, [page, pageSize]);
   React.useEffect(load, [load]);
@@ -78,7 +108,8 @@ export default function ScanImportsPage() {
   }
 
   const taskNum = taskId.trim() === "" ? undefined : Number(taskId);
-  const taskInvalid = taskNum !== undefined && !(Number.isSafeInteger(taskNum) && taskNum > 0);
+  const taskInvalid =
+    taskNum !== undefined && !(Number.isSafeInteger(taskNum) && taskNum > 0);
   const tooLarge = (file?.size ?? 0) > MAX_IMPORT_BYTES;
 
   async function runImport() {
@@ -100,18 +131,29 @@ export default function ScanImportsPage() {
       if (page === 1) load();
       else setPage(1);
     } catch (e) {
-      toast.error(t("Import failed: {error}", { error: (e as Error).message }), { duration: 10000 });
+      toast.error(
+        t("Import failed: {error}", { error: (e as Error).message }),
+        { duration: 10000 },
+      );
     } finally {
       setBusy(false);
     }
   }
 
-  const problems = [...(outcome?.asset_errors ?? []), ...(outcome?.finding_errors ?? [])];
+  const problems = [
+    ...(outcome?.asset_errors ?? []),
+    ...(outcome?.finding_errors ?? []),
+  ];
 
   return (
     <div className="flex flex-col gap-4">
       <div className="flex flex-wrap items-center gap-2">
-        <Button variant="ghost" size="icon-sm" asChild aria-label={t("Back to integrations")}>
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          asChild
+          aria-label={t("Back to integrations")}
+        >
           <Link href="/system/integrations">
             <ArrowLeftIcon />
           </Link>
@@ -126,88 +168,105 @@ export default function ScanImportsPage() {
         </div>
       </div>
 
-      <Card>
-        <CardContent>
-          <form
-            className="flex flex-wrap items-end gap-3"
-            onSubmit={(e) => {
-              e.preventDefault();
-              void runImport();
-            }}
-          >
-            <div className="grid gap-2">
-              <Label htmlFor="import-file">{t("Scanner file")}</Label>
-              <Input
-                id="import-file"
-                ref={inputRef}
-                type="file"
-                className="w-72"
-                accept=".jsonl,.json,.xml,.sarif"
-                onChange={(e) => void pick(e.target.files?.[0] ?? null)}
-              />
-            </div>
-            <div className="grid gap-2">
-              <Label>{t("Format")}</Label>
-              <Select value={format} onValueChange={(v) => setFormat((v ?? "") as ScanImportFormat | "")}>
-                <SelectTrigger className="w-56" aria-label={t("Format")}>
-                  <SelectValue placeholder={t("Select format")} />
-                </SelectTrigger>
-                <SelectContent>
-                  {IMPORT_FORMATS.map((f) => (
-                    <SelectItem key={f} value={f}>
-                      {FORMAT_LABEL[f]}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="grid gap-2">
-              <Label htmlFor="import-task">{t("Task ID (optional)")}</Label>
-              <Input
-                id="import-task"
-                className="w-32"
-                inputMode="numeric"
-                value={taskId}
-                aria-invalid={taskInvalid}
-                onChange={(e) => setTaskId(e.target.value)}
-              />
-            </div>
-            <Button type="submit" disabled={!file || !format || taskInvalid || tooLarge || busy}>
-              <UploadIcon /> {busy ? t("Importing…") : t("Import")}
-            </Button>
-          </form>
-          {file && <p className="text-muted-foreground mt-2 text-xs">{fileHint(tooLarge, detected)}</p>}
-          {outcome && (
-            <div className="mt-3 text-sm">
-              <p>
-                {t(
-                  "Import #{id}: {records} records, {assets} assets, {new} new findings, {existing} already known, {info} informational",
-                  {
-                    id: outcome.import.id,
-                    records: outcome.import.records,
-                    assets: outcome.import.assets,
-                    new: outcome.import.findings_new,
-                    existing: outcome.import.findings_existing,
-                    info: outcome.import.informational,
-                  },
-                )}
+      {canImport && (
+        <Card>
+          <CardContent>
+            <form
+              className="flex flex-wrap items-end gap-3"
+              onSubmit={(e) => {
+                e.preventDefault();
+                void runImport();
+              }}
+            >
+              <div className="grid gap-2">
+                <Label htmlFor="import-file">{t("Scanner file")}</Label>
+                <Input
+                  id="import-file"
+                  ref={inputRef}
+                  type="file"
+                  className="w-72"
+                  accept=".jsonl,.json,.xml,.sarif"
+                  onChange={(e) => void pick(e.target.files?.[0] ?? null)}
+                />
+              </div>
+              <div className="grid gap-2">
+                <Label>{t("Format")}</Label>
+                <Select
+                  value={format}
+                  onValueChange={(v) =>
+                    setFormat((v ?? "") as ScanImportFormat | "")
+                  }
+                >
+                  <SelectTrigger className="w-56" aria-label={t("Format")}>
+                    <SelectValue placeholder={t("Select format")} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {IMPORT_FORMATS.map((f) => (
+                      <SelectItem key={f} value={f}>
+                        {FORMAT_LABEL[f]}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="import-task">{t("Task ID (optional)")}</Label>
+                <Input
+                  id="import-task"
+                  className="w-32"
+                  inputMode="numeric"
+                  value={taskId}
+                  aria-invalid={taskInvalid}
+                  onChange={(e) => setTaskId(e.target.value)}
+                />
+              </div>
+              <Button
+                type="submit"
+                disabled={!file || !format || taskInvalid || tooLarge || busy}
+              >
+                <UploadIcon /> {busy ? t("Importing…") : t("Import")}
+              </Button>
+            </form>
+            {file && (
+              <p className="text-muted-foreground mt-2 text-xs">
+                {fileHint(tooLarge, detected)}
               </p>
-              {outcome.new_findings.length > 0 && (
-                <Link className="text-primary text-sm hover:underline" href={importFindingsHref(outcome.import.id)}>
-                  {t("Review the new findings")}
-                </Link>
-              )}
-              {problems.length > 0 && (
-                <ul className="text-destructive mt-2 list-disc pl-5 text-xs">
-                  {problems.slice(0, 10).map((p) => (
-                    <li key={p}>{p}</li>
-                  ))}
-                </ul>
-              )}
-            </div>
-          )}
-        </CardContent>
-      </Card>
+            )}
+            {outcome && (
+              <div className="mt-3 text-sm">
+                <p>
+                  {t(
+                    "Import #{id}: {records} records, {assets} assets, {new} new findings, {existing} already known, {info} informational",
+                    {
+                      id: outcome.import.id,
+                      records: outcome.import.records,
+                      assets: outcome.import.assets,
+                      new: outcome.import.findings_new,
+                      existing: outcome.import.findings_existing,
+                      info: outcome.import.informational,
+                    },
+                  )}
+                </p>
+                {outcome.new_findings.length > 0 && (
+                  <Link
+                    className="text-primary text-sm hover:underline"
+                    href={importFindingsHref(outcome.import.id)}
+                  >
+                    {t("Review the new findings")}
+                  </Link>
+                )}
+                {problems.length > 0 && (
+                  <ul className="text-destructive mt-2 list-disc pl-5 text-xs">
+                    {problems.slice(0, 10).map((p) => (
+                      <li key={p}>{p}</li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
 
       <Card className="gap-0">
         <CardHeader>
@@ -234,7 +293,13 @@ export default function ScanImportsPage() {
   );
 }
 
-function ImportsTable({ imports, loaded }: { imports: ScanImport[]; loaded: boolean }) {
+function ImportsTable({
+  imports,
+  loaded,
+}: {
+  imports: ScanImport[];
+  loaded: boolean;
+}) {
   return (
     <Table>
       <TableHeader>
@@ -255,7 +320,10 @@ function ImportsTable({ imports, loaded }: { imports: ScanImport[]; loaded: bool
       <TableBody>
         {imports.length === 0 && (
           <TableRow>
-            <TableCell colSpan={11} className="text-muted-foreground py-8 text-center text-sm">
+            <TableCell
+              colSpan={11}
+              className="text-muted-foreground py-8 text-center text-sm"
+            >
               {loaded ? t("No imports yet") : t("Loading…")}
             </TableCell>
           </TableRow>
@@ -263,7 +331,9 @@ function ImportsTable({ imports, loaded }: { imports: ScanImport[]; loaded: bool
         {imports.map((im) => (
           <TableRow key={im.id} id={`import-${im.id}`}>
             <TableCell className="font-mono text-xs">{im.id}</TableCell>
-            <TableCell className="text-xs whitespace-nowrap">{fmtTime(im.created_at)}</TableCell>
+            <TableCell className="text-xs whitespace-nowrap">
+              {fmtTime(im.created_at)}
+            </TableCell>
             <TableCell
               className="max-w-56 truncate font-mono text-xs"
               title={`${im.file_name} · sha256 ${im.file_sha256}`}
@@ -277,19 +347,37 @@ function ImportsTable({ imports, loaded }: { imports: ScanImport[]; loaded: bool
             </TableCell>
             <TableCell className="text-sm">
               {im.tool_name || FORMAT_LABEL[im.format] || im.format}
-              {im.tool_version && <span className="text-muted-foreground"> {im.tool_version}</span>}
+              {im.tool_version && (
+                <span className="text-muted-foreground">
+                  {" "}
+                  {im.tool_version}
+                </span>
+              )}
             </TableCell>
             <TableCell className="font-mono text-xs">
-              {im.task_id ? <Link href={`/function/tasks/detail?id=${im.task_id}`}>#{im.task_id}</Link> : "—"}
+              {im.task_id ? (
+                <Link href={`/function/tasks/detail?id=${im.task_id}`}>
+                  #{im.task_id}
+                </Link>
+              ) : (
+                "—"
+              )}
             </TableCell>
-            <TableCell className="text-right tabular-nums">{im.records}</TableCell>
-            <TableCell className="text-right tabular-nums">{im.assets}</TableCell>
+            <TableCell className="text-right tabular-nums">
+              {im.records}
+            </TableCell>
+            <TableCell className="text-right tabular-nums">
+              {im.assets}
+            </TableCell>
             <TableCell className="text-right tabular-nums">
               {im.findings_new > 0 ? (
                 <Link
                   className="text-primary underline underline-offset-2"
                   href={importFindingsHref(im.id)}
-                  aria-label={t("Show the {count} new findings of import #{id}", { count: im.findings_new, id: im.id })}
+                  aria-label={t(
+                    "Show the {count} new findings of import #{id}",
+                    { count: im.findings_new, id: im.id },
+                  )}
                 >
                   {im.findings_new}
                 </Link>
@@ -297,8 +385,12 @@ function ImportsTable({ imports, loaded }: { imports: ScanImport[]; loaded: bool
                 im.findings_new
               )}
             </TableCell>
-            <TableCell className="text-right tabular-nums">{im.findings_existing}</TableCell>
-            <TableCell className="text-right tabular-nums">{im.informational}</TableCell>
+            <TableCell className="text-right tabular-nums">
+              {im.findings_existing}
+            </TableCell>
+            <TableCell className="text-right tabular-nums">
+              {im.informational}
+            </TableCell>
             <TableCell className="text-xs">{im.imported_by}</TableCell>
           </TableRow>
         ))}

@@ -105,5 +105,5 @@ if ! node -e 'require("playwright")' >/dev/null 2>&1; then
 fi
 
 log "running the scenario"
-ARTEX_E2E_URL="http://127.0.0.1:$UI_PORT" ARTEX_E2E_PASSWORD="$PASSWORD" ARTEX_E2E_SHOTS="$WORK/shots" \
+ARTEX_E2E_URL="http://127.0.0.1:$UI_PORT" ARTEX_E2E_PASSWORD="$PASSWORD" ARTEX_E2E_PG_DSN="$DSN" ARTEX_E2E_SHOTS="$WORK/shots" \
   node "$ROOT/scripts/e2e/integrations-e2e.js"
