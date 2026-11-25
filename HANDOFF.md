@@ -130,10 +130,14 @@ the backend `ej/20261124-055326-6bcfa9`, so landing it lands all of E2. See `doc
   The findings bulk bar and the detail page have Push to tracker; the detail has a Tickets card.
 - **RBAC (with E5):** `GET /api/exploration/findings/{id}/integrations` needs `read`, not `client_read`.
   Tracker create/edit/delete need `admin`, the same as notification channels. Push, sync and import need `operate`.
-  The E2 pages do not yet gate their controls by role (`c-119206`).
+  The E2 pages gate their controls the same way with `useCan` (`c-119206`, in review): tracker
+  add/edit/delete/enable admin; Sync, Push to tracker and the import form operate; the finding Tickets
+  card read (a client_read session does not fetch it).
 - **Browser e2e:** `scripts/e2e/integrations.sh` sets up a throwaway Postgres, the backend, a Next production
-  build and Playwright, then runs `integrations-e2e.js` against `fake-github.js`. It passed 24 checks
-  locally on 2026-11-24. It is not a CI job yet (`c-1198a2`, after c-cc25b6).
+  build and Playwright, then runs `integrations-e2e.js` against `fake-github.js`, then `roles-e2e.js` signs in as a
+  reviewer and as a company-bound client_read user and checks that no refused control shows and no `/api`
+  call returns 403 (needs `psql`). It passed 45 checks locally on 2026-11-24; run against the pre-c-119206
+  UI the role probes fail 8 checks, so they do catch regressions. It is not a CI job yet (`c-1198a2`, after c-cc25b6).
 - Migration `0015_integrations.sql` is unreleased, and its checksum is enforced, so do not edit it. Fix forward.
 - Local `./server` failures that are environment, not code: `TestConnectWithoutPasswordRealPG` (trust-auth Postgres)
   and the SOCKS5 test that needs a `127.0.0.2` alias.
@@ -253,8 +257,9 @@ body, through the versioned prompt API, and the starting bodies are restored aft
    CVSS/EPSS-scored, remediation-bearing, standards-mapped deliverables (OWASP ASVS/WSTG, MITRE
    ATT&CK). Done = a report export with per-finding CVSS vector + remediation + framework tags,
    covered by tests. Card `c-8f9cca`.
-8. *(unclaimed)* — **E2 UI: gate integrations controls by role** (S), card `c-119206`. Done = as reviewer
-   and as client_read, no E2 control the server refuses is shown, and the finding detail has no 403.
+8. *(unclaimed)* — **client_read finding detail: hide refused controls** (S), card `c-81193b`. Start retest,
+   Link traffic and the severity/status/report-stage pickers show for client_read. Done = the client block of
+   `scripts/e2e/roles-e2e.js` asserts they are hidden and the e2e passes.
 
 - *(unclaimed)* — **RSI gate hardening** (M), card `c-0d277f`: server-side per-task arm ledger, suite
   pre-registration, adopted-lesson retire sync. Done = Postgres tests for each.
@@ -316,7 +321,7 @@ Card ids in brackets:
 
 - **E1** [`c-8f9cca`] Client-grade reporting & deliverables (scoring, remediation, framework mappings, branded export).
 - **E2** [`c-6def05`] Backend, UI (`c-597eb6`) and UI follow-ups (`c-2d91eb`) are done, in review on `ej/20261124-150516-d78c96` (see Current state). Follow-ups:
-  [`c-119206`] role-gate the E2 UI controls; [`c-1198a2`] run `scripts/e2e/integrations.sh` in CI (after c-cc25b6);
+  [`c-119206`] role-gate the E2 UI controls (in review); [`c-81193b`] the same for the client_read finding detail; [`c-1198a2`] run `scripts/e2e/integrations.sh` in CI (after c-cc25b6);
   [`c-da9198`] scheduled sync plus a per-tracker lock; [`c-ea60a0`] move agent `scan_ingest` onto
   `scanimport`, normalize default ports, and settle two dedup edge cases.
 - **E3** [`c-d25ff9`] — gate built (in review). Follow-ups: hardening `c-0d277f`, UI `c-936308`, first live run `c-772190`, proposer/critic `c-c89f5b`.
