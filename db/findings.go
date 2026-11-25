@@ -19,6 +19,10 @@ type DBFinding struct {
 	EvidenceVersion       int64
 	ReportEvidenceVersion int64
 	TrafficBindings       []FindingTrafficBinding // populated only for export
+	// ImportSource is the provenance of a scanner-imported finding (E2/E10:
+	// lane, tool, rule, code location); nil for a finding from ARTEX's workers.
+	// Filled by the list, export and detail queries (attachImportSources).
+	ImportSource *FindingImportSource
 
 	ID                 int64
 	TaskID             *int64
@@ -190,8 +194,12 @@ type FindingFilter struct {
 	// A finding an import only matched by dedup key belongs to the import that created it.
 	// Empty/invalid = do not filter by import.
 	ImportID string
-	Query    string // fuzzy search keyword over name/class/summary/evidence/report body
-	Sort     string // "severity" | "time"
+	// Lane narrows to a testing lane (E10): runtime = ARTEX's own findings and
+	// runtime-scanner imports; sast / sca = the code-scanner imports of that
+	// lane. Any other value matches nothing. Empty = do not filter by lane.
+	Lane  string
+	Query string // fuzzy search keyword over name/class/summary/evidence/report body
+	Sort  string // "severity" | "time"
 	// AssetScope is a node key of the asset tree (a:<id> / c:<id> / r:<domain> /
 	// __none__); selecting a node means selecting its whole subtree.
 	// Empty = do not filter by asset.
@@ -258,6 +266,16 @@ func (f FindingFilter) where() (string, []any) {
 		args = append(args, iid)
 		conds = append(conds, fmt.Sprintf(
 			"EXISTS (SELECT 1 FROM finding_import_sources fis WHERE fis.finding_id = f.id AND fis.import_id = $%d)", len(args)))
+	}
+	// Lane filter: a finding with no import source is a runtime finding.
+	switch f.Lane {
+	case "":
+	case "runtime":
+		conds = append(conds, "NOT EXISTS (SELECT 1 FROM finding_import_sources fis WHERE fis.finding_id = f.id AND fis.lane IN ('sast','sca'))")
+	default:
+		args = append(args, f.Lane)
+		conds = append(conds, fmt.Sprintf(
+			"EXISTS (SELECT 1 FROM finding_import_sources fis WHERE fis.finding_id = f.id AND fis.lane = $%d)", len(args)))
 	}
 	// Asset filter: asset_ids is a jsonb array; @> ANY(...) can use
 	// idx_findings_asset_ids.
@@ -366,7 +384,10 @@ func (d *DB) ListFindingsPage(f FindingFilter, page, pageSize int) ([]*DBFinding
 	}
 	defer rows.Close()
 	out, err := scanFindings(rows)
-	return out, total, err
+	if err != nil {
+		return nil, 0, err
+	}
+	return out, total, d.attachImportSources(out)
 }
 
 // ListFindingsFiltered returns up to limit findings matching f, newest first,
@@ -391,7 +412,11 @@ func (d *DB) ListFindingsFiltered(f FindingFilter, limit int) ([]*DBFinding, err
 		return nil, err
 	}
 	defer rows.Close()
-	return scanFindings(rows)
+	out, err := scanFindings(rows)
+	if err != nil {
+		return nil, err
+	}
+	return out, d.attachImportSources(out)
 }
 
 // orderBy is the list order: severity first when asked, newest first otherwise.
@@ -645,7 +670,10 @@ func (d *DB) ListFindingsForExport(f FindingFilter, ids []int64) ([]*DBFinding, 
 		_ = json.Unmarshal([]byte(aidsJSON), &f.AssetIDs)
 		out = append(out, f)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return out, d.attachImportSources(out)
 }
 
 // FindingStats is the whole-table aggregate powering the findings page's stat
@@ -806,7 +834,7 @@ func (d *DB) GetFinding(id int64) (*DBFinding, error) {
 		return nil, err
 	}
 	_ = json.Unmarshal([]byte(aidsJSON), &f.AssetIDs)
-	return f, nil
+	return f, d.attachImportSources([]*DBFinding{f})
 }
 
 // DeleteFinding removes a finding entirely: the standalone findings row and its

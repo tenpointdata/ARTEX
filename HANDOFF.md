@@ -84,6 +84,25 @@ worker-node finding binds the control capture through a signed node RPC (`POST /
 `server/node_rpc.go`, HMAC under `db.NodeRPCKey`); design in `docs/DISTRIBUTED.md` "Evidence on worker
 nodes", verification in Deltas. Gap: `c-7ad4da` (capture switch read at start-up).
 
+**2026-11-24 — E10 code-security lane + its UI and exports (`c-72dd9d`, `c-d059ae`; in review)** on
+`ej/20261124-170322-736db7`, which merges the unlanded E10 branch `ej/20261124-150533-1ba29e` and main
+(E2 backend + UI are on main as migration 0015). **Land this branch, not the E10 branch alone.**
+- E10: SARIF imports get a lane (`runtime`/`sast`/`sca`); a task import with `asset_ids` writes an
+  exploration fact yielding a finding node per new finding; `GET /api/report` shows a Source line and
+  per-lane counts. Migration `0024_code_security_lane.sql` (E10's renumber of E2 to 0023 is dropped).
+- c-d059ae: `?lane=runtime|sast|sca` in the shared findings filter (list, groups, tree, export;
+  runtime = worker findings + runtime-scanner imports); finding DTOs carry `source` (lane, tool, rule,
+  path:line, import id; no raw record); findings Markdown exports get the Source line and CSV gets
+  Lane/Source Tool/Source Rule/Source Location/Import ID; import rows carry `lane_counts`.
+- Web: lane badge + `path:line` on the findings table and detail, a lane dropdown (URL `?lane=`), an
+  anchor-asset picker on Scanner imports (enabled once a task is chosen; lists `GET /assets?task_id=`),
+  and Lanes + Fact node columns on Past imports.
+- Verified on Postgres 16: `TestFindingFilterByLane`, `TestCodeScanJoinsTaskGraphAndReport` (now also
+  lane filter, DTO source, CSV/MD exports, unknown anchor leaves no import row), `report` tests;
+  `scripts/verify.sh` (only the known macOS SOCKS5 test fails) and `--web-only` pass. Not checked in a
+  browser. Gaps: `c-7651e5` (stat cards ignore lane/import filters; fact node has no deep link).
+- Detail of E2 and E10 (formats, decisions, verification): `docs/handoff/2026-11-24-e2-e10-integrations.md`.
+
 **2026-11-24 — SSE 401 after console login (`c-13e86c`, fixed; pre-E5).** Streams are same-origin only
 (`web/src/lib/sse.ts`), dev gzip off, `openSSE` writes `: open`. Test `server/activity_stream_auth_pg_test.go`;
 browser-checked on the E5 stack.
@@ -113,30 +132,6 @@ companies lands on Reports, sees only Reports + Findings and a switcher with jus
 switches between them and reads each one's findings and report; all 51 `/api` responses were 200.
 
 **2026-11-24 — E5 web UI (`c-869050`, in review).** Detail moved to `docs/handoff/2026-11-24-e5-web-ui.md`.
-
-**2026-11-24** — **E2 integrations** (backend `c-6def05`, UI `c-597eb6`, follow-ups `c-2d91eb`, all in review)
-are on branch `ej/20261124-150516-d78c96`. It merges the UI branch `ej/20261124-132955-7aef3f`, which carries
-the backend `ej/20261124-055326-6bcfa9`, so landing it lands all of E2. See `docs/integrations.md`.
-- **Findings out:** package `ticketing` (GitHub Issues, Jira, DefectDojo) goes through `notify.Do` (the SSRF
-  guard and redaction). Tracker configs are sealed and masked, and a destination change needs the credentials again.
-  `/api/integrations/trackers` has CRUD, `push` and `sync`. Status round-trips, and the tracker wins a conflict.
-- **Scanner data in:** package `scanimport` reads Nmap, Nuclei, ZAP, Burp and SARIF. `POST /api/integrations/imports`
-  writes assets with provenance and unverified POE-0 findings (`finding_import_sources`), and never edits on re-import.
-  `GET /api/integrations/imports?limit=&offset=` returns `{imports, total}`.
-- **UI:** System → Integrations (the trackers table and a masked-credential sheet) and Scanner imports (format
-  detection, Past imports with a pager). Each import's New findings count links to
-  `/function/findings?import_id=N`. `import_id` is in the shared findings filter (`db.FindingFilter.ImportID`),
-  so it applies to the list, groups, asset tree and export, and the page shows a chip that clears it.
-  The findings bulk bar and the detail page have Push to tracker; the detail has a Tickets card.
-- **RBAC (with E5):** `GET /api/exploration/findings/{id}/integrations` needs `read`, not `client_read`.
-  Tracker create/edit/delete need `admin`, the same as notification channels. Push, sync and import need `operate`.
-  The E2 pages do not yet gate their controls by role (`c-119206`).
-- **Browser e2e:** `scripts/e2e/integrations.sh` sets up a throwaway Postgres, the backend, a Next production
-  build and Playwright, then runs `integrations-e2e.js` against `fake-github.js`. It passed 24 checks
-  locally on 2026-11-24. It is not a CI job yet (`c-1198a2`, after c-cc25b6).
-- Migration `0015_integrations.sql` is unreleased, and its checksum is enforced, so do not edit it. Fix forward.
-- Local `./server` failures that are environment, not code: `TestConnectWithoutPasswordRealPG` (trust-auth Postgres)
-  and the SOCKS5 test that needs a `127.0.0.2` alias.
 
 **2026-11-24 (c-d25ff9, E3)** — The `RSI.md` Loop C benchmark gate and Loop B lesson graduation are built,
 flag off (`ARTEX_RSI_LOOP`, default off, read per request). Pure core `rsi/` (search-space allowlist:
@@ -256,6 +251,12 @@ body, through the versioned prompt API, and the starting bodies are restored aft
 8. *(unclaimed)* — **E2 UI: gate integrations controls by role** (S), card `c-119206`. Done = as reviewer
    and as client_read, no E2 control the server refuses is shown, and the finding detail has no 403.
 
+9. *(unclaimed)* — **E2×E5 tracker RBAC** (S), card `c-5c4009`. Done = tracker create/update/delete
+   need admin (like notify channels), push/sync stay operator; RBAC tests pass.
+10. *(unclaimed)* — **Findings stat cards honour lane/import filters; fact-node deep link** (S), card
+   `c-7651e5`. Done = stat cards match the filtered list under `lane=`/`import_id=` (db test); the
+   Past imports fact node opens the task graph on that node.
+
 - *(unclaimed)* — **RSI gate hardening** (M), card `c-0d277f`: server-side per-task arm ledger, suite
   pre-registration, adopted-lesson retire sync. Done = Postgres tests for each.
 - *(unclaimed)* — **RSI gate web UI** (M), card `c-936308`. Done = adopt/rollback from a proposals table in ≤2 clicks + password.
@@ -355,10 +356,15 @@ Card ids in brackets:
 - **E8 follow-ups** [`c-f1518c`] first live run, [`c-75c593`] bench
   image from a clean clone, [`c-d73308`] optional provider sampling seed per LLM profile.
 - **DB** [`c-c18f43`] Renumber each pending branch migration above main's newest as it lands (list under Known issues; `scripts/check-migration-versions.sh --branches` regenerates it).
-- **E10** [`c-72dd9d`] Code-security testing lane (SAST/dependency ingest) feeding the same dual-graph + evidence model.
+- **E10** [`c-72dd9d`] Code-security lane: built 2026-11-24, in review (see Current state). Follow-ups:
+  [`c-d059ae`] lane in UI and exports (built, in review on `ej/20261124-170322-736db7`);
+  [`c-7651e5`] stat cards + fact-node link; [`c-c978e3`] SAST-guided runtime verification;
+  [`c-5c4009`] tracker RBAC (E2×E5).
 
 ## Known issues and gotchas
 
+- **bbot `portscan` (masscan) cannot run as the executor**: it needs raw sockets and fails setup with
+  `No such file or directory: 'sudo'`. This is by design (see Decisions, c-18c9c6); use `nmap -sT`.
 - **`next dev` writes `web/AGENTS.md`** (Next 16 agent rules) on start. Delete it before committing; it
   is not this repo's file.
 - **SSE in dev goes through the Next rewrite** (`/api/*` → `AUTOPENTEST_API`, default :8787). Keep
@@ -372,12 +378,18 @@ Card ids in brackets:
   working tree (run by `scripts/verify.sh` and the `migration-versions` CI job on PRs) and names the next
   free number; `--branches` reports every local `ej/*` branch. `db/migrate_test.go` now derives its
   expected rows from the embedded files, so adding a migration needs no test edit. As of 2026-11-24 17:40
-  main's newest is **0023** (`0023_distributed_workers`); still to renumber when they land:
+  main's newest is **0024** (`0024_code_security_lane`, E10, landed); still to renumber when they land:
   `0017_finding_classification` (E1, 083744-02fa3c), `0021_lesson_scope_scrub` (131958/140001/144555),
   `0023_finding_import_links` (150542-76d507), `0023_change_notify` (170157-3aeba5), and one of the two
-  `0026`s (`0026_task_drain_acks` on 164948/165722 vs `0026_rsi_arm_ledger` on 165538). `0024_code_security_lane`
-  and `0025_session_transcripts` are fine if they land in order. `0023_integrations` (150533-1ba29e) is
-  the E2 file already on main as 0015: drop it, do not land it.
+  `0026`s (`0026_task_drain_acks` on 164948/165722 vs `0026_rsi_arm_ledger` on 165538). `0025_session_transcripts`
+  is fine if it lands before any other 0025. `0023_integrations` (150533-1ba29e) is E2's file, already
+  on main as 0015: drop it (see the E2/E10 bullet below).
+- **E2's migration is 0015 (on main); E10's lane columns are 0024.** The E10 branch
+  (`ej/20261124-150533-1ba29e`) had renumbered E2 to `0023_integrations.sql`, but E2 landed on main as
+  0015 and main's 0023 is `0023_distributed_workers.sql`, so c-d059ae's branch drops the renumber. Do
+  not land the E10 branch alone: land c-d059ae's branch (it carries E10). A dev database that applied
+  E10's `0023_integrations` refuses to start: `DELETE FROM schema_migrations WHERE version IN (23,24)`
+  (0015 and 0024 are idempotent) or drop it. Server tests use per-package databases (`artex_server`, `artex_db`, …).
 - The RSI gate trusts the judge verdicts inside uploaded arm records (it checks shape, binding, task
   freshness and uniqueness, not the grading); the owner reads `report.md` before adopting. The generic
   prompt editor stays an owner path outside the gate and is what the bench harness uses to switch arms.
@@ -426,6 +438,18 @@ Card ids in brackets:
   against the merge-base so a branch that is merely behind passes with a note. The migrate test reads the
   expected list from `loadMigrations`, removing the line every migration branch used to conflict on.
 
+- **2026-11-24** — c-18c9c6: bbot's `portscan` (masscan) stays **unsupported** for the executor
+  (option a); masscan does not get `cap_net_raw` (option b rejected). Two reasons. (1) It would not
+  work without weakening an invariant: the executor runs under no_new_privs (Docker's
+  `no-new-privileges` and ARTEX's own `setNoNewPrivs` in `server/execpriv_nnp_linux.go`), which
+  ignores file capabilities on execve. Making it work means lifting NNP or granting ambient caps to
+  the executor. (2) It would bypass the egress governor: masscan transmits through libpcap/AF_PACKET
+  with its own TCP/IP stack, and packet-socket frames skip netfilter's OUTPUT chain, so
+  `egress.sh`'s `-m owner --uid-owner` rules never see them. Cloud metadata, the host gateway and the
+  API port would be reachable, and raw sockets also allow forged source addresses. The bbot-recon
+  skill now says to use `nmap -sT` instead. Revisit only with a server-side (root) port-scan service
+  that applies the scope gate and egress denies itself, never by giving the executor raw sockets.
+
 - **2026-11-24** — c-548e8b: the worker pins the control API's CA (`ARTEX_CONTROL_CA`) rather than
   trusting system roots, so a publicly valid certificate for the same name cannot impersonate the
   control node. TLS covers the control API only; the recording-proxy hop stays HTTP for now because
@@ -441,6 +465,28 @@ Card ids in brackets:
   rides in agent processes' proxy URL, so an agent's shell could have recorded or bound evidence past
   the tool-layer checks. Record/bind/assess run the unchanged control-side code; every agent-side check
   still runs on the worker first.
+- **2026-11-24 E10:**
+  - Code findings come in through the E2 SARIF import, not a new ingest path: one parser, and one
+    provenance table with a `lane` column, instead of a SAST-specific store.
+  - A task import writes into the task's exploration graph (a fact for the scan run that `yields`
+    finding nodes, `findings.node_id` set), so the existing report, planner tools and exports read one
+    record. No new node kind or edge relation, so no CHECK migration.
+  - Code is not a new asset type. Code findings anchor to existing runtime assets the operator
+    names (`asset_ids`), which is where a SAST and a runtime finding on one application meet. A
+    `repository` asset type can come later if a consumer needs it.
+  - Imported findings stay unverified leads: excluded from `findings_total`, and `prove_goal`
+    refuses them (no verified traffic). Only a reproduced worker finding proves a goal.
+  - SCA is classified from typed fields only (tool, advisory-style rule id, manifest file name).
+- **2026-11-24 E2:**
+  - Imported findings are scanner claims: `unverified`, POE 0, `worker=import:<tool>`. A known dedup
+    key leaves the existing finding untouched.
+  - Imports register no notification events, so bulk uploads do not flood the channels.
+  - Scanner free text goes only into quoted evidence; summary and name come from typed tokens.
+  - When both sides changed, the ticket sync lets the tracker win, because remediation is tracked
+    there.
+  - A tracker destination change drops its ticket links.
+  - Evidence goes into a ticket only when `include_evidence` is on, and then with credentials
+    redacted.
 - **2026-11-24 c-2d91eb (E2 follow-ups):**
   - This branch merges the unmerged E2 UI branch (which carries the backend) instead of waiting, as c-597eb6
     did. Landing it lands E2.
@@ -487,14 +533,7 @@ Card ids in brackets:
     Delete keeps its confirmation.
   - Integrations and Imports are System sidebar entries (the settings area), each one click away.
 - **2026-11-24 E2:**
-  - Imported findings are scanner claims: `unverified`, POE 0, `worker=import:<tool>`. A known dedup
-    key leaves the existing finding untouched.
-  - Imports register no notification events, so bulk uploads do not flood the channels.
-  - Scanner free text goes only into quoted evidence; summary and name come from typed tokens.
-  - When both sides changed, the ticket sync lets the tracker win, because remediation is tracked
     there.
-  - A tracker destination change drops its ticket links.
-  - Evidence goes into a ticket only when `include_evidence` is on, and then with credentials
     redacted.
   - Migration 0015 was edited in place before any release, because it was never on main.
 
@@ -627,9 +666,9 @@ Card ids in brackets:
 <!-- composite:deltas · newest first; Composite rewrites this block on every merge (ej handoff merge / merge_handoff) -->
 - **2026-11-24 17:26 MST** · claude-code · `ej/20261124-171846-d9aa95` `41cda01`→`1ac2d47` (1 commit) · `h-1e1166` — c-c18f43 (mechanism landed on this branch; renumbering stays open per landing): scripts/check-migration-versions.sh (+ self-test, verify.sh step, PR-only CI job migration-versions) fails a migration not numbered above main's newest, duplicates, and edited/removed published migrations; --branches reports all ej/* branches. db/migrate_test.go assertEmbeddedApplied derives its expected list from loadMigrations, so no per-migration test edit. go test ./db passes against Postgres 16. **Next:** As each branch lands, renumber its migration above main's newest (Known issues lists them: 0017_finding_classification, 0021_lesson_scope_scrub, 0023_finding_import_links, 0023_change_notify, one of the two 0026s; drop 0023_integrations, a dup of main's 0015). Run scripts/check-migration-versions.sh --branches to refresh the list. **Decided:** Check, don't reserve: a ledger would itself conflict. Ordering is judged against the base tip; edits/deletions against the merge-base so a branch that is only behind passes.
 - **2026-11-24 17:21 MST** · claude-code · `ej/20261124-170856-f6245f` `41cda01`→`bcaa8fa` (2 commits) · `h-c66079` — c-cea6ac (now in review): explained and fixed why c-4c8fd6 task 2 was `done` mid-decomposition. The main agent's add_intent revived the not-yet-started task (reviveTask → admitTask resume → engine.Run) while round-0 decomposition was running. The planner's goalless branch then persisted `done` once the injected intent finished, and the decomposed goal landed open in a done task. Fix: an Engine bootstrap barrier (server/engine_bootstrap.go). Run is a no-op and admission only confirms status until startTaskEngine finishes decomposing. Test TestRevivalDuringBootstrapDoesNotStartEngine covers the free-slot and at-capacity cases. Timeline: docs/handoff/c-cea6ac-bootstrap-race.md. Opened card c-3d7433. **Next:** Land ej/20261124-170856-f6245f. Optionally rerun the c-4c8fd6 sequence live (create a task, then immediately chat add_intent) and check that the task stays running until its goals exist. c-3d7433: a restart during decomposition still lets a goalless task settle done. **Decided:** The barrier is in the Engine (Run itself refuses), not only in admission, so POST /api/active and reruns are covered too. A bootstrapping task is never queued by a resume admission, because queueing pauses it and cancels the decomposition. The goalless settle branch is unchanged: it is intended for human-injected goalless sessions. Current state was over 16 KB, so the 2026-11-23 audit detail moved to docs/handoff/2026-11-23-audit-fixes.md.
+- **2026-11-24 17:18 MST** · claude-code · `ej/20261124-170322-736db7` `5e33af0`→`71d6b23` (1 commit) · `h-5e6f9c` — c-d059ae (now in review; card c-7651e5 opened): the E10 lane is visible and filterable outside the task report. The branch merges the unlanded E10 branch and main. E2 is on main as 0015, so E10's renumber of it to 0023 is dropped, and the lane migration stays at 0024 after main's 0023_distributed_workers. Backend: ?lane=runtime|sast|sca in the shared findings filter (list, groups, tree, export); finding DTOs carry a client-safe source (lane, tool, rule, path:line, import id); the findings Markdown exports get the Source line and the CSV gets lane/source columns; scan import rows carry lane_counts; a dead post-create anchor check is removed (anchors were already validated before CreateScanImport). Web: lane badge and path:line on the findings table and detail, a lane dropdown in the URL, an anchor-asset picker on Scanner imports, and Lanes and Fact node columns on Past imports. Verified on Postgres 16 (TestFindingFilterByLane, TestCodeScanJoinsTaskGraphAndReport extended, report tests); scripts/verify.sh passes except the known macOS SOCKS5 test, and --web-only passes. Not checked in a browser. **Next:** Land ej/20261124-170322-736db7 (it carries E10); do not land the E10 branch alone. c-7651e5: stat cards honour lane/import filters, and a fact-node deep link. c-5c4009 tracker RBAC, c-c978e3 SAST-guided runtime verification. **Decided:** Kept E2 at main's 0015 and E10's lane at 0024, rather than E10's renumber to 0023, which collides with main's 0023_distributed_workers. Finding DTOs expose only the fields the client_read task report already shows (lane, tool, rule, location, import id); the raw scanner record and dedup key stay behind /findings/{id}/integrations (read). lane=runtime includes worker findings, and an unknown lane matches nothing. Worker findings show no lane badge, so the badge flags imports. Moved the E2/E10 Current state detail to docs/handoff/2026-11-24-e2-e10-integrations.md to fit the size limit.
 - _Older hand-offs, a line each; `ej handoff log` has them whole:_
 - **2026-11-24 17:21 MST** · claude-code · `h-585760` — c-119206 (now in review; card c-81193b opened): E2 integrations UI gates its controls by role with useCan, matching server/rbac_policy.go — tracker add/edit/delete/enable admin; Sync, Push to tracker (bulk + detail) and the scanner import form operate; the fi… **Next:** c-81193b: hide Start retest, Link traffic and the severity/status/report-stage pickers on the finding detail for client_read (extend roles-e2e.js client block).
-- **2026-11-24 17:18 MST** · claude-code · `h-5e6f9c` — c-d059ae (now in review; card c-7651e5 opened): the E10 lane is visible and filterable outside the task report. **Next:** Land ej/20261124-170322-736db7 (it carries E10); do not land the E10 branch alone.
 - **2026-11-24 17:17 MST** · claude-code · `h-adc4a6` — c-0d277f (RSI gate hardening, now in review; card closed): evidence is checked against the server's own records. **Next:** c-936308 (RSI gate web UI: show suite runs and the new log actions).
 - **2026-11-24 17:14 MST** · claude-code · `h-917e8c` — c-1d3e0a (E7, now in review; cards c-c18f43 and c-20c400 opened), on a branch that merges the unmerged E7 branches ej/20261124-164948-393f2a (c-18f7a8 stack) and ej/20261124-155353-b1c60a (c-8cfbfe). **Next:** Land the E7 stack with this branch on top.
 - **2026-11-24 16:45 MST** · claude-code · `h-aa4a90` — c-7361b4 (in review): the goals runtime refuses LLM calls on a terminal task, and an in-flight decomposition is cancelled when its task ends, so it writes no fallback goal. **Next:** c-83ae7b: per-role default output caps for planner/worker/mainagent/compactor. **Issues:** opened #c-83ae7b.
@@ -641,6 +680,9 @@ Card ids in brackets:
 - **2026-11-24 16:17 MST** · claude-code · `h-11f65f` — c-3b781a (E7 follow-up, now in review): a finding recorded by a worker-node intent now binds the control node's captured request/response. **Next:** Land this branch (it carries E7). **Issues:** opened #c-548e8b, #c-7ad4da.
 - **2026-11-24 16:09 MST** · claude-code · `h-666bdf` — E7 (c-d60149) built, in review: -role all|control|worker. **Next:** c-8cfbfe: real helm install on a 2+ node cluster (human or infra). **Issues:** opened #c-18f7a8, #c-29ff19, #c-3b781a, #c-8cfbfe.
 - **2026-11-24 16:07 MST** · claude-code · `h-59c24d` — E10 (c-72dd9d, now in review): code-security lane. **Next:** c-5c4009: tracker config RBAC (admin vs operate). **Issues:** opened #c-5c4009, #c-c978e3, #c-d059ae.
+- **2026-11-24 15:58 MST** · claude-code · `h-0548f2` — c-2d91eb (E2 UI follow-ups, now in review; board cards c-1198a2 and c-119206 opened) on a branch that merges the unmerged E2 UI + backend branch (ej/20261124-132955-7aef3f), so landing it lands all of E2. **Next:** Land ej/20261124-150516-d78c96 (it carries the E2 backend, UI and these follow-ups).
+- **2026-11-24 15:56 MST** · claude-code · `h-f62f2d` — c-4c8fd6 (E6 live check, now in review): built the E6 branch into an isolated compose stack (local Ollama with prices, nginx target on its own network, OTel collector via host.docker.internal). **Next:** Land ej/20261124-123231-b78990 (E6, not on main yet) with c-f4a69d. **Issues:** opened #c-7361b4, #c-990198.
+- **2026-11-24 15:30 MST** · claude-code · `h-124b6f` — c-f4a69d (E6 follow-up, now in review; card c-888292 opened): the Cost & efficiency view now includes archived tasks. **Next:** c-4c8fd6: check the cost page in a browser against real LLM traffic, including an archived task.
 <!-- /composite:deltas -->
 
 _(written by `merge_handoff`)_

@@ -1,5 +1,5 @@
 import { http } from "@/lib/api";
-import { chunk, PUSH_BATCH } from "@/lib/integrations";
+import { anchorAssetIdsParam, chunk, PUSH_BATCH } from "@/lib/integrations";
 import type {
   FindingIntegrations,
   ScanImport,
@@ -47,9 +47,12 @@ export const integrationsApi = {
       (r) => ({ items: r.imports ?? [], total: r.total ?? 0 }),
     ),
   // importScan posts the raw file as the body; format and provenance travel in the query.
-  importScan: (file: File, format: ScanImportFormat, taskId?: number) => {
+  // assetIds anchor the imported findings to assets already in the task's scope or asset set; they need a task.
+  importScan: (file: File, format: ScanImportFormat, taskId?: number, assetIds: readonly number[] = []) => {
     const q = new URLSearchParams({ format, file_name: file.name });
     if (taskId) q.set("task_id", String(taskId));
+    const anchors = anchorAssetIdsParam(assetIds);
+    if (taskId && anchors) q.set("asset_ids", anchors);
     return http<ScanImportOutcome>(`/integrations/imports?${q.toString()}`, {
       method: "POST",
       body: file,

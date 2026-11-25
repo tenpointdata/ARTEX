@@ -230,6 +230,7 @@ function findingFilterParams(q: Omit<FindingQuery, "page" | "pageSize">): URLSea
   if (q.assetScope) p.set("asset_scope", q.assetScope);
   if (q.company) p.set("company", q.company);
   if (q.importId) p.set("import_id", q.importId);
+  if (q.lane) p.set("lane", q.lane);
   return p;
 }
 
