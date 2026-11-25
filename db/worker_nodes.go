@@ -16,6 +16,12 @@ import (
 // NodeTTL is how long a node row stays live without a heartbeat.
 const NodeTTL = 45 * time.Second
 
+// NodeRetention is how long a dead node's row is kept (and listed, as not
+// live) after its last heartbeat. Under Kubernetes the node id is the pod name,
+// so every rollout leaves the replaced pods' rows behind when they are killed
+// before RemoveNode runs; past this age they are pruned and no longer listed.
+const NodeRetention = 20 * NodeTTL
+
 // NodeHeartbeatInterval is how often a node refreshes its registry row.
 const NodeHeartbeatInterval = 10 * time.Second
 
@@ -55,12 +61,26 @@ func (d *DB) RemoveNode(nodeID string) error {
 	return err
 }
 
-// ListNodes returns every registry row, live ones first; Live is computed on
-// the database clock against NodeTTL.
+// PruneNodes deletes registry rows whose last heartbeat is older than
+// NodeRetention and returns how many it removed. Every node calls it from its
+// heartbeat, so stale rows go as long as any node runs.
+func (d *DB) PruneNodes() (int64, error) {
+	res, err := d.Exec(`DELETE FROM worker_nodes WHERE last_seen_at < now() - $1 * INTERVAL '1 second'`,
+		NodeRetention.Seconds())
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
+}
+
+// ListNodes returns the live and recently dead registry rows (last heartbeat
+// within NodeRetention), live ones first; Live is computed on the database
+// clock against NodeTTL. Older rows are hidden even before PruneNodes runs.
 func (d *DB) ListNodes() ([]WorkerNode, error) {
 	rows, err := d.Query(`SELECT node_id, role, host, version, workers, started_at, last_seen_at,
   last_seen_at >= now() - $1 * INTERVAL '1 second'
-FROM worker_nodes ORDER BY 8 DESC, role, node_id`, NodeTTL.Seconds())
+FROM worker_nodes WHERE last_seen_at >= now() - $2 * INTERVAL '1 second'
+ORDER BY 8 DESC, role, node_id`, NodeTTL.Seconds(), NodeRetention.Seconds())
 	if err != nil {
 		return nil, err
 	}
