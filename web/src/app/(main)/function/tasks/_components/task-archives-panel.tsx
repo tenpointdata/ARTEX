@@ -28,6 +28,7 @@ import { Progress } from "@/components/ui/progress";
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Spinner } from "@/components/ui/spinner";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { useCan } from "@/hooks/use-session";
 import { intlLocale, t } from "@/i18n";
 import { api } from "@/lib/api";
 import { setVisibleInterval } from "@/lib/polling";
@@ -149,7 +150,9 @@ export function ArchiveDeleteDialog({
   );
 }
 
+// Archived tab. Restore, retry and permanent delete need operate; reviewers see the list read-only.
 export function TaskArchivesPanel({ onChanged }: { onChanged: () => void }) {
+  const canOperate = useCan("operate");
   const [archives, setArchives] = React.useState<TaskArchive[]>([]);
   const [query, setQuery] = React.useState("");
   const [stateFilter, setStateFilter] = React.useState("all");
@@ -374,13 +377,15 @@ export function TaskArchivesPanel({ onChanged }: { onChanged: () => void }) {
             <TableHeader className="[&_tr]:border-t">
               <TableRow>
                 <TableHead className="w-10">
-                  <Checkbox
-                    checked={selectedAll || (selectedSome ? "indeterminate" : false)}
-                    onCheckedChange={(checked) =>
-                      setSelected(checked === true ? new Set(selectable.map((archive) => archive.id)) : new Set())
-                    }
-                    aria-label={t("Select the archives on this page")}
-                  />
+                  {canOperate && (
+                    <Checkbox
+                      checked={selectedAll || (selectedSome ? "indeterminate" : false)}
+                      onCheckedChange={(checked) =>
+                        setSelected(checked === true ? new Set(selectable.map((archive) => archive.id)) : new Set())
+                      }
+                      aria-label={t("Select the archives on this page")}
+                    />
+                  )}
                 </TableHead>
                 <TableHead>{t("Task")}</TableHead>
                 <TableHead>{t("Original status")}</TableHead>
@@ -400,19 +405,21 @@ export function TaskArchivesPanel({ onChanged }: { onChanged: () => void }) {
                 return (
                   <TableRow key={archive.id} data-state={selected.has(archive.id) ? "selected" : undefined}>
                     <TableCell>
-                      <Checkbox
-                        checked={selected.has(archive.id)}
-                        disabled={processing}
-                        onCheckedChange={(checked) =>
-                          setSelected((current) => {
-                            const next = new Set(current);
-                            if (checked === true) next.add(archive.id);
-                            else next.delete(archive.id);
-                            return next;
-                          })
-                        }
-                        aria-label={t("Select task archive #{id}", { id: archive.task_id })}
-                      />
+                      {canOperate && (
+                        <Checkbox
+                          checked={selected.has(archive.id)}
+                          disabled={processing}
+                          onCheckedChange={(checked) =>
+                            setSelected((current) => {
+                              const next = new Set(current);
+                              if (checked === true) next.add(archive.id);
+                              else next.delete(archive.id);
+                              return next;
+                            })
+                          }
+                          aria-label={t("Select task archive #{id}", { id: archive.task_id })}
+                        />
+                      )}
                     </TableCell>
                     <TableCell className="max-w-sm">
                       <div className="flex min-w-0 flex-col gap-0.5">
@@ -473,46 +480,48 @@ export function TaskArchivesPanel({ onChanged }: { onChanged: () => void }) {
                       </div>
                     </TableCell>
                     <TableCell className="text-right">
-                      <div className="flex justify-end gap-0.5">
-                        {ARCHIVE_FAILED_STATES.has(archive.state) && (
-                          <Button
-                            size="icon"
-                            variant="ghost"
-                            onClick={() => void retry(archive)}
-                            aria-label={t("Retry archive operation")}
-                            title={t("Retry")}
-                          >
-                            <Undo2Icon />
-                          </Button>
-                        )}
-                        {canRestore && (
-                          <Button
-                            size="icon"
-                            variant="ghost"
-                            onClick={() => void restoreMany([archive])}
-                            aria-label={t("Restore task")}
-                            title={t("Restore task")}
-                          >
-                            <Undo2Icon />
-                          </Button>
-                        )}
-                        {canDelete && (
-                          <ArchiveDeleteDialog
-                            archives={[archive]}
-                            onConfirm={() => deleteMany([archive])}
-                            trigger={
-                              <Button
-                                size="icon"
-                                variant="ghost"
-                                aria-label={t("Permanently delete archive")}
-                                title={t("Permanently delete")}
-                              >
-                                <Trash2Icon />
-                              </Button>
-                            }
-                          />
-                        )}
-                      </div>
+                      {canOperate && (
+                        <div className="flex justify-end gap-0.5">
+                          {ARCHIVE_FAILED_STATES.has(archive.state) && (
+                            <Button
+                              size="icon"
+                              variant="ghost"
+                              onClick={() => void retry(archive)}
+                              aria-label={t("Retry archive operation")}
+                              title={t("Retry")}
+                            >
+                              <Undo2Icon />
+                            </Button>
+                          )}
+                          {canRestore && (
+                            <Button
+                              size="icon"
+                              variant="ghost"
+                              onClick={() => void restoreMany([archive])}
+                              aria-label={t("Restore task")}
+                              title={t("Restore task")}
+                            >
+                              <Undo2Icon />
+                            </Button>
+                          )}
+                          {canDelete && (
+                            <ArchiveDeleteDialog
+                              archives={[archive]}
+                              onConfirm={() => deleteMany([archive])}
+                              trigger={
+                                <Button
+                                  size="icon"
+                                  variant="ghost"
+                                  aria-label={t("Permanently delete archive")}
+                                  title={t("Permanently delete")}
+                                >
+                                  <Trash2Icon />
+                                </Button>
+                              }
+                            />
+                          )}
+                        </div>
+                      )}
                     </TableCell>
                   </TableRow>
                 );

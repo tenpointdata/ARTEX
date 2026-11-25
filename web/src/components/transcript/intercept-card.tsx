@@ -9,6 +9,7 @@ import { ApprovalDetail } from "@/components/approval-records";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import { useCan } from "@/hooks/use-session";
 import { t } from "@/i18n";
 import { api } from "@/lib/api";
 import type { Activity, InterceptPending } from "@/lib/types";
@@ -27,6 +28,7 @@ export function InterceptCard({ step, getDetail }: { step: Activity; getDetail: 
 
   const [detail, setDetail] = React.useState<Record<string, unknown> | null>(null);
   const [decided, setDecided] = React.useState<"allowed" | "denied" | "timeout" | null>(null);
+  const canReview = useCan("review"); // deciding an approval needs review
   const [deciding, setDeciding] = React.useState(false);
   const [expanded, setExpanded] = React.useState(false);
   const [pending, setPending] = React.useState<InterceptPending | null>(null);
@@ -126,7 +128,7 @@ export function InterceptCard({ step, getDetail }: { step: Activity; getDetail: 
           >
             {decided === "allowed" ? t("Allowed") : decided === "timeout" ? t("Timed out") : t("Denied")}
           </span>
-        ) : (
+        ) : canReview ? (
           <div className="flex shrink-0 gap-1.5">
             <Button
               size="sm"
@@ -148,7 +150,7 @@ export function InterceptCard({ step, getDetail }: { step: Activity; getDetail: 
               {t("Deny")}
             </Button>
           </div>
-        )}
+        ) : null}
       </div>
       {pendingId ? (
         <Collapsible open={expanded} onOpenChange={setExpanded} className="mt-2 min-w-0">
@@ -169,7 +171,7 @@ export function InterceptCard({ step, getDetail }: { step: Activity; getDetail: 
                 busy={deciding}
                 decide={(_id, decision) => decide(decision)}
                 revision={retry}
-                readOnly={Boolean(step.inherited)}
+                readOnly={Boolean(step.inherited) || !canReview}
                 defaultExpanded
                 onResolved={setDecided}
               />

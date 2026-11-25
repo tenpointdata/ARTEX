@@ -66,6 +66,23 @@ calls, the UI Sync loop's contract). `ticketSyncRunner` starts on the control no
 in server.go). The UI half (`c-224317`: interval field, Sync loops while `more`, 409 = "already running") is
 **not on main yet**; it is on `ej/20261124-191201-980dda`. Until it lands, the UI's Sync does one capped call.
 
+**2026-11-24 — Role route guard + c-92bb52 gates (`c-bd9b7a`, in review on `ej/20261124-191154-865292`).**
+`scripts/e2e/role-probe.sh` now **passes for reviewer, operator and client_read** (no /api >= 400, no
+request needing a missing permission). The probe itself (`c-80fe4e`) is on this branch too.
+- `RouteGuard` (`web/src/app/(main)/_components/route-guard.tsx`, pure resolver `web/src/lib/route-access.ts`
+  + `route-access.test.mjs`) takes a path's permission from the sidebar's `need` (detail pages inherit their
+  parent; uncovered paths need read) and sends a role lacking it to `landingPath` without mounting the page.
+- c-92bb52's gating (`ej/20261124-144553-d5978e`) could not be git-merged: its one commit both gated and split
+  files, conflicting with main's E9 split in ~40 files. Its intent was **re-applied onto main's files** here, so
+  this branch supersedes it: **do not land `ej/20261124-144553-d5978e`.** Not ported: its `errorText(e)` swaps.
+- Beyond the branch: task Overview `TokensCard` (`/api/llm/records/by-model`) needs operate; integrations page
+  (tracker create/edit/enable/delete admin, sync operate) and tracker reads on findings pages skipped for client_read.
+- Run the probe with spare ports when another harness is up: `ARTEX_E2E_API_PORT=38787 ARTEX_E2E_UI_PORT=35173
+  ARTEX_E2E_PG_PORT=46432 ARTEX_E2E_PROXY_PORT=38788 scripts/e2e/role-probe.sh`.
+- Findings are in `docs/handoff/2026-11-24-role-probe-findings.md`.
+- `integrations.sh` now runs the backend from its work dir (it used to write `jwt.key`/`secret.key` into the
+  caller's cwd) and takes `ARTEX_E2E_PROXY_PORT`.
+
 **2026-11-24 — SOCKS5 auth regression after #79 fixed (`c-831dfa`).** `checkCredential` looked up a
 scope-token password in the local registry only, so worker-minted tokens that the remote resolver holds got
 RFC 1929 0x01. It now uses `Traffic.resolveScope` (local, then remote). `TestSOCKS5RemoteScope` now expects
@@ -73,6 +90,8 @@ RFC 1929 0x01. It now uses `Traffic.resolveScope` (local, then remote). `TestSOC
 and then gets 0x02 at CONNECT. `TestManagerSOCKS5UDP…` was failing only because 127.0.0.2 can't be bound on
 macOS. It now skips there and passes on Linux with real PG (golang:1.26.11-bookworm, private Docker network).
 `scripts/verify.sh` Go steps pass. Its web i18n step fails on #80's strings (`c-be8a4f`).
+`c-1a74a4` was the same fix made in parallel; its merge kept main's code and added one assertion (an
+unresolvable worker token as `egress.ScopeUser` gets 0x01).
 
 **2026-11-24 — E2 push updates via signed webhooks (`c-c2bdc8`; in review on `ej/20261124-191156-37e38c`).**
 This branch also carries the c-da9198 commit (per-tracker advisory lock, capped sync cursor, background
@@ -91,8 +110,8 @@ unchanged, redelivery of the same id then processed), the ticketing webhook unit
 `test:integrations`. An independent security review found no bypass or leak; its slowloris, timing, dedup-order
 and id-length findings are fixed (10 s read deadline, every refusal hashes the body). `scripts/verify.sh`:
 only the two known environment failures (`TestConnectWithoutPasswordRealPG` on a trust-auth Postgres,
-`TestManagerSOCKS5UDPOptInAndAssetBlockRuleDropsDatagram` without 127.0.0.2), plus `TestSOCKS5RemoteScope`, which
-also fails on main (`traffic/` is identical to main; card `c-1a74a4`). Not verified: a live
+`TestManagerSOCKS5UDPOptInAndAssetBlockRuleDropsDatagram` without 127.0.0.2) (`TestSOCKS5RemoteScope`, then
+also failing on main, is fixed by `c-831dfa`). Not verified: a live
 GitHub/Jira delivery (needs a publicly reachable instance), the sheet in a browser.
 
 **2026-11-24 — RSI proposer (`c-c89f5b`, on main via #77) + model drafter (`c-0aaa24`, in review on
@@ -100,7 +119,7 @@ GitHub/Jira delivery (needs a publicly reachable instance), the sheet in a brows
 (core `rsi/propose`) drafts goals/planner/worker body edits from closed tasks when a rule's signal holds
 on ≥2 tasks across ≥2 scopes, inside the round budget; `--draft-model` (off by default) lets a model
 rewrite the body through the same checks; the drafter must not be the judge. `verify.sh` there fails only
-on `TestSOCKS5RemoteScope` (fix in review, `c-1a74a4`) and the web i18n check (`c-430ba2`). Detail:
+on `TestSOCKS5RemoteScope` (since fixed, `c-831dfa`) and the web i18n check (`c-be8a4f`). Detail:
 `docs/handoff/2026-11-24-e3-rsi-loops.md`. Not checked: a real instance (`c-4bbf29`).
 
 **2026-11-24 — LLM sampling pin (`c-d73308`, E8; on main via #69).** Migration 0028 adds nullable
@@ -234,9 +253,9 @@ the full Docker image, the E8 suite) are in `docs/handoff/2026-11-24-current-sta
    "Done when" is on each card.
 3. *(unclaimed)* — **SEC: per-task uid follow-ups** (S each): `c-12df03` (single-uid start-up fails on a
    socket; MCP uid not egress-filtered), `c-e70e5c` (release ended tasks at start-up; per-key lock). The "Done when" is on each card.
-4. *(unclaimed)* — **E5 UI: hide role-lacking actions on existing pages** (M), card `c-92bb52`. Done = as
-   reviewer and operator, no visible control answers 403. Then `c-601ec6` (chain newest-first paging, S).
-   (`c-7c4715`, the client_read console, is built and in review on `ej/20261124-144554-67afc9`.)
+4. *(unclaimed)* — **E5: chain newest-first paging** (S), card `c-601ec6`. (`c-bd9b7a` role guard + c-92bb52
+   gates are in review on `ej/20261124-191154-865292`; `c-7c4715`, the client_read console, is in review on
+   `ej/20261124-144554-67afc9`.)
 5. *(unclaimed)* — **SEC: gorilla/websocket bump, GO-2026-6278** (XS), card `c-c10f2c`; needs network.
    Done = govulncheck clean.
 6. *(unclaimed)* — **SEC: upstream-gate residuals** (M), card `c-5a6f96`: task-scoped rules on proxy
@@ -302,6 +321,10 @@ the full Docker image, the E8 suite) are in `docs/handoff/2026-11-24-current-sta
 - **Browser e2e (E2 integrations):** `scripts/e2e/integrations.sh`. It needs Go, Node, and initdb/pg_ctl,
   or `ARTEX_E2E_PG_DSN` set to an empty database. It installs Playwright unless it resolves on `NODE_PATH`.
   `ARTEX_E2E_KEEP=1` keeps the logs and screenshots. Ports are set with `ARTEX_E2E_{API,UI,PG}_PORT`.
+- **Role probe (RBAC in the UI):** `scripts/e2e/role-probe.sh` (about 5 minutes, same harness).
+  `ARTEX_E2E_ROLES=reviewer` and `ARTEX_E2E_PAGES=/system` narrow a run. With `ARTEX_E2E_KEEP=1`, per-role
+  JSON reports and screenshots land in the work dir's `shots/`. Use free ports when another dev backend
+  holds 28787/28788.
 - **Benchmark harness:** `scripts/benchmark` against the subject instance `docker-compose.bench.yml`
   (`cp bench/.env.example bench/.env`, set `ARTEX_PG_PASSWORD` + an LLM key, then
   `docker compose -f docker-compose.bench.yml up --build -d`; `ARTEX_BENCH_PORT=18787` when a production

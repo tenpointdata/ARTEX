@@ -9,6 +9,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { useCan } from "@/hooks/use-session";
 import { t } from "@/i18n";
 import { api } from "@/lib/api";
 import type { LLMPoolMember, LLMPoolStatus, LLMProfile } from "@/lib/types";
@@ -20,6 +21,8 @@ import { ProfileSheet } from "./_components/profile-sheet";
 import { RetryPolicyPanel } from "./_components/retry";
 
 export default function LLMPage() {
+  // Profiles live under /api/llm (admin); other roles get a read-only view.
+  const canAdmin = useCan("admin");
   const [profiles, setProfiles] = React.useState<LLMProfile[]>([]);
   const [pool, setPool] = React.useState<LLMPoolStatus | null>(null);
   const [poolOpen, setPoolOpen] = React.useState(false);
@@ -106,9 +109,11 @@ export default function LLMPage() {
               </Badge>
             )}
           </Button>
-          <Button size="sm" variant="outline" onClick={() => openEditor(null)}>
-            <PlusIcon /> {t("Create")}
-          </Button>
+          {canAdmin && (
+            <Button size="sm" variant="outline" onClick={() => openEditor(null)}>
+              <PlusIcon /> {t("Create")}
+            </Button>
+          )}
         </div>
       </div>
 
@@ -183,31 +188,33 @@ export default function LLMPage() {
                         ))}
                     </div>
 
-                    <div className="mt-1 flex gap-2">
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        className="flex-1"
-                        disabled={p.is_default}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          void activate(p.id, p.name);
-                        }}
-                      >
-                        {p.is_default ? t("Active") : t("Set as active")}
-                      </Button>
-                      <Button
-                        size="icon"
-                        variant="outline"
-                        aria-label={t("Delete profile")}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          void remove(p);
-                        }}
-                      >
-                        <Trash2Icon className="text-destructive" />
-                      </Button>
-                    </div>
+                    {canAdmin && (
+                      <div className="mt-1 flex gap-2">
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="flex-1"
+                          disabled={p.is_default}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            void activate(p.id, p.name);
+                          }}
+                        >
+                          {p.is_default ? t("Active") : t("Set as active")}
+                        </Button>
+                        <Button
+                          size="icon"
+                          variant="outline"
+                          aria-label={t("Delete profile")}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            void remove(p);
+                          }}
+                        >
+                          <Trash2Icon className="text-destructive" />
+                        </Button>
+                      </div>
+                    )}
                   </CardContent>
                 </Card>
               );

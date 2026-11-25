@@ -22,6 +22,7 @@ import { Input } from "@/components/ui/input";
 import { Sheet, SheetContent, SheetFooter, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
+import { useCan } from "@/hooks/use-session";
 import { intlLocale, t } from "@/i18n";
 import { api } from "@/lib/api";
 import type { WorkspaceEntry, WorkspaceFile } from "@/lib/types";
@@ -51,6 +52,8 @@ type EditState = {
 };
 
 export default function WorkspacePage() {
+  // Reading/downloading files and every write need `operate`; the listing needs only `read`.
+  const canOperate = useCan("operate");
   const [path, setPath] = React.useState("");
   const [entries, setEntries] = React.useState<WorkspaceEntry[]>([]);
   const [loading, setLoading] = React.useState(true);
@@ -175,12 +178,16 @@ export default function WorkspacePage() {
           ))}
         </div>
         <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm" onClick={() => setMkdirOpen(true)}>
-            <FolderPlusIcon /> {t("New folder")}
-          </Button>
-          <Button variant="outline" size="sm" onClick={() => uploadRef.current?.click()}>
-            <UploadIcon /> {t("Upload")}
-          </Button>
+          {canOperate && (
+            <>
+              <Button variant="outline" size="sm" onClick={() => setMkdirOpen(true)}>
+                <FolderPlusIcon /> {t("New folder")}
+              </Button>
+              <Button variant="outline" size="sm" onClick={() => uploadRef.current?.click()}>
+                <UploadIcon /> {t("Upload")}
+              </Button>
+            </>
+          )}
           <Button variant="ghost" size="icon" className="size-8" onClick={() => load(path)} title={t("Refresh")}>
             <RefreshCwIcon className={cn("size-4", loading && "animate-spin")} />
           </Button>
@@ -212,8 +219,9 @@ export default function WorkspacePage() {
                   <TableCell>
                     <button
                       type="button"
+                      disabled={!e.dir && !canOperate}
                       onClick={() => (e.dir ? load(e.path) : openFile(e))}
-                      className="flex items-center gap-2 text-left hover:underline"
+                      className="flex items-center gap-2 text-left enabled:hover:underline"
                     >
                       {e.dir ? (
                         <FolderIcon className="size-4 shrink-0 text-blue-500" />
@@ -229,7 +237,7 @@ export default function WorkspacePage() {
                   <TableCell className="text-muted-foreground text-xs">{fmtTime(e.mtime)}</TableCell>
                   <TableCell>
                     <div className="flex items-center justify-end gap-1">
-                      {!e.dir && (
+                      {canOperate && !e.dir && (
                         <Button
                           variant="ghost"
                           size="icon"
@@ -246,15 +254,17 @@ export default function WorkspacePage() {
                           <DownloadIcon className="size-3.5" />
                         </Button>
                       )}
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="text-destructive size-7"
-                        title={t("Delete")}
-                        onClick={() => del(e)}
-                      >
-                        <Trash2Icon className="size-3.5" />
-                      </Button>
+                      {canOperate && (
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="text-destructive size-7"
+                          title={t("Delete")}
+                          onClick={() => del(e)}
+                        >
+                          <Trash2Icon className="size-3.5" />
+                        </Button>
+                      )}
                     </div>
                   </TableCell>
                 </TableRow>

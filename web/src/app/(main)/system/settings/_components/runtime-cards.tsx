@@ -10,6 +10,7 @@ import { Switch } from "@/components/ui/switch";
 import { t } from "@/i18n";
 
 import { rich } from "./rich";
+import { useSettingsAccess } from "./use-system-settings";
 
 export function ConstraintInjectionCard({
   injectPlanner,
@@ -24,6 +25,7 @@ export function ConstraintInjectionCard({
   toggleInjectPlanner: (v: boolean) => void;
   toggleInjectWorker: (v: boolean) => void;
 }) {
+  const { editable } = useSettingsAccess(loaded);
   return (
     <Card className="mb-4 break-inside-avoid md:mb-6">
       <CardHeader>
@@ -53,7 +55,7 @@ export function ConstraintInjectionCard({
           <Switch
             id="inject-planner"
             checked={injectPlanner}
-            disabled={!loaded}
+            disabled={!editable}
             onCheckedChange={toggleInjectPlanner}
           />
         </div>
@@ -61,7 +63,7 @@ export function ConstraintInjectionCard({
           <Label htmlFor="inject-worker" className="text-sm font-normal text-muted-foreground">
             {injectWorker ? t("Inject into worker · On") : t("Inject into worker · Off")}
           </Label>
-          <Switch id="inject-worker" checked={injectWorker} disabled={!loaded} onCheckedChange={toggleInjectWorker} />
+          <Switch id="inject-worker" checked={injectWorker} disabled={!editable} onCheckedChange={toggleInjectWorker} />
         </div>
       </CardContent>
     </Card>
@@ -77,6 +79,7 @@ export function ExperimentalCard({
   loaded: boolean;
   toggleNoaCompaction: (v: boolean) => void;
 }) {
+  const { editable } = useSettingsAccess(loaded);
   return (
     <Card className="mb-4 break-inside-avoid md:mb-6">
       <CardHeader>
@@ -100,7 +103,12 @@ export function ExperimentalCard({
         <Label htmlFor="noa-compaction" className="text-sm font-normal text-muted-foreground">
           {noaCompaction ? t("noa context compaction · On") : t("noa context compaction · Off")}
         </Label>
-        <Switch id="noa-compaction" checked={noaCompaction} disabled={!loaded} onCheckedChange={toggleNoaCompaction} />
+        <Switch
+          id="noa-compaction"
+          checked={noaCompaction}
+          disabled={!editable}
+          onCheckedChange={toggleNoaCompaction}
+        />
       </CardContent>
     </Card>
   );
@@ -121,6 +129,7 @@ export function PythonInterpreterCard({
   detectPython: () => void;
   savePython: () => void;
 }) {
+  const { canAdmin, editable } = useSettingsAccess(loaded);
   return (
     <Card className="mb-4 break-inside-avoid md:mb-6">
       <CardHeader>
@@ -142,15 +151,19 @@ export function PythonInterpreterCard({
             className="font-mono text-sm"
             placeholder={t("/usr/bin/python3 (empty = auto-detect)")}
             value={pyInterp}
-            disabled={!loaded || saving}
+            disabled={!editable || saving}
             onChange={(e) => setPyInterp(e.target.value)}
           />
-          <Button variant="outline" onClick={detectPython} disabled={!loaded || saving}>
-            {t("Re-detect")}
-          </Button>
-          <Button onClick={savePython} disabled={!loaded || saving}>
-            {t("Save")}
-          </Button>
+          {canAdmin && (
+            <Button variant="outline" onClick={detectPython} disabled={!editable || saving}>
+              {t("Re-detect")}
+            </Button>
+          )}
+          {canAdmin && (
+            <Button onClick={savePython} disabled={!editable || saving}>
+              {t("Save")}
+            </Button>
+          )}
         </div>
       </CardContent>
     </Card>
@@ -170,6 +183,7 @@ export function WorkersCard({
   savingWorkers: boolean;
   saveWorkers: () => void;
 }) {
+  const { canAdmin, editable } = useSettingsAccess(loaded);
   return (
     <Card className="mb-4 break-inside-avoid md:mb-6">
       <CardHeader>
@@ -193,12 +207,14 @@ export function WorkersCard({
             className="w-32 font-mono text-sm"
             placeholder="3"
             value={workers}
-            disabled={!loaded || savingWorkers}
+            disabled={!editable || savingWorkers}
             onChange={(e) => setWorkers(e.target.value)}
           />
-          <Button onClick={saveWorkers} disabled={!loaded || savingWorkers}>
-            {t("Save")}
-          </Button>
+          {canAdmin && (
+            <Button onClick={saveWorkers} disabled={!editable || savingWorkers}>
+              {t("Save")}
+            </Button>
+          )}
         </div>
       </CardContent>
     </Card>

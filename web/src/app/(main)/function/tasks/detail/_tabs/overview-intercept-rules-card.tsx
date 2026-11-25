@@ -9,6 +9,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
 import { Switch } from "@/components/ui/switch";
+import { useCan } from "@/hooks/use-session";
 import { t } from "@/i18n";
 import { api } from "@/lib/api";
 import type { AssetInterceptKind, AssetInterceptRule } from "@/lib/types";
@@ -30,6 +31,7 @@ const TASK_RULE_KIND_LABEL: Record<AssetInterceptKind, string> = Object.fromEntr
 // TaskInterceptRulesCard manages "task-level asset intercept / allow rules" on the task detail overview:
 // list + add + inline edit + delete + enable toggle. Rules apply to this task only and never enter the global table.
 export function TaskInterceptRulesCard({ taskId }: { taskId: string }) {
+  const isAdmin = useCan("admin"); // rule mutations are admin-only (server/rbac_policy.go)
   const [rules, setRules] = React.useState<AssetInterceptRule[]>([]);
   const [busy, setBusy] = React.useState(false);
   const [err, setErr] = React.useState("");
@@ -141,40 +143,46 @@ export function TaskInterceptRulesCard({ taskId }: { taskId: string }) {
       </CardHeader>
       <CardContent className="flex flex-col gap-3">
         {/* Add form */}
-        <div className="flex flex-wrap items-center gap-2">
-          <NativeSelect size="sm" value={newAction} onChange={(e) => setNewAction(e.target.value as "block" | "allow")}>
-            <NativeSelectOption value="block">{t("Block")}</NativeSelectOption>
-            <NativeSelectOption value="allow">{t("Allow")}</NativeSelectOption>
-          </NativeSelect>
-          <NativeSelect size="sm" value={newKind} onChange={(e) => setNewKind(e.target.value as AssetInterceptKind)}>
-            {TASK_RULE_KIND_OPTIONS.map((o) => (
-              <NativeSelectOption key={o.value} value={o.value}>
-                {o.label}
-              </NativeSelectOption>
-            ))}
-          </NativeSelect>
-          <Input
-            className="h-7 min-w-56 flex-1 text-sm"
-            placeholder={placeholder}
-            value={newPattern}
-            onChange={(e) => setNewPattern(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") void add();
-            }}
-            disabled={busy}
-          />
-          <Input
-            className="h-7 w-36 text-sm"
-            placeholder={t("Note (optional)")}
-            value={newNote}
-            onChange={(e) => setNewNote(e.target.value)}
-            disabled={busy}
-          />
-          <Button size="sm" variant="outline" disabled={busy || !newPattern.trim()} onClick={() => void add()}>
-            <PlusIcon className="size-3.5" /> {t("Add")}
-          </Button>
-          {err && <span className="text-xs text-red-500">{err}</span>}
-        </div>
+        {isAdmin && (
+          <div className="flex flex-wrap items-center gap-2">
+            <NativeSelect
+              size="sm"
+              value={newAction}
+              onChange={(e) => setNewAction(e.target.value as "block" | "allow")}
+            >
+              <NativeSelectOption value="block">{t("Block")}</NativeSelectOption>
+              <NativeSelectOption value="allow">{t("Allow")}</NativeSelectOption>
+            </NativeSelect>
+            <NativeSelect size="sm" value={newKind} onChange={(e) => setNewKind(e.target.value as AssetInterceptKind)}>
+              {TASK_RULE_KIND_OPTIONS.map((o) => (
+                <NativeSelectOption key={o.value} value={o.value}>
+                  {o.label}
+                </NativeSelectOption>
+              ))}
+            </NativeSelect>
+            <Input
+              className="h-7 min-w-56 flex-1 text-sm"
+              placeholder={placeholder}
+              value={newPattern}
+              onChange={(e) => setNewPattern(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") void add();
+              }}
+              disabled={busy}
+            />
+            <Input
+              className="h-7 w-36 text-sm"
+              placeholder={t("Note (optional)")}
+              value={newNote}
+              onChange={(e) => setNewNote(e.target.value)}
+              disabled={busy}
+            />
+            <Button size="sm" variant="outline" disabled={busy || !newPattern.trim()} onClick={() => void add()}>
+              <PlusIcon className="size-3.5" /> {t("Add")}
+            </Button>
+            {err && <span className="text-xs text-red-500">{err}</span>}
+          </div>
+        )}
         {/* Rule list */}
         {rules.length > 0 ? (
           <div className="flex flex-col gap-1.5">
@@ -253,25 +261,29 @@ export function TaskInterceptRulesCard({ taskId }: { taskId: string }) {
                   {r.note && (
                     <span className="text-muted-foreground max-w-[120px] shrink-0 truncate text-xs">{r.note}</span>
                   )}
-                  <Switch checked={r.enabled} onCheckedChange={() => void toggle(r)} />
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    className="h-6 shrink-0 px-1.5"
-                    disabled={busy}
-                    onClick={() => startEdit(r)}
-                  >
-                    <PencilIcon className="size-3.5" />
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    className="h-6 shrink-0 px-1.5"
-                    disabled={busy}
-                    onClick={() => void remove(r)}
-                  >
-                    <Trash2Icon className="size-3.5 text-red-500" />
-                  </Button>
+                  <Switch checked={r.enabled} onCheckedChange={() => void toggle(r)} disabled={!isAdmin} />
+                  {isAdmin && (
+                    <>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="h-6 shrink-0 px-1.5"
+                        disabled={busy}
+                        onClick={() => startEdit(r)}
+                      >
+                        <PencilIcon className="size-3.5" />
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="h-6 shrink-0 px-1.5"
+                        disabled={busy}
+                        onClick={() => void remove(r)}
+                      >
+                        <Trash2Icon className="size-3.5 text-red-500" />
+                      </Button>
+                    </>
+                  )}
                 </div>
               ),
             )}

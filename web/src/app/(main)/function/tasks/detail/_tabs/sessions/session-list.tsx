@@ -2,6 +2,7 @@ import { ChevronDownIcon, Loader2Icon, PlusIcon, RotateCwIcon, WifiOffIcon } fro
 
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { useCan } from "@/hooks/use-session";
 import { intlLocale, t } from "@/i18n";
 import { MOCK } from "@/lib/mock/enabled";
 import type { Session, TokenTotal } from "@/lib/types";
@@ -61,6 +62,7 @@ export function SessionList({
   loadOlderIntents,
   showNoWorkers,
 }: SessionListProps) {
+  const canOperate = useCan("operate"); // new sessions and worker deletion are operate-level
   return (
     <div className="flex min-h-0 flex-col overflow-hidden rounded-lg border bg-card">
       <div className="border-b px-3 py-2">
@@ -154,7 +156,7 @@ export function SessionList({
                 <div className="flex items-center gap-1.5 px-2 py-1 text-xs font-medium text-muted-foreground">
                   <Meta.icon className="size-3.5" />
                   {Meta.label}
-                  {role === "mainagent" && (
+                  {role === "mainagent" && canOperate && (
                     <button
                       type="button"
                       onClick={onNewMain}
@@ -185,7 +187,7 @@ export function SessionList({
                       onClick={() => onSelect(s)}
                       controlling={controllingIntent === s.intent_id}
                       deleted={meta?.deleted}
-                      onCancel={() => onCancel(s)}
+                      onCancel={canOperate ? () => onCancel(s) : undefined}
                     />
                   );
                 })}

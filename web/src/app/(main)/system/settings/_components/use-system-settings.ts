@@ -4,9 +4,17 @@ import * as React from "react";
 
 import { toast } from "sonner";
 
+import { useCan } from "@/hooks/use-session";
 import { t } from "@/i18n";
 import { api } from "@/lib/api";
 import type { Settings } from "@/lib/types";
+
+// useSettingsAccess: every save on the settings page is PUT /api/settings, which is admin-only
+// (server/rbac_policy.go). Other roles see the values read-only: controls disabled, Save buttons hidden.
+export function useSettingsAccess(loaded: boolean): { canAdmin: boolean; editable: boolean } {
+  const canAdmin = useCan("admin");
+  return { canAdmin, editable: loaded && canAdmin };
+}
 
 export function useSystemSettings() {
   const [trafficCapture, setTrafficCapture] = React.useState(false);

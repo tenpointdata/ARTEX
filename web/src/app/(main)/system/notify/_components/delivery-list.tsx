@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { useCan } from "@/hooks/use-session";
 import { intlLocale, t } from "@/i18n";
 import { api } from "@/lib/api";
 import { statusMeta, toneClasses } from "@/lib/status";
@@ -17,6 +18,7 @@ import type { NotificationChannel, NotificationDelivery } from "@/lib/types";
 
 // DeliveryList is the delivery records table: filterable by channel and state, with manual retry for failed items.
 export function DeliveryList({ channels }: { channels: NotificationChannel[] }) {
+  const canOperate = useCan("operate"); // POST /api/notify/deliveries/{id}/retry
   const [rows, setRows] = React.useState<NotificationDelivery[]>([]);
   const [total, setTotal] = React.useState(0);
   const [page, setPage] = React.useState(1);
@@ -148,7 +150,7 @@ export function DeliveryList({ channels }: { channels: NotificationChannel[] }) 
                   <TableCell className="text-muted-foreground max-w-md text-xs break-all">{d.last_error}</TableCell>
                   <TableCell>
                     {/* Only failed/skipped items get a retry button: re-sending a delivered one would duplicate the push. */}
-                    {(d.state === "failed" || d.state === "skipped") && (
+                    {canOperate && (d.state === "failed" || d.state === "skipped") && (
                       <Button size="sm" variant="outline" onClick={() => retry(d.id)}>
                         <RotateCcwIcon /> {t("Retry")}
                       </Button>

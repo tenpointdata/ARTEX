@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
+import { useCan } from "@/hooks/use-session";
 import { t } from "@/i18n";
 import { api } from "@/lib/api";
 import type { LLMProfile, LLMRetryOverride } from "@/lib/types";
@@ -35,6 +36,7 @@ export function ProfileSheet({
   onOpenChange: (o: boolean) => void;
   onSaved: (id: string) => void;
 }) {
+  const canAdmin = useCan("admin"); // /api/llm is admin to change; other roles view the profile read-only
   const isNew = !profile;
   const [name, setName] = React.useState("");
   const [format, setFormat] = React.useState<ProfileFormat>("anthropic");
@@ -264,7 +266,7 @@ export function ProfileSheet({
           </SheetDescription>
         </SheetHeader>
 
-        <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-4 pb-4">
+        <fieldset disabled={!canAdmin} className="flex min-h-0 min-w-0 flex-1 flex-col gap-4 overflow-y-auto px-4 pb-4">
           <div className="grid gap-4 sm:grid-cols-2">
             <div className="grid gap-2">
               <Label htmlFor="p-name">{t("Name")}</Label>
@@ -450,19 +452,21 @@ export function ProfileSheet({
           <ProfileSamplingFields format={format} value={sampling} onChange={setSampling} />
 
           <ProfileRetryFields value={retry} onChange={setRetry} />
-        </div>
+        </fieldset>
 
-        <div className="flex gap-2 border-t px-4 py-3">
-          <Button variant="outline" onClick={testConnection} disabled={testing}>
-            {testing ? <Loader2Icon className="animate-spin" /> : <PlugZapIcon />}
-            {testing ? t("Testing…") : t("Test connection")}
-          </Button>
-          <Button onClick={save} disabled={saving} className="flex-1">
-            {saving && <Loader2Icon className="animate-spin" />}
-            {!saving && (isNew ? <PlusIcon /> : <SaveIcon />)}
-            {isNew ? t("Create") : t("Save")}
-          </Button>
-        </div>
+        {canAdmin && (
+          <div className="flex gap-2 border-t px-4 py-3">
+            <Button variant="outline" onClick={testConnection} disabled={testing}>
+              {testing ? <Loader2Icon className="animate-spin" /> : <PlugZapIcon />}
+              {testing ? t("Testing…") : t("Test connection")}
+            </Button>
+            <Button onClick={save} disabled={saving} className="flex-1">
+              {saving && <Loader2Icon className="animate-spin" />}
+              {!saving && (isNew ? <PlusIcon /> : <SaveIcon />)}
+              {isNew ? t("Create") : t("Save")}
+            </Button>
+          </div>
+        )}
       </SheetContent>
     </Sheet>
   );

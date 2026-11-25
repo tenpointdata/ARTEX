@@ -3,10 +3,9 @@
 
 import type * as React from "react";
 
-import { KeyRoundIcon, Trash2Icon } from "lucide-react";
+import { KeyRoundIcon } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { TableCell, TableRow } from "@/components/ui/table";
 import { t } from "@/i18n";
@@ -15,6 +14,7 @@ import type { Asset } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 import { Chips } from "./asset-table";
+import { RowDeleteButton } from "./row-delete-button";
 
 const METHOD_COLOR: Record<string, string> = {
   GET: "bg-emerald-100 text-emerald-700",
@@ -229,15 +229,10 @@ export function AssetRow({
       </TableCell>
       <TypeCells a={a} type={type} companyName={companyName} />
       <TableCell className="w-8 pl-0">
-        <Button
-          variant="ghost"
-          size="icon"
-          className="size-7 text-muted-foreground hover:text-destructive"
+        <RowDeleteButton
+          label={t("Delete asset {name}", { name: assetLabel(a, type) })}
           onClick={() => onDelete([a.id])}
-          aria-label={t("Delete asset {name}", { name: assetLabel(a, type) })}
-        >
-          <Trash2Icon className="size-3.5" />
-        </Button>
+        />
       </TableCell>
     </TableRow>
   );

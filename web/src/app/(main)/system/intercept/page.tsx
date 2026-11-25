@@ -8,6 +8,7 @@ import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { useCan } from "@/hooks/use-session";
 import { t } from "@/i18n";
 import { api } from "@/lib/api";
 import type { InterceptRule, Tool } from "@/lib/types";
@@ -22,6 +23,7 @@ import { groupTools } from "./_components/tool-groups";
 // ---- page ----
 
 export default function InterceptPage() {
+  const canAdmin = useCan("admin"); // rules, scope and the judge are admin-only to change (server/rbac_policy.go)
   const [rules, setRules] = React.useState<InterceptRule[]>([]);
   const [loading, setLoading] = React.useState(true);
   const [open, setOpen] = React.useState(false);
@@ -271,10 +273,12 @@ export default function InterceptPage() {
             <p className="text-xs text-muted-foreground">
               {t("Rules are matched one by one in priority order (higher numbers first); the first match wins")}
             </p>
-            <Button onClick={openNew} size="sm" className="shrink-0">
-              <PlusIcon className="h-4 w-4" />
-              {t("Create rule")}
-            </Button>
+            {canAdmin && (
+              <Button onClick={openNew} size="sm" className="shrink-0">
+                <PlusIcon className="h-4 w-4" />
+                {t("Create rule")}
+              </Button>
+            )}
           </div>
 
           <RulesTable

@@ -11,6 +11,7 @@ import { Label } from "@/components/ui/label";
 import { Sheet, SheetContent, SheetFooter, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
+import { useCan } from "@/hooks/use-session";
 import { t } from "@/i18n";
 import { api } from "@/lib/api";
 import type { Agent, MCPServer } from "@/lib/types";
@@ -28,6 +29,7 @@ export function CreateSkillSheet({
   mcpOptions: MCPServer[];
   onCreated: () => void;
 }) {
+  const canAdmin = useCan("admin"); // initial visibility is /api/visibility (admin)
   const [newName, setNewName] = React.useState("");
   const [newDesc, setNewDesc] = React.useState("");
   const [newLicense, setNewLicense] = React.useState("");
@@ -220,6 +222,7 @@ export function CreateSkillSheet({
                     <Checkbox
                       id={`new-skill-agent-${a.id}`}
                       checked={newVisibility.includes(a.id)}
+                      disabled={!canAdmin}
                       onCheckedChange={(on) =>
                         setNewVisibility((cur) => (on ? [...cur, a.id] : cur.filter((id) => id !== a.id)))
                       }

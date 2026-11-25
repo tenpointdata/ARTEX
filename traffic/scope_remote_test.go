@@ -348,6 +348,13 @@ func TestSOCKS5RemoteScope(t *testing.T) {
 			t.Fatalf("remote client with password %q: auth status 0x%02x, want 0x01", pass, status)
 		}
 	}
+	// The same unresolvable token under the scope user is refused at auth too.
+	if c, status := socks5UserPassAuth(t, addr, egress.ScopeUser, workerToken(8)); status != socks5UserPassFail {
+		_ = c.Close()
+		t.Fatalf("unresolvable worker token as %s: auth status 0x%02x, want 0x01", egress.ScopeUser, status)
+	} else {
+		_ = c.Close()
+	}
 	if got := spy.take(); len(got) != 0 {
 		t.Fatalf("refused SOCKS5 clients dialled %v", got)
 	}

@@ -21,6 +21,7 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { useCan } from "@/hooks/use-session";
 import { intlLocale, t } from "@/i18n";
 import { api } from "@/lib/api";
 import type { LLMRecordDetail, LLMRecordItem, LLMTask } from "@/lib/types";
@@ -58,7 +59,16 @@ function tryFormatJSON(s: string): string {
 
 const PAGE_SIZES = [25, 50, 100];
 
+// Raw LLM records need `operate` to read (they echo prompts and secrets).
 export default function LLMRecordsPage() {
+  if (!useCan("operate")) {
+    return <p className="p-6 text-muted-foreground text-sm">{t("Your role does not allow this.")}</p>;
+  }
+  return <LLMRecordsView />;
+}
+
+function LLMRecordsView() {
+  const canAdmin = useCan("admin"); // toggling recording / deleting records mutate /api/llm
   const [page, setPage] = React.useState(0);
   const [size, setSize] = React.useState(50);
   const [session, setSession] = React.useState("");
@@ -270,17 +280,19 @@ export default function LLMRecordsPage() {
             )}
           </SelectContent>
         </Select>
-        <Button
-          variant="destructive"
-          size="sm"
-          className="h-8"
-          disabled={!pickedTask || deleting}
-          title={pickedTask ? undefined : t("Select a task above first")}
-          onClick={() => setDeleteOpen(true)}
-        >
-          <Trash2Icon className="size-3.5" />
-          {t("Delete task conversations")}
-        </Button>
+        {canAdmin && (
+          <Button
+            variant="destructive"
+            size="sm"
+            className="h-8"
+            disabled={!pickedTask || deleting}
+            title={pickedTask ? undefined : t("Select a task above first")}
+            onClick={() => setDeleteOpen(true)}
+          >
+            <Trash2Icon className="size-3.5" />
+            {t("Delete task conversations")}
+          </Button>
+        )}
         <Select value={String(size)} onValueChange={(v) => setSize(Number(v))}>
           <SelectTrigger size="sm" className="w-28">
             <SelectValue />
@@ -301,7 +313,7 @@ export default function LLMRecordsPage() {
             size="sm"
             checked={recEnabled}
             onCheckedChange={toggleRecording}
-            disabled={recBusy}
+            disabled={recBusy || !canAdmin}
           />
           <label
             htmlFor="llm-rec-toggle"

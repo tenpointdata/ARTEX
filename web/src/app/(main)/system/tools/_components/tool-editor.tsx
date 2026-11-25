@@ -13,6 +13,7 @@ import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
+import { useCan } from "@/hooks/use-session";
 import { t } from "@/i18n";
 import { api } from "@/lib/api";
 import type { Agent, Tool } from "@/lib/types";
@@ -35,6 +36,8 @@ export function ToolEditor({
   onSaved: () => void;
   onClose: () => void;
 }) {
+  // Saving or restoring a tool is PUT/POST /api/tools (admin).
+  const canAdmin = useCan("admin");
   // traffic tools can't be bound/enabled until the global traffic capture switch is on.
   const trafficGated = TRAFFIC_TOOL_KEYS.has(tool.key) && !captureOn;
   const [description, setDescription] = React.useState(tool.description);
@@ -78,7 +81,7 @@ export function ToolEditor({
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-4">
+      <fieldset disabled={!canAdmin} className="flex min-h-0 min-w-0 flex-1 flex-col gap-4 overflow-y-auto px-4">
         {trafficGated && (
           <div className="rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-muted-foreground text-xs">
             {(() => {
@@ -185,17 +188,21 @@ export function ToolEditor({
             </div>
           ))}
         </div>
-      </div>
+      </fieldset>
 
-      <Separator className="mt-4" />
-      <div className="flex flex-wrap gap-2 p-4">
-        <Button size="sm" onClick={save} disabled={saving}>
-          <SaveIcon /> {t("Save")}
-        </Button>
-        <Button size="sm" variant="outline" onClick={reset}>
-          <RotateCcwIcon /> {t("Restore defaults")}
-        </Button>
-      </div>
+      {canAdmin && (
+        <>
+          <Separator className="mt-4" />
+          <div className="flex flex-wrap gap-2 p-4">
+            <Button size="sm" onClick={save} disabled={saving}>
+              <SaveIcon /> {t("Save")}
+            </Button>
+            <Button size="sm" variant="outline" onClick={reset}>
+              <RotateCcwIcon /> {t("Restore defaults")}
+            </Button>
+          </div>
+        </>
+      )}
     </div>
   );
 }

@@ -11,6 +11,7 @@ import { StatusBadge } from "@/components/status-badge";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger } from "@/components/ui/select";
+import { useCan } from "@/hooks/use-session";
 import { intlLocale, t } from "@/i18n";
 import { api } from "@/lib/api";
 import { setVisibleInterval } from "@/lib/polling";
@@ -52,6 +53,7 @@ function Row({
   onStatus: (f: Finding, next: FindingStatus) => void;
 }) {
   const [open, setOpen] = React.useState(false);
+  const canReview = useCan("review");
   return (
     <div className="border-b last:border-b-0">
       <div className="flex w-full items-center gap-3 px-4 py-3 text-sm hover:bg-accent/40">
@@ -91,7 +93,7 @@ function Row({
             {f.assets.length > 2 && <span className="text-xs text-muted-foreground">+{f.assets.length - 2}</span>}
           </div>
         )}
-        {f.finding_id && !f.inherited ? (
+        {f.finding_id && !f.inherited && canReview ? (
           <Select value={f.status} onValueChange={(v) => onStatus(f, v as FindingStatus)}>
             <SelectTrigger size="sm" className="h-7 w-28 shrink-0 border-none px-1 shadow-none focus-visible:ring-0">
               <StatusBadge domain="finding" value={f.status} dot />

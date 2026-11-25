@@ -16,6 +16,7 @@ import { Sheet, SheetContent, SheetDescription, SheetFooter, SheetHeader, SheetT
 import { Switch } from "@/components/ui/switch";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
+import { useCan } from "@/hooks/use-session";
 import { t } from "@/i18n";
 import { api } from "@/lib/api";
 import type { AssetInterceptKind, AssetInterceptRule } from "@/lib/types";
@@ -91,6 +92,7 @@ function frontValidate(form: RuleForm): string | null {
 // ---- page ----
 
 export default function AssetInterceptPage() {
+  const canAdmin = useCan("admin"); // asset interception rules are admin-only to change (server/rbac_policy.go)
   const [rules, setRules] = React.useState<AssetInterceptRule[]>([]);
   const [loading, setLoading] = React.useState(true);
   const [open, setOpen] = React.useState(false);
@@ -201,10 +203,12 @@ export default function AssetInterceptPage() {
             "Supports exact and fuzzy matching for domains / IPs / URLs, plus CIDR networks; ships with built-in fuzzy blocks for government (.gov / .gov.cn) and education (.edu / .edu.cn) sites",
           )}
         </p>
-        <Button onClick={openNew} size="sm" className="shrink-0">
-          <PlusIcon className="h-4 w-4" />
-          {t("Create rule")}
-        </Button>
+        {canAdmin && (
+          <Button onClick={openNew} size="sm" className="shrink-0">
+            <PlusIcon className="h-4 w-4" />
+            {t("Create rule")}
+          </Button>
+        )}
       </div>
 
       <Card>
@@ -215,10 +219,12 @@ export default function AssetInterceptPage() {
             <div className="flex flex-col items-center justify-center gap-2 py-16 text-center">
               <BanIcon className="h-8 w-8 text-muted-foreground/40" />
               <p className="text-sm text-muted-foreground">{t("No asset interception rules yet")}</p>
-              <Button size="sm" variant="outline" onClick={openNew}>
-                <PlusIcon className="h-4 w-4" />
-                {t("Create the first rule")}
-              </Button>
+              {canAdmin && (
+                <Button size="sm" variant="outline" onClick={openNew}>
+                  <PlusIcon className="h-4 w-4" />
+                  {t("Create the first rule")}
+                </Button>
+              )}
             </div>
           ) : (
             <Table>
@@ -253,21 +259,23 @@ export default function AssetInterceptPage() {
                       </div>
                     </TableCell>
                     <TableCell className="text-center">
-                      <Switch checked={rule.enabled} onCheckedChange={() => handleToggle(rule)} />
+                      <Switch checked={rule.enabled} disabled={!canAdmin} onCheckedChange={() => handleToggle(rule)} />
                     </TableCell>
                     <TableCell>
                       <div className="flex items-center justify-end gap-0.5">
                         <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => openEdit(rule)}>
                           <PencilIcon className="h-3.5 w-3.5" />
                         </Button>
-                        <Button
-                          size="icon"
-                          variant="ghost"
-                          className="h-7 w-7 text-destructive hover:text-destructive"
-                          onClick={() => handleDelete(rule)}
-                        >
-                          <Trash2Icon className="h-3.5 w-3.5" />
-                        </Button>
+                        {canAdmin && (
+                          <Button
+                            size="icon"
+                            variant="ghost"
+                            className="h-7 w-7 text-destructive hover:text-destructive"
+                            onClick={() => handleDelete(rule)}
+                          >
+                            <Trash2Icon className="h-3.5 w-3.5" />
+                          </Button>
+                        )}
                       </div>
                     </TableCell>
                   </TableRow>
@@ -288,7 +296,7 @@ export default function AssetInterceptPage() {
             </SheetDescription>
           </SheetHeader>
 
-          <div className="flex-1 min-h-0 overflow-y-auto px-6 py-5 space-y-5">
+          <fieldset disabled={!canAdmin} className="flex-1 min-h-0 min-w-0 overflow-y-auto px-6 py-5 space-y-5">
             <Field label={t("Match type")}>
               <Select value={form.kind} onValueChange={(v) => set({ kind: v as AssetInterceptKind })}>
                 <SelectTrigger>
@@ -346,16 +354,18 @@ export default function AssetInterceptPage() {
                 {t("Enable this rule")}
               </Label>
             </div>
-          </div>
+          </fieldset>
 
-          <SheetFooter className="border-t px-6 py-4 flex-row justify-end gap-2">
-            <Button variant="outline" onClick={() => setOpen(false)}>
-              {t("Cancel")}
-            </Button>
-            <Button onClick={handleSave} disabled={saving}>
-              {saving ? t("Saving…") : t("Save")}
-            </Button>
-          </SheetFooter>
+          {canAdmin && (
+            <SheetFooter className="border-t px-6 py-4 flex-row justify-end gap-2">
+              <Button variant="outline" onClick={() => setOpen(false)}>
+                {t("Cancel")}
+              </Button>
+              <Button onClick={handleSave} disabled={saving}>
+                {saving ? t("Saving…") : t("Save")}
+              </Button>
+            </SheetFooter>
+          )}
         </SheetContent>
       </Sheet>
     </div>

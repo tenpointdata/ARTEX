@@ -12,7 +12,7 @@ import { t } from "@/i18n";
 import type { Settings } from "@/lib/types";
 
 import { rich } from "./rich";
-import type { useSystemSettings } from "./use-system-settings";
+import { useSettingsAccess, type useSystemSettings } from "./use-system-settings";
 
 export type WebSearchCardProps = Pick<
   ReturnType<typeof useSystemSettings>,
@@ -77,6 +77,7 @@ export function WebSearchCard({
   runTest,
   saveWebSearch,
 }: WebSearchCardProps) {
+  const { canAdmin, editable } = useSettingsAccess(loaded);
   return (
     <Card className="mb-4 break-inside-avoid md:mb-6">
       <CardHeader>
@@ -108,7 +109,7 @@ export function WebSearchCard({
           <Switch
             id="web-search"
             checked={webSearch}
-            disabled={!loaded || saving}
+            disabled={!editable || saving}
             onCheckedChange={(v) => {
               setWebSearch(v); // optimistic
               saveWebSearch({ web_search_enabled: v });
@@ -121,7 +122,7 @@ export function WebSearchCard({
             <Label className="text-sm font-normal text-muted-foreground">{t("Search source")}</Label>
             <Select
               value={backend}
-              disabled={!loaded || saving}
+              disabled={!editable || saving}
               onValueChange={(v) => {
                 setBackend(v); // optimistic
                 saveWebSearch({ web_search_backend: v });
@@ -179,16 +180,18 @@ export function WebSearchCard({
                 autoComplete="off"
                 placeholder={braveKeySet ? t("Configured (leave empty to keep)") : t("Enter Brave API Key")}
                 value={braveKeyInput}
-                disabled={!loaded || savingKey}
+                disabled={!editable || savingKey}
                 onChange={(e) => setBraveKeyInput(e.target.value)}
               />
-              <Button
-                type="button"
-                onClick={saveBraveKey}
-                disabled={!loaded || savingKey || braveKeyInput.trim() === ""}
-              >
-                {t("Save")}
-              </Button>
+              {canAdmin && (
+                <Button
+                  type="button"
+                  onClick={saveBraveKey}
+                  disabled={!editable || savingKey || braveKeyInput.trim() === ""}
+                >
+                  {t("Save")}
+                </Button>
+              )}
             </div>
             {braveNeedsKey && (
               <p className="text-xs text-amber-500">
@@ -214,16 +217,18 @@ export function WebSearchCard({
                 autoComplete="off"
                 placeholder={tavilyKeySet ? t("Configured (leave empty to keep)") : t("Enter Tavily API Key (tvly-…)")}
                 value={tavilyKeyInput}
-                disabled={!loaded || savingTavilyKey}
+                disabled={!editable || savingTavilyKey}
                 onChange={(e) => setTavilyKeyInput(e.target.value)}
               />
-              <Button
-                type="button"
-                onClick={saveTavilyKey}
-                disabled={!loaded || savingTavilyKey || tavilyKeyInput.trim() === ""}
-              >
-                {t("Save")}
-              </Button>
+              {canAdmin && (
+                <Button
+                  type="button"
+                  onClick={saveTavilyKey}
+                  disabled={!editable || savingTavilyKey || tavilyKeyInput.trim() === ""}
+                >
+                  {t("Save")}
+                </Button>
+              )}
             </div>
             {webSearch && backend === "tavily" && !tavilyKeySet && (
               <p className="text-xs text-amber-500">
@@ -251,16 +256,18 @@ export function WebSearchCard({
                     : t("Optional: leave empty for the keyless endpoint")
                 }
                 value={keenableKeyInput}
-                disabled={!loaded || savingKeenableKey}
+                disabled={!editable || savingKeenableKey}
                 onChange={(e) => setKeenableKeyInput(e.target.value)}
               />
-              <Button
-                type="button"
-                onClick={saveKeenableKey}
-                disabled={!loaded || savingKeenableKey || keenableKeyInput.trim() === ""}
-              >
-                {t("Save")}
-              </Button>
+              {canAdmin && (
+                <Button
+                  type="button"
+                  onClick={saveKeenableKey}
+                  disabled={!editable || savingKeenableKey || keenableKeyInput.trim() === ""}
+                >
+                  {t("Save")}
+                </Button>
+              )}
             </div>
             <p className="text-muted-foreground text-xs leading-relaxed">
               {rich(
@@ -283,12 +290,14 @@ export function WebSearchCard({
                 autoComplete="off"
                 placeholder={t("http://host:port or socks5://host:port (empty = direct)")}
                 value={proxyInput}
-                disabled={!loaded || savingProxy}
+                disabled={!editable || savingProxy}
                 onChange={(e) => setProxyInput(e.target.value)}
               />
-              <Button type="button" onClick={saveProxy} disabled={!loaded || savingProxy}>
-                {t("Save")}
-              </Button>
+              {canAdmin && (
+                <Button type="button" onClick={saveProxy} disabled={!editable || savingProxy}>
+                  {t("Save")}
+                </Button>
+              )}
             </div>
             <p className="text-muted-foreground text-xs">
               {t(
@@ -303,15 +312,17 @@ export function WebSearchCard({
             <p className="text-muted-foreground text-xs">
               {t('Run a real "test" search with the current config (source + proxy + key) to verify it works.')}
             </p>
-            <Button
-              type="button"
-              variant="outline"
-              onClick={runTest}
-              disabled={!loaded || testing}
-              className="shrink-0"
-            >
-              {testing ? t("Testing…") : t("Test search")}
-            </Button>
+            {canAdmin && (
+              <Button
+                type="button"
+                variant="outline"
+                onClick={runTest}
+                disabled={!editable || testing}
+                className="shrink-0"
+              >
+                {testing ? t("Testing…") : t("Test search")}
+              </Button>
+            )}
           </div>
         )}
       </CardContent>

@@ -24,6 +24,7 @@ import { InputGroup, InputGroupAddon, InputGroupButton, InputGroupTextarea } fro
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useIsMobile } from "@/hooks/use-mobile";
+import { useCan } from "@/hooks/use-session";
 import type { SideQuestions } from "@/hooks/use-side-questions";
 import { intlLocale, t } from "@/i18n";
 import { cn } from "@/lib/utils";
@@ -39,7 +40,9 @@ const preparationLabels = {
 };
 
 export function SideQuestionButton({ side }: { side: SideQuestions }) {
-  if (!side.enabled) return null;
+  // Side questions run the model (a mutation), so they need operate.
+  const canOperate = useCan("operate");
+  if (!side.enabled || !canOperate) return null;
   return (
     <Button variant="outline" size="sm" onClick={() => side.setOpen(true)} title={t("/btw side question")}>
       <MessageCircleQuestionIcon data-icon="inline-start" />

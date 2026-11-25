@@ -6,6 +6,7 @@ import { Separator } from "@/components/ui/separator";
 import { Sheet, SheetContent, SheetDescription, SheetFooter, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
+import { useCan } from "@/hooks/use-session";
 import { t } from "@/i18n";
 import type { InterceptAction, InterceptRule } from "@/lib/types";
 
@@ -33,6 +34,7 @@ export function RuleSheet({
   saving: boolean;
   handleSave: () => void;
 }) {
+  const canAdmin = useCan("admin");
   return (
     <Sheet open={open} onOpenChange={setOpen}>
       <SheetContent side="right" className="flex flex-col gap-0 p-0 sm:max-w-md">
@@ -43,7 +45,7 @@ export function RuleSheet({
           </SheetDescription>
         </SheetHeader>
 
-        <div className="flex-1 min-h-0 overflow-y-auto px-6 py-5 space-y-5">
+        <fieldset disabled={!canAdmin} className="flex-1 min-h-0 min-w-0 overflow-y-auto px-6 py-5 space-y-5">
           <Field label={t("Name")}>
             <Input
               placeholder={t("Give the rule a name")}
@@ -217,16 +219,18 @@ export function RuleSheet({
               {t("Enable this rule")}
             </Label>
           </div>
-        </div>
+        </fieldset>
 
-        <SheetFooter className="border-t px-6 py-4 flex-row justify-end gap-2">
-          <Button variant="outline" onClick={() => setOpen(false)}>
-            {t("Cancel")}
-          </Button>
-          <Button onClick={handleSave} disabled={saving || !!regexErr}>
-            {saving ? t("Saving…") : t("Save")}
-          </Button>
-        </SheetFooter>
+        {canAdmin && (
+          <SheetFooter className="border-t px-6 py-4 flex-row justify-end gap-2">
+            <Button variant="outline" onClick={() => setOpen(false)}>
+              {t("Cancel")}
+            </Button>
+            <Button onClick={handleSave} disabled={saving || !!regexErr}>
+              {saving ? t("Saving…") : t("Save")}
+            </Button>
+          </SheetFooter>
+        )}
       </SheetContent>
     </Sheet>
   );

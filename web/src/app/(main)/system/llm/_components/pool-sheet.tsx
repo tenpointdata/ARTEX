@@ -9,6 +9,7 @@ import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Switch } from "@/components/ui/switch";
+import { useCan } from "@/hooks/use-session";
 import { t } from "@/i18n";
 import { api } from "@/lib/api";
 import { setVisibleInterval } from "@/lib/polling";
@@ -28,6 +29,7 @@ export function PoolSheet({
   pool: LLMPoolStatus | null;
   onReload: () => Promise<void>;
 }) {
+  const canAdmin = useCan("admin"); // PUT /api/settings and POST /api/llm/pool/reset are admin; other roles view the pool
   const [busy, setBusy] = React.useState(false);
 
   // The cooldown countdown is the remaining seconds computed by the backend — fetched on a timer only while the drawer is open and some profile is unhealthy, to keep it ticking.
@@ -97,7 +99,7 @@ export function PoolSheet({
             </div>
             <Switch
               checked={enabled}
-              disabled={busy}
+              disabled={busy || !canAdmin}
               onCheckedChange={(v) => void toggle({ llm_pool_enabled: v })}
               aria-label={t("LLM pool toggle")}
             />
@@ -116,7 +118,7 @@ export function PoolSheet({
                 </div>
                 <Switch
                   checked={pool?.bind_fallback ?? false}
-                  disabled={busy}
+                  disabled={busy || !canAdmin}
                   onCheckedChange={(v) => void toggle({ llm_pool_bind_fallback: v })}
                   aria-label={t("Bound-config failure fallback toggle")}
                 />
@@ -127,7 +129,7 @@ export function PoolSheet({
               <div className="grid gap-2">
                 <div className="flex items-center justify-between">
                   <Label className="text-sm">{t("Pool order")}</Label>
-                  {tripped.length > 0 && (
+                  {canAdmin && tripped.length > 0 && (
                     <Button size="sm" variant="ghost" onClick={() => void recover()}>
                       <RotateCcwIcon /> {t("Recover all")}
                     </Button>
@@ -175,7 +177,7 @@ export function PoolSheet({
                               {t("{count} consecutive failures", { count: m.fails })}
                             </span>
                           )}
-                          {m.state !== "ok" && (
+                          {canAdmin && m.state !== "ok" && (
                             <Button
                               size="icon"
                               variant="ghost"

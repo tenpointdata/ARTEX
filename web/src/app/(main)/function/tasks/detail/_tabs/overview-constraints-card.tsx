@@ -8,12 +8,14 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
+import { useCan } from "@/hooks/use-session";
 import { t } from "@/i18n";
 import { api } from "@/lib/api";
 import { setVisibleInterval } from "@/lib/polling";
 import type { TaskConstraint } from "@/lib/types";
 
 export function ConstraintsCard({ taskId }: { taskId: string }) {
+  const canOperate = useCan("operate");
   // Constraint management: constraint list + add form + inline edit state.
   const [constraints, setConstraints] = React.useState<TaskConstraint[]>([]);
   const [conText, setConText] = React.useState("");
@@ -111,35 +113,37 @@ export function ConstraintsCard({ taskId }: { taskId: string }) {
         </CardHeader>
         <CardContent className="flex flex-col gap-3">
           {/* Add form */}
-          <div className="flex flex-wrap items-center gap-2">
-            <NativeSelect
-              size="sm"
-              value={conKind}
-              onChange={(e) => setConKind(e.target.value as TaskConstraint["kind"])}
-            >
-              <NativeSelectOption value="deny">{t("Deny")}</NativeSelectOption>
-              <NativeSelectOption value="allow">{t("Allow")}</NativeSelectOption>
-            </NativeSelect>
-            <Input
-              className="h-7 min-w-56 flex-1 text-sm"
-              placeholder={t("One operation constraint, e.g. 'test only the current port, do not scan other ports'")}
-              value={conText}
-              onChange={(e) => setConText(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") void addConstraint();
-              }}
-              disabled={conBusy}
-            />
-            <Button
-              size="sm"
-              variant="outline"
-              disabled={conBusy || !conText.trim()}
-              onClick={() => void addConstraint()}
-            >
-              <PlusIcon className="size-3.5" /> {t("Add")}
-            </Button>
-            {conErr && <span className="text-xs text-red-500">{conErr}</span>}
-          </div>
+          {canOperate && (
+            <div className="flex flex-wrap items-center gap-2">
+              <NativeSelect
+                size="sm"
+                value={conKind}
+                onChange={(e) => setConKind(e.target.value as TaskConstraint["kind"])}
+              >
+                <NativeSelectOption value="deny">{t("Deny")}</NativeSelectOption>
+                <NativeSelectOption value="allow">{t("Allow")}</NativeSelectOption>
+              </NativeSelect>
+              <Input
+                className="h-7 min-w-56 flex-1 text-sm"
+                placeholder={t("One operation constraint, e.g. 'test only the current port, do not scan other ports'")}
+                value={conText}
+                onChange={(e) => setConText(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") void addConstraint();
+                }}
+                disabled={conBusy}
+              />
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={conBusy || !conText.trim()}
+                onClick={() => void addConstraint()}
+              >
+                <PlusIcon className="size-3.5" /> {t("Add")}
+              </Button>
+              {conErr && <span className="text-xs text-red-500">{conErr}</span>}
+            </div>
+          )}
           {/* Constraint list */}
           {constraints.length > 0 ? (
             <div className="flex flex-col gap-1.5">
@@ -196,24 +200,28 @@ export function ConstraintsCard({ taskId }: { taskId: string }) {
                       {c.kind === "allow" ? t("Allow") : t("Deny")}
                     </span>
                     <span className="min-w-0 flex-1 break-words">{c.text}</span>
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      className="h-6 shrink-0 px-1.5"
-                      disabled={conBusy}
-                      onClick={() => startEditConstraint(c)}
-                    >
-                      <PencilIcon className="size-3.5" />
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      className="h-6 shrink-0 px-1.5"
-                      disabled={conBusy}
-                      onClick={() => void removeConstraint(c)}
-                    >
-                      <Trash2Icon className="size-3.5 text-red-500" />
-                    </Button>
+                    {canOperate && (
+                      <>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="h-6 shrink-0 px-1.5"
+                          disabled={conBusy}
+                          onClick={() => startEditConstraint(c)}
+                        >
+                          <PencilIcon className="size-3.5" />
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="h-6 shrink-0 px-1.5"
+                          disabled={conBusy}
+                          onClick={() => void removeConstraint(c)}
+                        >
+                          <Trash2Icon className="size-3.5 text-red-500" />
+                        </Button>
+                      </>
+                    )}
                   </div>
                 ),
               )}

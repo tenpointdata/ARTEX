@@ -11,6 +11,8 @@
 # (with its Chromium, which `playwright install` skips when cached).
 #
 # Env: ARTEX_E2E_API_PORT (28787), ARTEX_E2E_UI_PORT (25173), ARTEX_E2E_PG_PORT (56432),
+# ARTEX_E2E_PROXY_PORT (unset: no recording proxy) starts the backend's recording proxy
+# on that loopback port and hands it to the scenario as ARTEX_E2E_PROXY (host:port).
 # ARTEX_E2E_KEEP=1 keeps the work dir (logs, screenshots) for inspection.
 # ARTEX_E2E_SCENARIO picks another scenario file in scripts/e2e (default integrations-e2e.js),
 # e.g. triage-e2e.js; the scenario gets the database as ARTEX_E2E_DSN.
@@ -24,6 +26,7 @@ ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 API_PORT="${ARTEX_E2E_API_PORT:-28787}"
 UI_PORT="${ARTEX_E2E_UI_PORT:-25173}"
 PG_PORT="${ARTEX_E2E_PG_PORT:-56432}"
+PROXY_ADDR="${ARTEX_E2E_PROXY_PORT:+127.0.0.1:$ARTEX_E2E_PROXY_PORT}"
 PASSWORD="e2e-correct-horse-battery-9"
 WORK="$(mktemp -d "${TMPDIR:-/tmp}/artex-e2e.XXXXXX")"
 mkdir -p "$WORK/shots"
@@ -72,8 +75,9 @@ fi
 # ---- backend (config, keys and data live next to the binary, in the work dir) ----
 log "building the backend"
 (cd "$ROOT" && go build -o "$WORK/artex" ./cmd/artex)
-ARTEX_PG_DSN="$DSN" ARTEX_ALLOW_UNSANDBOXED=1 ARTEX_NOTIFY_ALLOW_LOCAL=1 \
-  "$WORK/artex" -addr "127.0.0.1:$API_PORT" -proxy "" -data "$WORK/data" >"$WORK/backend.log" 2>&1 &
+# Run from the work dir: the backend writes jwt.key and secret.key to its working directory.
+(cd "$WORK" && ARTEX_PG_DSN="$DSN" ARTEX_ALLOW_UNSANDBOXED=1 ARTEX_NOTIFY_ALLOW_LOCAL=1 \
+  exec "$WORK/artex" -addr "127.0.0.1:$API_PORT" -proxy "$PROXY_ADDR" -data "$WORK/data" >"$WORK/backend.log" 2>&1) &
 PIDS+=("$!")
 wait_for "http://127.0.0.1:$API_PORT/api/auth/status" 90
 TOKEN=""
@@ -108,4 +112,4 @@ fi
 
 log "running the scenario"
 ARTEX_E2E_URL="http://127.0.0.1:$UI_PORT" ARTEX_E2E_PASSWORD="$PASSWORD" ARTEX_E2E_SHOTS="$WORK/shots" \
-  ARTEX_E2E_DSN="$DSN" node "$ROOT/scripts/e2e/${ARTEX_E2E_SCENARIO:-integrations-e2e.js}"
+  ARTEX_E2E_DSN="$DSN" ARTEX_E2E_PROXY="$PROXY_ADDR" node "$ROOT/scripts/e2e/${ARTEX_E2E_SCENARIO:-integrations-e2e.js}"

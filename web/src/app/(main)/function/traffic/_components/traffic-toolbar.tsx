@@ -7,6 +7,7 @@ import { ChevronLeftIcon, ChevronRightIcon, EraserIcon, SearchIcon, Trash2Icon }
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { useCan } from "@/hooks/use-session";
 import { t } from "@/i18n";
 
 import { METHODS, PAGE_SIZES } from "./traffic-format";
@@ -46,6 +47,8 @@ export function TrafficToolbar({
   onDeleteTarget,
   onPurgeAll,
 }: TrafficToolbarProps) {
+  const canOperate = useCan("operate"); // delete-by-target
+  const canAdmin = useCan("admin"); // purge all
   const hostQ = f.host.debounced;
   return (
     <div className="flex flex-wrap items-center gap-2">
@@ -58,30 +61,34 @@ export function TrafficToolbar({
           className="h-8"
         />
       </div>
-      <Button
-        variant="destructive"
-        size="sm"
-        className="h-8"
-        disabled={!hostQ || deleting}
-        title={hostQ ? undefined : t("Select a target on the left or enter a host first")}
-        onClick={onDeleteTarget}
-      >
-        <Trash2Icon className="size-3.5" />
-        {t("Delete this target")}
-      </Button>
-      {/* Outline rather than a second destructive button: this one ignores every
-          filter, so it must not look one mis-click away from "Delete this target". */}
-      <Button
-        variant="outline"
-        size="sm"
-        className="h-8 text-destructive hover:bg-destructive/10 hover:text-destructive"
-        disabled={!recordCount || deleting}
-        title={recordCount ? t("Delete all traffic and compact storage") : t("No traffic records yet")}
-        onClick={onPurgeAll}
-      >
-        <EraserIcon className="size-3.5" />
-        {t("Purge all")}
-      </Button>
+      {canOperate && (
+        <Button
+          variant="destructive"
+          size="sm"
+          className="h-8"
+          disabled={!hostQ || deleting}
+          title={hostQ ? undefined : t("Select a target on the left or enter a host first")}
+          onClick={onDeleteTarget}
+        >
+          <Trash2Icon className="size-3.5" />
+          {t("Delete this target")}
+        </Button>
+      )}
+      {canAdmin && (
+        // Outline rather than a second destructive button: this one ignores every
+        // filter, so it must not look one mis-click away from "Delete this target".
+        <Button
+          variant="outline"
+          size="sm"
+          className="h-8 text-destructive hover:bg-destructive/10 hover:text-destructive"
+          disabled={!recordCount || deleting}
+          title={recordCount ? t("Delete all traffic and compact storage") : t("No traffic records yet")}
+          onClick={onPurgeAll}
+        >
+          <EraserIcon className="size-3.5" />
+          {t("Purge all")}
+        </Button>
+      )}
       <div className="relative max-w-sm flex-1">
         <SearchIcon className="absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" />
         <Input
