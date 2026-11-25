@@ -1,6 +1,6 @@
 # HANDOFF.md — ARTEX
 
-**Last updated:** 2026-11-24 18:23 MST, by claude-code: c-d73308 (E8 follow-up) built, in review: an optional per-profile LLM sampling pin. Earlier hand-offs are under Deltas and in `ej handoff log`.
+**Last updated:** 2026-11-24 19:10 MST, by claude-code: c-7651e5 built, in review: findings stat cards honour lane/import_id; task detail `?tab=graph&node=` deep link. Earlier hand-offs are under Deltas and in `ej handoff log`.
 
 > Single entry point for whoever picks this up next (any agent or human), with no access to the
 > originating conversation. Read this first, then the sections of the code it points at.
@@ -142,7 +142,8 @@ nodes", verification in Deltas. Gap `c-7ad4da` (capture switch read at start-up)
 - Verified on Postgres 16: `TestFindingFilterByLane`, `TestCodeScanJoinsTaskGraphAndReport` (now also
   lane filter, DTO source, CSV/MD exports, unknown anchor leaves no import row), `report` tests;
   `scripts/verify.sh` (only the known macOS SOCKS5 test fails) and `--web-only` pass. Not checked in a
-  browser. Gaps: `c-7651e5` (stat cards ignore lane/import filters; fact node has no deep link).
+  browser. Follow-up `c-7651e5` built (in review): stat cards honour `lane`/`import_id`; task detail
+  takes `?tab=graph&node=<id>` and the Past imports Fact node cell links there.
 - Detail of E2 and E10 (formats, decisions, verification): `docs/handoff/2026-11-24-e2-e10-integrations.md`.
 
 **2026-11-24 — SSE 401 after console login (`c-13e86c`, fixed; pre-E5).** Streams are same-origin only
@@ -236,10 +237,6 @@ the full Docker image, the E8 suite) are in `docs/handoff/2026-11-24-current-sta
 
 11. *(unclaimed)* — **E2×E5 tracker RBAC** (S), card `c-5c4009`. Done = tracker create/update/delete
    need admin (like notify channels), push/sync stay operator; RBAC tests pass.
-12. *(unclaimed)* — **Findings stat cards honour lane/import filters; fact-node deep link** (S), card
-   `c-7651e5`. Done = stat cards match the filtered list under `lane=`/`import_id=` (db test); the
-   Past imports fact node opens the task graph on that node.
-
 - *(unclaimed)* — **RSI gate hardening** (M), card `c-0d277f`: server-side per-task arm ledger, suite
   pre-registration, adopted-lesson retire sync. Done = Postgres tests for each.
 - *(unclaimed)* — **RSI gate web UI** (M), card `c-936308`. Done = adopt/rollback from a proposals table in ≤2 clicks + password.
@@ -346,7 +343,7 @@ Card ids in brackets:
   image from a clean clone, [`c-d73308`] per-profile sampling pin (built, in review).
 - **E10** [`c-72dd9d`] Code-security lane: built 2026-11-24, in review (see Current state). Follow-ups:
   [`c-d059ae`] lane in UI and exports (built, in review on `ej/20261124-170322-736db7`);
-  [`c-7651e5`] stat cards + fact-node link; [`c-c978e3`] SAST-guided runtime verification;
+  [`c-7651e5`] stat cards + fact-node link (built, in review); [`c-c978e3`] SAST-guided runtime verification;
   [`c-5c4009`] tracker RBAC (E2×E5).
 
 ## Known issues and gotchas
@@ -413,6 +410,13 @@ Card ids in brackets:
 
 ## Decisions
 
+- **2026-11-24 c-7651e5 (stat cards / graph deep link):** the findings stat cards apply only the
+  page-wide filters (company, `import_id`, `lane`), not the per-view ones (severity, status, ...), so
+  the cards keep showing the breakdown the dropdowns pick from. Under `import_id`/`lane` archived (cold)
+  task aggregates are left out, as under company: they carry no import or lane attribution. The task
+  detail tab is URL state (`?tab=`); `?node=` implies the graph tab, opens the node's drawer and centers
+  on it once (a later poll does not reopen a drawer the user closed); a node folded into a digest opens
+  its drawer without centering.
 - **2026-11-24 c-f729e8 (approvals triage):** approval keys are A/D (separate verdict set from findings' C/F/D/A/I/P;
   the meaning of a key depends on the queue). They act only on an open pending request, never on a selection or with
   nothing open; batch decide keeps its confirmation dialog. The grouped view advances within the same group across
