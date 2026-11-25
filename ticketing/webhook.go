@@ -92,21 +92,20 @@ func validateWebhookSecret(cfg map[string]any) error {
 
 // VerifyHMACSHA256 checks a "sha256=<hex>" signature of body under secret in
 // constant time. A secret shorter than WebhookSecretMinLen never verifies.
+// The MAC is computed on every path, so a refusal takes as long as a check
+// and timing does not reveal whether a usable secret is configured.
 func VerifyHMACSHA256(secret string, body []byte, signature string) error {
-	if len(secret) < WebhookSecretMinLen {
-		return ErrWebhookSignature
+	usable := len(secret) >= WebhookSecretMinLen
+	key := secret
+	if !usable {
+		key = "artex-unusable-webhook-secret"
 	}
-	hexSig, ok := strings.CutPrefix(strings.TrimSpace(signature), "sha256=")
-	if !ok {
-		return ErrWebhookSignature
-	}
-	got, err := hex.DecodeString(hexSig)
-	if err != nil || len(got) != sha256.Size {
-		return ErrWebhookSignature
-	}
-	mac := hmac.New(sha256.New, []byte(secret))
+	mac := hmac.New(sha256.New, []byte(key))
 	mac.Write(body)
-	if !hmac.Equal(got, mac.Sum(nil)) {
+	want := mac.Sum(nil)
+	hexSig, ok := strings.CutPrefix(strings.TrimSpace(signature), "sha256=")
+	got, err := hex.DecodeString(hexSig)
+	if !usable || !ok || err != nil || len(got) != sha256.Size || !hmac.Equal(got, want) {
 		return ErrWebhookSignature
 	}
 	return nil

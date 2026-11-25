@@ -43,7 +43,17 @@ const (
 	ticketWebhookSeenMax  = 4096
 	ticketWebhookTimeout  = 30 * time.Second
 	ticketWebhookActor    = "webhook"
+	// ticketWebhookReadMax bounds the body read, so a client dripping bytes
+	// cannot hold one of the in-flight slots for the server's 30-minute read timeout.
+	ticketWebhookReadMax = 10 * time.Second
+	// ticketWebhookIDMax caps a delivery id (an unsigned header) kept in the replay map.
+	ticketWebhookIDMax = 128
 )
+
+// ticketWebhookDummySecret is hashed for an unknown tracker or a kind without
+// webhooks, so that refusal costs the same HMAC over the body as a real check
+// and response time does not reveal which tracker ids exist.
+const ticketWebhookDummySecret = "artex-webhook-timing-equalizer"
 
 // ticketWebhookGuard bounds concurrent deliveries and remembers recent
 // delivery ids. The zero value is ready.
@@ -66,7 +76,7 @@ func (g *ticketWebhookGuard) release() { g.inFlight.Add(-1) }
 // firstSeen records a delivery and reports whether it is new within the
 // replay window. An empty id is always new.
 func (g *ticketWebhookGuard) firstSeen(trackerID int64, delivery string, now time.Time) bool {
-	if delivery == "" {
+	if delivery == "" || len(delivery) > ticketWebhookIDMax {
 		return true
 	}
 	key := strconv.FormatInt(trackerID, 10) + ":" + delivery
@@ -121,6 +131,7 @@ func (s *Server) ticketWebhook(w http.ResponseWriter, r *http.Request) {
 	}
 	defer s.ticketWebhooks.release()
 
+	_ = http.NewResponseController(w).SetReadDeadline(time.Now().Add(ticketWebhookReadMax))
 	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, ticketWebhookBodyMax))
 	if err != nil {
 		writeErr(w, 413, "payload too large")
@@ -141,6 +152,7 @@ func (s *Server) ticketWebhook(w http.ResponseWriter, r *http.Request) {
 		recv, _ = ticketing.Webhooks(t.Kind)
 	}
 	if recv == nil {
+		_ = ticketing.VerifyHMACSHA256(ticketWebhookDummySecret, body, "")
 		writeErr(w, 401, "Unauthorized")
 		return
 	}
@@ -154,12 +166,13 @@ func (s *Server) ticketWebhook(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 400, "malformed payload")
 		return
 	}
-	if !s.ticketWebhooks.firstSeen(t.ID, ev.DeliveryID, time.Now()) {
-		writeJSON(w, 200, ticketWebhookReply{Status: "duplicate"})
-		return
-	}
+	// Ignored deliveries are not recorded, so a redelivery after the tracker is re-enabled is handled.
 	if !t.Enabled || len(ev.TicketIDs) == 0 {
 		writeJSON(w, 200, ticketWebhookReply{Status: "ignored"})
+		return
+	}
+	if !s.ticketWebhooks.firstSeen(t.ID, ev.DeliveryID, time.Now()) {
+		writeJSON(w, 200, ticketWebhookReply{Status: "duplicate"})
 		return
 	}
 	// Finish the sync even if the sender hangs up (GitHub waits 10 s).

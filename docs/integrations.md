@@ -71,10 +71,13 @@ A delivery is only a hint: its payload names the ticket, then the ordinary sync 
 reads the state from the tracker's API under the tracker lock. A forged state cannot be injected
 and a replay can at most cause one more read; repeated delivery ids are also dropped for 10 minutes.
 Replies: 200 `{"status":"ok","synced":n}`, `ignored` (unknown ticket, other event, tracker
-disabled), `duplicate`; 202 `deferred` when a push or sync of the tracker holds the lock (the
-running sync or the next one picks the change up, and a redelivery is accepted); 401 for an unknown
+disabled), `duplicate`; 202 `deferred` when a push or sync of the tracker holds the lock (GitHub
+does not retry a 2xx, so the change lands with the running or next sync; a manual redelivery is
+accepted); 401 for an unknown
 tracker, no secret, or a missing or bad signature (all the same, so tracker ids are not revealed);
-413 over 1 MiB; 503 past 4 concurrent deliveries. A delivery that pulls a status (or fails) is
+413 over 1 MiB or a body slower than 10 s; 503 past 4 concurrent deliveries. Refusals hash the body
+like a real check, so timing does not reveal configured trackers either. Delivery ids over 128 bytes
+are not remembered (such a delivery is still verified and synced). A delivery that pulls a status (or fails) is
 written to the audit chain as `ticket.webhook`. The tracker sheet shows the URL to register.
 
 The dedup key is `ticketing.DedupKey` over the finding's class, name and asset ids, or over the
