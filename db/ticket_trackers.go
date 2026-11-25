@@ -215,6 +215,20 @@ func (d *DB) FindingTicket(ctx context.Context, trackerID, findingID int64) (*Fi
 	return out[0], nil
 }
 
+// FindingTicketByExternal returns the link of one external ticket in one
+// tracker, nil when none (UNIQUE (tracker_id, external_id) makes it at most one).
+func (d *DB) FindingTicketByExternal(ctx context.Context, trackerID int64, externalID string) (*FindingTicket, error) {
+	rows, err := d.QueryContext(ctx, `SELECT `+findingTicketCols+` FROM finding_tickets WHERE tracker_id=$1 AND external_id=$2`, trackerID, externalID)
+	if err != nil {
+		return nil, err
+	}
+	out, err := scanFindingTickets(rows)
+	if err != nil || len(out) == 0 {
+		return nil, err
+	}
+	return out[0], nil
+}
+
 // UpsertFindingTicket records the agreed state after a successful push or sync
 // and clears last_error.
 func (d *DB) UpsertFindingTicket(ctx context.Context, t *FindingTicket) error {

@@ -77,7 +77,8 @@ type Server struct {
 	authHashKey    string
 	authVersionKey string
 
-	ticketCursors ticketCursors // per-tracker ticket sync cursor (ticket_sync_run.go)
+	ticketCursors  ticketCursors      // per-tracker ticket sync cursor (ticket_sync_run.go)
+	ticketWebhooks ticketWebhookGuard // in-flight cap + delivery replay window (ticket_webhook.go)
 
 	// Test-only seams for pgListModels SSRF checks. All remain zero/nil in
 	// production (strict public-only default; only exact host:port entries in
@@ -977,6 +978,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/traffic/replay", s.replayTraffic)
 	mux.HandleFunc("POST /api/traffic/import/har", s.importTrafficHAR)
 	mux.HandleFunc("GET /api/traffic/export/har", s.exportTrafficHAR)
+	mux.HandleFunc("POST /api/traffic/bulk-delete", s.bulkDeleteTraffic)
+	mux.HandleFunc("POST /api/traffic/bulk-export", s.bulkExportTrafficHAR)
 	mux.HandleFunc("GET /api/commands", s.pgListCommands)
 	mux.HandleFunc("GET /api/commands/stats", s.pgToolStats) // aggregate call counts per tool
 	mux.HandleFunc("GET /api/llm/records", s.pgListLLMRecords)
@@ -1007,6 +1010,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("DELETE /api/integrations/trackers/{id}", s.deleteTracker)
 	mux.HandleFunc("POST /api/integrations/trackers/{id}/push", s.pushTickets)
 	mux.HandleFunc("POST /api/integrations/trackers/{id}/sync", s.syncTickets)
+	mux.HandleFunc("POST "+ticketWebhookPrefix+"{id}", s.ticketWebhook) // public: HMAC-authenticated (requireAuth exempts it)
 	mux.HandleFunc("GET /api/integrations/imports", s.listScanImports)
 	mux.HandleFunc("POST /api/integrations/imports", s.importScan)
 	mux.HandleFunc("GET /api/exploration/findings/{id}/integrations", s.findingIntegrations)

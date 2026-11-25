@@ -191,7 +191,7 @@ func (s *Server) updateTracker(w http.ResponseWriter, r *http.Request) {
 	destChanged := false
 	if req.Config != nil {
 		stored := trackerConfig(t)
-		merged, err := notify.PrepareConfigUpdateKeys(impl.SecretKeys(), impl.DestinationKeys(), stored, req.Config)
+		merged, err := notify.PrepareConfigUpdateKeys(ticketing.OutboundSecretKeys(impl), impl.DestinationKeys(), stored, req.Config)
 		if err != nil {
 			writeErr(w, 400, err.Error())
 			return
