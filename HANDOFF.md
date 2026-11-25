@@ -1,6 +1,6 @@
 # HANDOFF.md — ARTEX
 
-**Last updated:** 2026-11-24 17:18 MST, by claude-code: c-d059ae (now in review; card c-7651e5 opened): the E10 lane is visible and filterable outside the task report. Earlier hand-offs are under Deltas and in `ej handoff log`.
+**Last updated:** 2026-11-24 17:30 MST, by claude-code: c-597b06 (E7, in review): stale worker_nodes rows no longer pile up under Kubernetes. Earlier hand-offs are under Deltas and in `ej handoff log`.
 
 > Single entry point for whoever picks this up next (any agent or human), with no access to the
 > originating conversation. Read this first, then the sections of the code it points at.
@@ -90,6 +90,12 @@ New chart default: agent egress deny for PostgreSQL and the control API (`egress
 plus the strict `egress.clusterCIDRs` mode. The lab fixtures are in `deploy/lab/` (an LLM stub and the kind
 values); `scripts/k8s-egress-probe.sh` runs the egress probe.
 
+**2026-11-24 — Stale `worker_nodes` rows pruned (`c-597b06`, E7; in review).** Under Kubernetes the
+node id is the pod name, so each rollout left dead rows. `db.NodeRetention` (20 × NodeTTL = 15 min):
+`ListNodes` hides older rows and every node heartbeat runs `PruneNodes` (`db/worker_nodes.go`,
+`server/node.go`). Test `db/worker_nodes_test.go` passes on Postgres 18; documented in
+`docs/DISTRIBUTED.md` ("Node registry"). Not re-run on a kind cluster.
+
 **2026-11-24 — TLS between worker nodes and the control node by default (`c-548e8b`, E7; in review).**
 Worker nodes reach the control API (node RPC) over **TLS with the CA pinned**: `ARTEX_CONTROL_CA`
 (`server/node_tls.go`) makes the worker accept only `https://` and trust only that CA, never the system
@@ -164,36 +170,9 @@ switches between them and reads each one's findings and report; all 51 `/api` re
 
 **2026-11-24 — E5 web UI (`c-869050`, in review).** Detail moved to `docs/handoff/2026-11-24-e5-web-ui.md`.
 
-**2026-11-24 (c-d25ff9, E3)** — The `RSI.md` Loop C benchmark gate and Loop B lesson graduation are built,
-flag off (`ARTEX_RSI_LOOP`, default off, read per request). Pure core `rsi/` (search-space allowlist:
-`prompt_body` for goals/planner/worker and `lesson`; immutable and git-reviewed surfaces refused;
-annealed budget 4,2,1,1…; `Evaluate` recomputes per-gate and paired results from raw E8 arm records,
-binds them to the exact body sha / lesson set, refuses proposed-from targets, net regressions and
-gains on fewer than 2 targets). API `/api/rsi/*` (`server/rsi_loop.go`); migration **0020**
-(`rsi_proposals`, `rsi_proposal_evidence`, append-only `rsi_adoption_log`). Adoption = owner
-password + newest passing evidence id + evidence baseline equal to the live prompt; it appends an
-`agent_prompts` version; rollback is a pointer change (refused if an owner edited since, open
-with the flag off). `ARTEX_RSI_LESSONS` gains `adopted` (only graduated lessons) and `bench` (a
-pinned set, `PUT /api/rsi/bench-lessons`). This branch merges the unmerged E8 suite branch
-(`ej/20261124-084655-ccdab2`); harness gains lesson arms and `scripts/benchmark/rsi_submit.py`.
-An adversarial review (opus) found real-upload breakage (string task ids) and replay/forgery
-paths; fixed here: task ledger across proposals, `suite_run` invariant, 3 uploads per proposal,
-crashed candidate runs count as losses, rendered + normalized marker checks, ≤4 open proposals
-with forward-only rounds, split agent lock, lesson block sha and unedited-role shas re-checked at
-adoption. Remaining findings: `c-0d277f`. Verified: `go test ./rsi`, the RSI DB and server tests
-against Postgres 16, 65 benchmark Python tests, `scripts/verify.sh`. Not verified: any live suite run through the gate (`c-772190`); no UI
-(`c-936308`).
+**2026-11-24 (c-d25ff9, E3)** — RSI Loop C gate and Loop B lesson graduation built, flag off (`ARTEX_RSI_LOOP`). Detail moved to `docs/handoff/2026-11-24-e3-rsi-loops.md`.
 
-**2026-11-24 (c-c0bb07, E4)** — Methodology-driven coverage: OWASP WSTG 4.2 (97 tests) and the OWASP
-API Security Top 10 2023 are typed checklists in `methodology/` (data in `methodology/data/*.json`,
-embedded and validated). A task's applicable checklists come from its goal and description (no
-column). `db/coverage_methodology.go` scores them from the coverage ledger, findings (vulnclass)
-and intents citing an item (`payload.methodology_item`). The planner gets a `[Methodology coverage]`
-block each round, and `add_intent` takes `methodology_item`, which is validated and stored as the
-canonical item id. `GET /api/tasks/{id}/coverage` returns `methodologies`, and the task overview's
-coverage card shows a filterable table of the items. Verified by the methodology, agent and
-db unit tests, a Postgres integration test (`TestMethodologyCoverage`), `tsc` and `scripts/verify.sh`.
-The UI was not checked in a browser.
+**2026-11-24 (c-c0bb07, E4)** — OWASP WSTG 4.2 and API Top 10 2023 checklists drive coverage (`methodology/`). Detail moved to `docs/handoff/2026-11-24-e4-methodology-coverage.md`.
 
 **2026-11-24 (c-75c593)** — The benchmark subject instance (`docker-compose.bench.yml`) now builds from a
 clean clone: production `Dockerfile`, a sibling Postgres, named volumes, committed `bench/.env.example`
@@ -264,7 +243,7 @@ body, through the versioned prompt API, and the starting bodies are restored aft
 **Agents' lane**
 0. *(unclaimed)* — **E7: worker nodes miss other runtime control-node state** (M), card `c-6bcdd3`: LLM profiles,
    MCP servers, custom tools and similar are rebuilt only at start. Done = each one is followed or listed in
-   DISTRIBUTED.md Limits. Then `c-597b06` (stale worker_nodes rows, S).
+   DISTRIBUTED.md Limits.
 1. *(unclaimed)* — **SEC: per-task uid follow-ups** (S each): `c-12df03` (single-uid start-up fails on a
    socket; MCP uid not egress-filtered), `c-e70e5c` (release ended tasks at start-up; per-key lock). The "Done when" is on each card.
 2. *(unclaimed)* — **E5 UI: hide role-lacking actions on existing pages** (M), card `c-92bb52`. Done = as
@@ -369,7 +348,7 @@ Card ids in brackets:
   Follow-ups: `c-3b781a` and `c-548e8b` (TLS to the control API) in review; `c-677166` (TLS on the
   proxy hop), `c-29ff19`, `c-18f7a8`; `c-8cfbfe` (kind install recorded, in review; `c-7ad4da` closed by it).
   From the install: `c-6bcdd3` (other state workers read only at start), `c-d4946f` (egress deny re-resolved;
-  in review), `c-597b06` (stale node rows), `c-620510` (real multi-machine cluster, human).
+  in review), `c-597b06` (stale node rows; in review), `c-620510` (real multi-machine cluster, human).
 - **E8** [`c-5487e8`] Planner/worker evaluation suite (regression targets, prompt-version A/B via the benchmark gate).
 - **E9** [`c-73af97`] Frontend/UX pass (tables over cards, fewer-clicks triage workflow, live engagement dashboard).
 - **SEC** [`c-517c2d`] Live Playwright task check of the scope relay (human/bench: needs an LLM key and an authorized target).
@@ -705,8 +684,13 @@ Card ids in brackets:
 ## Deltas
 
 <!-- composite:deltas · newest first; Composite rewrites this block on every merge (ej handoff merge / merge_handoff) -->
-- **2026-11-24 17:18 MST** · claude-code · `ej/20261124-170322-736db7` `5e33af0`→`71d6b23` (1 commit) · `h-5e6f9c` — c-d059ae (now in review; card c-7651e5 opened): the E10 lane is visible and filterable outside the task report. The branch merges the unlanded E10 branch and main. E2 is on main as 0015, so E10's renumber of it to 0023 is dropped, and the lane migration stays at 0024 after main's 0023_distributed_workers. Backend: ?lane=runtime|sast|sca in the shared findings filter (list, groups, tree, export); finding DTOs carry a client-safe source (lane, tool, rule, path:line, import id); the findings Markdown exports get the Source line and the CSV gets lane/source columns; scan import rows carry lane_counts; a dead post-create anchor check is removed (anchors were already validated before CreateScanImport). Web: lane badge and path:line on the findings table and detail, a lane dropdown in the URL, an anchor-asset picker on Scanner imports, and Lanes and Fact node columns on Past imports. Verified on Postgres 16 (TestFindingFilterByLane, TestCodeScanJoinsTaskGraphAndReport extended, report tests); scripts/verify.sh passes except the known macOS SOCKS5 test, and --web-only passes. Not checked in a browser. **Next:** Land ej/20261124-170322-736db7 (it carries E10); do not land the E10 branch alone. c-7651e5: stat cards honour lane/import filters, and a fact-node deep link. c-5c4009 tracker RBAC, c-c978e3 SAST-guided runtime verification. **Decided:** Kept E2 at main's 0015 and E10's lane at 0024, rather than E10's renumber to 0023, which collides with main's 0023_distributed_workers. Finding DTOs expose only the fields the client_read task report already shows (lane, tool, rule, location, import id); the raw scanner record and dedup key stay behind /findings/{id}/integrations (read). lane=runtime includes worker findings, and an unknown lane matches nothing. Worker findings show no lane badge, so the badge flags imports. Moved the E2/E10 Current state detail to docs/handoff/2026-11-24-e2-e10-integrations.md to fit the size limit.
+- **2026-11-24 17:30 MST** · claude-code · `ej/20261124-172040-ead433` `dd269fd`→`0450525` (1 commit) · `h-8ce710` — c-597b06 (E7, in review): stale worker_nodes rows no longer pile up under Kubernetes. db.NodeRetention = 20 × NodeTTL (15 min); ListNodes hides rows silent longer than that and every node heartbeat runs PruneNodes (db/worker_nodes.go, server/node.go). New test db/worker_nodes_test.go (live + recently dead listed, stale hidden then deleted) passes on Postgres 18; existing two-node server tests pass. docs/DISTRIBUTED.md gains a "Node registry" bullet. Moved the E3 and E4 Current state detail to docs/handoff/ to keep HANDOFF.md under 60 KB. **Next:** Land this branch with E7. Optionally confirm on the kind install (c-8cfbfe) that after a few rollouts GET /api/settings/nodes shows only live + recently dead pods once 15 min pass. **Decided:** Retention is a fixed 20 × NodeTTL (15 min) rather than a setting: long enough to see a crashed pod on the nodes page, short enough that rollouts do not accumulate. Both hide in the query (correct even if pruning fails) and delete from the heartbeat (no separate sweeper; any running node cleans up).
 - _Older hand-offs, a line each; `ej handoff log` has them whole:_
+- **2026-11-24 17:28 MST** · claude-code · `h-1cba84` — c-45c921 (now in review), on a branch that merges the unlanded E9 branch (ej/20261124-145257-79147f), so landing it lands E9 too. **Next:** Land ej/20261124-170157-3aeba5; it carries E9.
+- **2026-11-24 17:26 MST** · claude-code · `h-1e1166` — c-c18f43 (mechanism landed on this branch; renumbering stays open per landing): scripts/check-migration-versions.sh (+ self-test, verify.sh step, PR-only CI job migration-versions) fails a migration not numbered above main's newest, duplicates, and edited/rem… **Next:** As each branch lands, renumber its migration above main's newest (Known issues lists them: 0017_finding_classification, 0021_lesson_scope_scrub, 0023_finding_import_links, 0023_change_notify, one of…
+- **2026-11-24 17:21 MST** · claude-code · `h-c66079` — c-cea6ac (now in review): explained and fixed why c-4c8fd6 task 2 was `done` mid-decomposition. **Next:** Land ej/20261124-170856-f6245f.
+- **2026-11-24 17:21 MST** · claude-code · `h-585760` — c-119206 (now in review; card c-81193b opened): E2 integrations UI gates its controls by role with useCan, matching server/rbac_policy.go — tracker add/edit/delete/enable admin; Sync, Push to tracker (bulk + detail) and the scanner import form operate; the fi… **Next:** c-81193b: hide Start retest, Link traffic and the severity/status/report-stage pickers on the finding detail for client_read (extend roles-e2e.js client block).
+- **2026-11-24 17:18 MST** · claude-code · `h-5e6f9c` — c-d059ae (now in review; card c-7651e5 opened): the E10 lane is visible and filterable outside the task report. **Next:** Land ej/20261124-170322-736db7 (it carries E10); do not land the E10 branch alone.
 - **2026-11-24 17:17 MST** · claude-code · `h-adc4a6` — c-0d277f (RSI gate hardening, now in review; card closed): evidence is checked against the server's own records. **Next:** c-936308 (RSI gate web UI: show suite runs and the new log actions).
 - **2026-11-24 17:14 MST** · claude-code · `h-917e8c` — c-1d3e0a (E7, now in review; cards c-c18f43 and c-20c400 opened), on a branch that merges the unmerged E7 branches ej/20261124-164948-393f2a (c-18f7a8 stack) and ej/20261124-155353-b1c60a (c-8cfbfe). **Next:** Land the E7 stack with this branch on top.
 - **2026-11-24 16:45 MST** · claude-code · `h-aa4a90` — c-7361b4 (in review): the goals runtime refuses LLM calls on a terminal task, and an in-flight decomposition is cancelled when its task ends, so it writes no fallback goal. **Next:** c-83ae7b: per-role default output caps for planner/worker/mainagent/compactor. **Issues:** opened #c-83ae7b.
@@ -716,11 +700,6 @@ Card ids in brackets:
 - **2026-11-24 16:33 MST** · claude-code · `h-a38b70` — c-2af578 (card, now in review; follow-up card c-1229ff opened): the Docker image no longer runs `bbot --install-all-deps`. **Next:** c-1229ff: make the pinned tools and bbot.yml visible to executor-run scans (per-run HOME).
 - **2026-11-24 16:33 MST** · claude-code · `h-0857b6` — c-29ff19 (E7 follow-up, in review): worker transcripts are shared through PostgreSQL, so any node resumes any intent. **Next:** Land after E7 (ej/20261124-150525-1a95b3) and after the branches carrying 0023/0024; a database that applied 0025 refuses older pending migrations.
 - **2026-11-24 16:17 MST** · claude-code · `h-11f65f` — c-3b781a (E7 follow-up, now in review): a finding recorded by a worker-node intent now binds the control node's captured request/response. **Next:** Land this branch (it carries E7). **Issues:** opened #c-548e8b, #c-7ad4da.
-- **2026-11-24 16:09 MST** · claude-code · `h-666bdf` — E7 (c-d60149) built, in review: -role all|control|worker. **Next:** c-8cfbfe: real helm install on a 2+ node cluster (human or infra). **Issues:** opened #c-18f7a8, #c-29ff19, #c-3b781a, #c-8cfbfe.
-- **2026-11-24 16:07 MST** · claude-code · `h-59c24d` — E10 (c-72dd9d, now in review): code-security lane. **Next:** c-5c4009: tracker config RBAC (admin vs operate). **Issues:** opened #c-5c4009, #c-c978e3, #c-d059ae.
-- **2026-11-24 15:58 MST** · claude-code · `h-0548f2` — c-2d91eb (E2 UI follow-ups, now in review; board cards c-1198a2 and c-119206 opened) on a branch that merges the unmerged E2 UI + backend branch (ej/20261124-132955-7aef3f), so landing it lands all of E2. **Next:** Land ej/20261124-150516-d78c96 (it carries the E2 backend, UI and these follow-ups).
-- **2026-11-24 15:56 MST** · claude-code · `h-f62f2d` — c-4c8fd6 (E6 live check, now in review): built the E6 branch into an isolated compose stack (local Ollama with prices, nginx target on its own network, OTel collector via host.docker.internal). **Next:** Land ej/20261124-123231-b78990 (E6, not on main yet) with c-f4a69d. **Issues:** opened #c-7361b4, #c-990198.
-- **2026-11-24 15:30 MST** · claude-code · `h-124b6f` — c-f4a69d (E6 follow-up, now in review; card c-888292 opened): the Cost & efficiency view now includes archived tasks. **Next:** c-4c8fd6: check the cost page in a browser against real LLM traffic, including an archived task.
 <!-- /composite:deltas -->
 
 _(written by `merge_handoff`)_
