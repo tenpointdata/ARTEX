@@ -476,6 +476,14 @@ Card ids in brackets:
 
 ## Decisions
 
+- **2026-11-24 c-cce755 (RSI action roles):** `POST /api/rsi/proposals/{id}/rollback` needs `admin`
+  (one exact rule in `server/rbac_policy.go`): it re-points an agent's live prompt version, the same effect as
+  `PUT /api/agents/...`. No password, so the owner (admin) keeps one-step rollback. Reject, propose and evidence stay
+  `operate` (the default): reject applies only before adoption and changes no live prompt, and the proposer and bench
+  harness post with operator tokens; adopt stays `operate` + owner password. Not a blanket `/api/rsi` mutate rule,
+  which would lock the proposer out. Reverses the earlier "reject and rollback need only a session" line in `RSI.md`.
+  The RSI page (c-936308, unmerged branch `ej/20261124-192153-48c72c`) must gate the Rollback button on
+  `useCan("admin")` and keep reject on `useCan("operate")` (follow-up c-a842a0).
 - **2026-11-24 c-c2bdc8 (tracker webhooks):** a delivery is a hint, never state: it names a ticket and the
   normal sync reads the tracker API, so forged or replayed payloads cannot set a finding status. Jira is
   supported only through Jira Cloud's HMAC-signed admin webhooks (`X-Hub-Signature`); a secret in the URL was
