@@ -42,7 +42,7 @@ type TaskOutcome struct {
 	TaskID      int64               `json:"task_id"`
 	Status      string              `json:"status"`
 	CategoryID  int64               `json:"category_id"`
-	CompanyID   int64               `json:"company_id"`
+	CompanyID   int64               `json:"company_id"` // first company in task_scope (tasks.company_id is legacy and unset by task creation)
 	Findings    TaskOutcomeFindings `json:"findings"`
 	Retests     TaskOutcomeRetests  `json:"retests"`
 	Tokens      TaskOutcomeTokens   `json:"tokens"`
@@ -57,7 +57,10 @@ func (d *DB) TaskOutcome(ctx context.Context, taskID int64) (TaskOutcome, error)
 	var o TaskOutcome
 	err := d.QueryRowContext(ctx, `
 		SELECT t.id, t.status,
-		       COALESCE(t.category_id,0), COALESCE(t.company_id,0),
+		       COALESCE(t.category_id,0),
+		       COALESCE((SELECT ts.company_id FROM task_scope ts
+		                 WHERE ts.task_id=t.id AND ts.kind='company' AND ts.company_id IS NOT NULL
+		                 ORDER BY ts.id LIMIT 1), t.company_id, 0),
 		       COALESCE(f.total,0), COALESCE(f.confirmed,0), COALESCE(f.open,0),
 		       COALESCE(f.false_positive,0), COALESCE(f.duplicate,0),
 		       COALESCE(f.critical,0), COALESCE(f.high,0),

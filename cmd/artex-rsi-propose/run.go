@@ -17,10 +17,11 @@ import (
 
 // options are the command-line settings of one run.
 type options struct {
-	Out      string // directory for arm files; round-<N> is appended
-	Round    int    // -1 = the newest round
-	MaxTasks int    // newest closed tasks to read
-	Post     bool   // post the drafts; default is a dry run
+	Out      string   // directory for arm files; round-<N> is appended
+	Round    int      // -1 = the newest round
+	MaxTasks int      // newest closed tasks to read
+	Post     bool     // post the drafts; default is a dry run
+	Only     []string // with Post, register only the drafts with these names
 }
 
 // ErrLoopOff is returned when the server's RSI loop flag is off.
@@ -110,10 +111,14 @@ func run(c *client, opt options, log io.Writer) (*result, error) {
 		res.Files = append(res.Files, path)
 	}
 	if opt.Post && len(plan.Drafts) > 0 {
+		post, err := selectDrafts(plan.Drafts, opt.Only)
+		if err != nil {
+			return res, err
+		}
 		if _, err := loopStatus(c); err != nil {
 			return nil, err
 		}
-		for _, d := range plan.Drafts {
+		for _, d := range post {
 			var out struct {
 				Proposal struct {
 					ID int64 `json:"id"`
@@ -136,6 +141,28 @@ func run(c *client, opt options, log io.Writer) (*result, error) {
 	return res, nil
 }
 
+// selectDrafts picks the drafts named in only (all of them when only is
+// empty). A name that matches no draft is an error, so a typo never posts
+// nothing silently or something unintended.
+func selectDrafts(drafts []propose.Draft, only []string) ([]propose.Draft, error) {
+	if len(only) == 0 {
+		return drafts, nil
+	}
+	byName := map[string]propose.Draft{}
+	for _, d := range drafts {
+		byName[d.Name] = d
+	}
+	out := make([]propose.Draft, 0, len(only))
+	for _, name := range only {
+		d, ok := byName[name]
+		if !ok {
+			return nil, fmt.Errorf("--only %q matches no draft in this round's plan", name)
+		}
+		out = append(out, d)
+	}
+	return out, nil
+}
+
 func loopStatus(c *client) (*statusResp, error) {
 	var st statusResp
 	if err := c.get("/api/rsi/status", &st); err != nil {
@@ -147,7 +174,8 @@ func loopStatus(c *client) (*statusResp, error) {
 	return &st, nil
 }
 
-// closedTasks reads the newest done/failed tasks with their outcome and lessons.
+// closedTasks reads the newest closed tasks (done, failed or timeout, the
+// statuses db.IsTerminal treats as terminal) with their outcome and lessons.
 func closedTasks(c *client, limit int) ([]propose.Task, error) {
 	var list struct {
 		Tasks []taskRow `json:"tasks"`
@@ -157,7 +185,7 @@ func closedTasks(c *client, limit int) ([]propose.Task, error) {
 	}
 	var rows []taskRow
 	for _, t := range list.Tasks {
-		if t.Status == "done" || t.Status == "failed" {
+		if t.Status == "done" || t.Status == "failed" || t.Status == "timeout" {
 			rows = append(rows, t)
 		}
 	}

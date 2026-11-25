@@ -1,6 +1,6 @@
 # HANDOFF.md — ARTEX
 
-**Last updated:** 2026-11-24 19:31 MST, by claude-code: c-c89f5b (in review): RSI Loop C proposer. Earlier hand-offs are under Deltas and in `ej handoff log`.
+**Last updated:** 2026-11-24 20:05 MST, by claude-code: c-4bbf29 (in review): RSI proposer checked against a real server. Earlier hand-offs are under Deltas and in `ej handoff log`.
 
 > Single entry point for whoever picks this up next (any agent or human), with no access to the
 > originating conversation. Read this first, then the sections of the code it points at.
@@ -58,6 +58,23 @@ See `docs/ARCHITECTURE.md` for the code-level map. Summary:
 - `docs/` — `ARCHITECTURE.md`, `OPS.md`, traffic docs, `RSI.md` (self-improvement governance contract).
 
 ## Current state
+
+**2026-11-24 — RSI proposer against a real server (`c-4bbf29`, in review)** on `ej/20261124-195101-9cd1e0`.
+Ran `artex-rsi-propose` against a real ARTEX server (throwaway Postgres + `cmd/artex`, `ARTEX_RSI_LOOP=on`,
+no LLM; 6 closed tasks seeded across 2 companies and 2 categories, company membership in `task_scope` as
+task creation writes it). Dry run: 4 slots filled (`planner-breadth`, `goals-verifiable`,
+`planner-skill-gaps`, `worker-precision`); `worker-reproducible` skipped (1 of 6 tasks) and
+`planner-avoid-repeats` pruned (one company only). `--post --only r0-worker-precision` was accepted by the
+server (template validation, marker check), `status: proposed`; `arms.py` activating that arm stamped
+`prompt_sha[worker]` = the proposal's `body_sha` (`17d3cd2cfc3f3b76`) and restored every role; the next
+dry run showed 3 slots. Bugs found and fixed: **the outcome card always reported `company_id: 0`**
+(task creation writes companies to `task_scope` only, `tasks.company_id` is never set), so the proposer's
+"≥2 companies" transfer check silently fell back to category — `db.TaskOutcome` now reads the first
+`task_scope` company (`db/task_outcome_test.go`, fails without the fix); **`timeout` tasks were not read
+as closed** (now done/failed/timeout, as `db.IsTerminal`). Added `--only NAME,...` so `--post` can
+register one draft instead of spending the whole round and the open cap. Thresholds in `rules.go` left
+unchanged: seeded data cannot justify tuning. Not done: `eval_suite.py` + `rsi_submit.py evidence` on a
+live bench instance (needs an LLM, judge, drost corpus) — folded into `c-f1518c`/`c-772190`.
 
 **2026-11-24 — RSI proposer/critic (`c-c89f5b`, in review)** on `ej/20261124-192202-fbe9e3`.
 `cmd/artex-rsi-propose` (core `rsi/propose`: `Build` critic + pruner, `Slots` budget, `WriteArm`,
@@ -231,6 +248,9 @@ the full Docker image, the E8 suite) are in `docs/handoff/2026-11-24-current-sta
 ## Triage (next handful)
 
 **Agents' lane**
+0. *(unclaimed)* — **SEC regression: SOCKS5 auth tests fail on main after #79** (S), card `c-831dfa`:
+   `TestSOCKS5RemoteScope` (traffic) and `TestManagerSOCKS5UDPOptInAndAssetBlockRuleDropsDatagram` (server)
+   fail at `ad3e5b2`, so `scripts/verify.sh` is red. Done = both pass and the listener still refuses unauthenticated clients.
 1. *(unclaimed)* — **E7: worker nodes miss other runtime control-node state** (M), card `c-6bcdd3`: LLM profiles,
    MCP servers, custom tools and similar are rebuilt only at start. Done = each one is followed or listed in
    DISTRIBUTED.md Limits.
@@ -276,6 +296,9 @@ the full Docker image, the E8 suite) are in `docs/handoff/2026-11-24-current-sta
   suite → evidence → adopt (password) → rollback on the bench instance with `ARTEX_RSI_LOOP=on`.
 - **E8 first live held-out run** (card `c-f1518c`): needs a bench instance, an LLM, a judge key and a
   drost-benchmarks checkout. Done = a `report.md` with per-gate passes/n for baseline vs builtin.
+  Fold in the rest of `c-4bbf29`: on that bench instance with real closed tasks, `artex-rsi-propose` dry
+  run, `--post --only <one>`, `eval_suite.py` for that arm, `rsi_submit.py evidence`; record whether the
+  `rules.go` thresholds fire on every rule or none and tune them if so.
 - Revisit tracking: E1–E10 are on the private Composite board (decided 2026-11-23, repo is public).
   File GitHub issues only if the repo goes private or you want them public.
 - Decide engagement-governance direction (E5): how formal the rules-of-engagement/authorization
@@ -331,7 +354,7 @@ Card ids in brackets:
   [`c-119206`] role-gate the E2 UI controls; [`c-1198a2`] run `scripts/e2e/integrations.sh` in CI (after c-cc25b6);
   [`c-da9198`] scheduled sync plus a per-tracker lock; [`c-ea60a0`] move agent `scan_ingest` onto
   `scanimport`, normalize default ports, and settle two dedup edge cases.
-- **E3** [`c-d25ff9`] — gate built (in review). Follow-ups: hardening `c-0d277f`, UI `c-936308`, first live run `c-772190`, proposer/critic `c-c89f5b` (in review; follow-ups `c-4bbf29` live run, `c-0aaa24` model drafter).
+- **E3** [`c-d25ff9`] — gate built (in review). Follow-ups: hardening `c-0d277f`, UI `c-936308`, first live run `c-772190`, proposer/critic `c-c89f5b` (in review; follow-ups `c-4bbf29` real-server check, in review — suite + evidence left to `c-f1518c`; `c-0aaa24` model drafter).
 - **E4** [`c-c0bb07`] Methodology-driven coverage: landed 2026-11-24 (see Current state). Follow-ups:
   [`c-ca2bd0`] an operator-chosen methodology per task (landed, in review; gaps `c-aed5fd`); [`c-ed937d`] checklist completion in the report export (after E1).
 - **E5** [`c-669406`] Engagement governance. The backend is done on `ej/20261124-055929-bd2253`. Follow-ups:
@@ -593,6 +616,7 @@ Card ids in brackets:
 ## Deltas
 
 <!-- composite:deltas · newest first; Composite rewrites this block on every merge (ej handoff merge / merge_handoff) -->
+- **2026-11-24 20:05 MST** · claude-code · `ej/20261124-195101-9cd1e0` from `ad3e5b2` — c-4bbf29 (in review): proposer run against a real server (throwaway, seeded closed tasks across 2 companies). Fixed outcome `company_id` (read from task_scope; was always 0), timeout tasks counted as closed, added `--only` for posting one draft. Server accepted the post; arms.py stamp binds to body_sha. **Next:** suite + evidence on a live bench instance with real tasks (c-f1518c, human lane). **Decided:** thresholds unchanged until real outcomes exist; `--post` without `--only` still posts all drafts (backward compatible). (`ej handoff` CLI failed: database format 7 newer than supported, so this entry is hand-written.)
 - **2026-11-24 19:31 MST** · claude-code · `ej/20261124-192202-fbe9e3` `5e3f5b4`→`077451f` (1 commit) · `h-8d9748` — c-c89f5b (in review): RSI Loop C proposer. cmd/artex-rsi-propose + rsi/propose read closed tasks' outcome/lessons and /api/skill-gaps, keep only rules whose signal holds on >=2 tasks across >=2 scopes, append fixed guidance to one goals/planner/worker body, validate with rsi.ValidateEdit (draft and write time), write arm files (proposed_from task:<id>, rationale) + plan.json within the round's remaining status budget; --post registers them. Refuses while ARTEX_RSI_LOOP is off; client can only GET and POST /api/rsi/proposals. Tail markers moved to agent.CodeOwnedTailMarkers; status reports max_open. **Next:** Land ej/20261124-192202-fbe9e3. Then c-4bbf29: real-instance dry run and one proposal through eval_suite + evidence (fold with c-f1518c). Later c-0aaa24 (model-drafted critic). **Decided:** Go, not Python, so the proposer calls rsi.ValidateEdit directly. Guidance is a fixed code-written table and no live task text enters a body (live output is untrusted). The proposer stays in the newest round and opens the next only when --round names it, since advancing closes the current round. Dry run is the default. Loop flag is required even for a dry run (checked at start and before posting). **Issues:** opened #c-0aaa24, #c-4bbf29.
 - **2026-11-24 19:12 MST** · claude-code · `ej/20261124-184126-e60926` `124c0dd`→`0406b7e` (2 commits) · `h-43b8d4` — c-80fe4e (in review): scripts/e2e/role-probe.sh, a role probe on the integrations.sh harness. It seeds a WebSocket recorded through the real proxy plus a paused task, a finding and an agent, then clicks every enabled control on every (main) page as reviewer, operator and client_read, with writes faked in the browser. It fails on any /api 4xx and on any request whose permission (parsed from server/rbac_policy.go) the role lacks. On the c-92bb52 branch operator passes (the stream view shows the messages). Reviewer has 2 reads left, and client_read gets 403s on sign-in and on non-client pages opened by URL. integrations.sh now runs the backend from its work dir and takes ARTEX_E2E_PROXY_PORT. **Next:** Land c-92bb52 (ej/20261124-144553-d5978e; main still lacks it, so the probe fails widely on main). Then do c-bd9b7a: a route guard in the (main) layout plus a guard on the task Overview by-model read, until role-probe.sh passes for all three roles. After that, consider running role-probe.sh in CI. **Decided:** Writes are faked in the browser (200 {}), never sent to the backend. Deciding from the parsed policy whether the role may make each request catches enabled controls without changing state, which a "click and wait for a 403" probe cannot. The policy table is parsed from the Go source so the probe can't drift from it (cross-checked against Go requiredPermission on 21 routes). The task is created through the API before any LLM profile exists and then paused, so the Manager knows it and no agent can run. The UI fixes were left to c-92bb52 and c-bd9b7a rather than this probe card. **Issues:** opened #c-bd9b7a.
 - **2026-11-24 19:11 MST** · claude-code · `ej/20261124-185425-cbc1cf` `0a08bb5`→`66742b3` (1 commit) · `h-e9f875` — c-1e3b53 (E7, in review): before worker.Execute a distributed node pulls the stored files of the intent's run dir, the task's spills and the session's sidechains (pullRunFilesFrom), makes the dirs as the run does, then hands what it pulled to the executor (shared group or the task's uid). The branch merges the c-43dbfc branch (ej/20261124-180332-433a2b), so landing it also lands c-29ff19 + c-43dbfc (migrations 0025, 0026). Tests pass: the PG two-node rerun test, an allowlist unit test, and root tests for both privilege modes on Linux. Each new test was also checked to fail when the pull or sharer is turned off. **Next:** Land ej/20261124-185425-cbc1cf instead of ej/20261124-180332-433a2b (it carries it). When landing next to c-1bbeb6's branch, reconcile DISTRIBUTED.md Limits. **Decided:** The pull runs inside runIntent right before Execute, under the claim heartbeat, and not again on model_error retries. The run and spill dirs are created through the agent's makers before the gather, so no pulled file sits in a default 0755 root dir. Ownership goes through a package hook, runFilesSharer, set by PrepareExecPrivilege, not by passing ExecPrivilege into Engine. Group mode re-shares only this intent's run dir and the spill files. Uid mode gives both to the task's uid, or closes them to root when the task holds none. The main transcript is not pulled (transcriptsync owns it). A spill dir that cannot be made is left out of the pull. The pull is a union and deletes nothing.

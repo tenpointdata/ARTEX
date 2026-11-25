@@ -284,9 +284,25 @@ next one, and can only read and `POST /api/rsi/proposals`: it has no adopt path.
 ```bash
 go build -o artex-rsi-propose ./cmd/artex-rsi-propose
 ARTEX_TOKEN=... ./artex-rsi-propose --artex-url http://localhost:8787 --out rsi-proposals   # dry run: files only
-ARTEX_TOKEN=... ./artex-rsi-propose --out rsi-proposals --post                              # also register them
+ARTEX_TOKEN=... ./artex-rsi-propose --out rsi-proposals --post --only r0-worker-precision   # register one draft
 # then step 2 with --candidate rsi-proposals/round-<N>/<name>.json
 ```
+
+`--post` alone registers every draft, which spends the round's budget and fills
+the open-proposal cap (4) with proposals that each need their own suite run;
+`--only` (comma-separated arm names from `plan.json`) registers just the ones you
+will evaluate. Closed means `done`, `failed` or `timeout`. A task's transfer scope
+is its first company in `task_scope` (the outcome card's `company_id`), else its
+category, so tasks created without a company and without a category all count as
+one scope and every rule is pruned.
+
+Checked against a real server (2026-11-24, throwaway instance, seeded closed
+tasks across two companies; no LLM): the dry run filled the round's 4 slots with
+the expected rules and pruned a single-company signal; `--post --only` was
+accepted by the server's template and marker checks; and `arms.py` activating the
+arm stamped `prompt_sha[worker]` equal to the proposal's `body_sha`, then restored
+every role. Not yet run: the held-out suite and `rsi_submit.py evidence` on a
+live bench instance (they need an LLM, a judge and the drost corpus).
 
 Binding: the server ties evidence to the proposal. For a prompt body,
 `candidate.stamp.prompt_sha[target]` must equal the sha256 (first 16 hex) of the

@@ -8,7 +8,7 @@
 // It never adopts: adoption is an owner action with the owner's password.
 // It runs only while the server's ARTEX_RSI_LOOP flag is on.
 //
-//	ARTEX_TOKEN=... artex-rsi-propose [--artex-url URL] [--out DIR] [--round N] [--post]
+//	ARTEX_TOKEN=... artex-rsi-propose [--artex-url URL] [--out DIR] [--round N] [--post [--only NAME,...]]
 package main
 
 import (
@@ -17,6 +17,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"strings"
 )
 
 func main() {
@@ -27,7 +28,13 @@ func main() {
 	fs.IntVar(&opt.Round, "round", -1, "round to propose in; default the newest open round. The next round must be named explicitly")
 	fs.IntVar(&opt.MaxTasks, "max-tasks", 50, "newest closed tasks to read")
 	fs.BoolVar(&opt.Post, "post", false, "register the drafts as proposals (default: dry run, files only)")
+	only := fs.String("only", "", "with --post, register only these drafts (comma-separated arm names, e.g. r0-worker-precision)")
 	_ = fs.Parse(os.Args[1:])
+	for _, n := range strings.Split(*only, ",") {
+		if n = strings.TrimSpace(n); n != "" {
+			opt.Only = append(opt.Only, n)
+		}
+	}
 	token := os.Getenv("ARTEX_TOKEN")
 	if token == "" {
 		fmt.Fprintln(os.Stderr, "need ARTEX_TOKEN")
