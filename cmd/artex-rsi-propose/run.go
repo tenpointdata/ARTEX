@@ -21,6 +21,7 @@ type options struct {
 	Round    int             // -1 = the newest round
 	MaxTasks int             // newest closed tasks to read
 	Post     bool            // post the drafts; default is a dry run
+	Only     []string        // with Post, register only the drafts with these names
 	Drafter  propose.Drafter // optional model that rewrites bodies (--draft-model)
 	Judge    string          // the suite's judge model; the drafter must differ
 }
@@ -116,10 +117,14 @@ func run(c *client, opt options, log io.Writer) (*result, error) {
 		res.Files = append(res.Files, path)
 	}
 	if opt.Post && len(plan.Drafts) > 0 {
+		post, err := selectDrafts(plan.Drafts, opt.Only)
+		if err != nil {
+			return res, err
+		}
 		if _, err := loopStatus(c); err != nil {
 			return nil, err
 		}
-		for _, d := range plan.Drafts {
+		for _, d := range post {
 			var out struct {
 				Proposal struct {
 					ID int64 `json:"id"`
@@ -133,13 +138,39 @@ func run(c *client, opt options, log io.Writer) (*result, error) {
 			res.Posted = append(res.Posted, out.Proposal.ID)
 		}
 	}
-	if len(plan.Drafts) > 0 {
-		raw, _ := json.MarshalIndent(res, "", "  ")
-		if err := os.WriteFile(filepath.Join(dir, "plan.json"), append(raw, '\n'), 0o644); err != nil {
-			return res, err
-		}
+	// Always record the plan, even when every rule was pruned: the skipped-rule
+	// reasons are the operator's view of why nothing fired, and a dry run on
+	// low-signal real tasks is exactly when that view matters most.
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return res, err
+	}
+	raw, _ := json.MarshalIndent(res, "", "  ")
+	if err := os.WriteFile(filepath.Join(dir, "plan.json"), append(raw, '\n'), 0o644); err != nil {
+		return res, err
 	}
 	return res, nil
+}
+
+// selectDrafts picks the drafts named in only (all of them when only is
+// empty). A name that matches no draft is an error, so a typo never posts
+// nothing silently or something unintended.
+func selectDrafts(drafts []propose.Draft, only []string) ([]propose.Draft, error) {
+	if len(only) == 0 {
+		return drafts, nil
+	}
+	byName := map[string]propose.Draft{}
+	for _, d := range drafts {
+		byName[d.Name] = d
+	}
+	out := make([]propose.Draft, 0, len(only))
+	for _, name := range only {
+		d, ok := byName[name]
+		if !ok {
+			return nil, fmt.Errorf("--only %q matches no draft in this round's plan", name)
+		}
+		out = append(out, d)
+	}
+	return out, nil
 }
 
 func loopStatus(c *client) (*statusResp, error) {
@@ -153,7 +184,8 @@ func loopStatus(c *client) (*statusResp, error) {
 	return &st, nil
 }
 
-// closedTasks reads the newest done/failed tasks with their outcome and lessons.
+// closedTasks reads the newest closed tasks (done, failed or timeout, the
+// statuses db.IsTerminal treats as terminal) with their outcome and lessons.
 func closedTasks(c *client, limit int) ([]propose.Task, error) {
 	var list struct {
 		Tasks []taskRow `json:"tasks"`
@@ -163,7 +195,7 @@ func closedTasks(c *client, limit int) ([]propose.Task, error) {
 	}
 	var rows []taskRow
 	for _, t := range list.Tasks {
-		if t.Status == "done" || t.Status == "failed" {
+		if t.Status == "done" || t.Status == "failed" || t.Status == "timeout" {
 			rows = append(rows, t)
 		}
 	}

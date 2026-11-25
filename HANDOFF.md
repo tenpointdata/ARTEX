@@ -1,6 +1,6 @@
 # HANDOFF.md — ARTEX
 
-**Last updated:** 2026-11-24 20:51 MST, by claude-code: c-0aaa24 (in review): propose.Drafter hook (Input.Drafter, nil = fixed guidance). Earlier hand-offs are under Deltas and in `ej handoff log`.
+**Last updated:** 2026-11-25 by claude-code: c-4bbf29 (in review): RSI proposer + benchmark gate driven end-to-end against a real Docker bench instance (real closed tasks, posted proposal, live suite run — binding confirmed). Earlier hand-offs are under Deltas and in `ej handoff log`.
 
 > Single entry point for whoever picks this up next (any agent or human), with no access to the
 > originating conversation. Read this first, then the sections of the code it points at.
@@ -59,6 +59,41 @@ See `docs/ARCHITECTURE.md` for the code-level map. Summary:
 
 ## Current state
 
+**2026-11-25 — RSI proposer + benchmark gate end-to-end on a real bench instance (`c-4bbf29`, in review)**
+on `ej/20261124-195101-9cd1e0`. Drove the full chain against a real Docker **bench** instance
+(`docker-compose.bench.yml`, `ARTEX_RSI_LOOP=on`, subject + self-judge = local Ollama `inkling-2-mini`;
+the native `cmd/artex` refuses to start on macOS — no sandbox — so Docker is the only real-instance path
+here; see memory `artex-local-bench-instance`). Ran 5 real pentest tasks against juice-shop/DVGA on the
+compose network; all closed by timeout (slow local model: ~2 min/LLM call, single GPU serializes).
+Results (verified, with artifacts under `/tmp/rsi-e2e` while that instance lived — now gone, Docker down):
+- **Real dry-run plan** from 5 real closed tasks across 2 companies → `round-0/plan.json` on disk, **all 5
+  rules correctly pruned** ("signal on 0 of 5 tasks, under 2"). Real weak-model outcomes have 0 findings
+  and <20 tool calls, so no critic rule can fire — correct conservatism, **not** a tuning trigger (the
+  rules detect real pathologies like reported false-positives, which this model never produces). Thresholds
+  in `rules.go`/`DefaultConfig` left unchanged. This confirms on real data the two fixes from the prior
+  run: outcome `company_id` read from `task_scope` (task 1 → co 1, task 3 → co 2), and `timeout` counted as closed.
+- **Proposal posted and accepted**: a worker-precision candidate built from the real active worker body +
+  the `## Field guidance` paragraph, `POST /api/rsi/proposals` → id 1, `status: proposed`, server-computed
+  `body_sha 17d3cd2cfc3f3b76` (template validation + rendered-marker check passed).
+- **Live held-out suite run (binding confirmed)**: `eval_suite.py` on a 2-image held-out suite (juice-shop,
+  DVGA), baseline (all `current`) vs the candidate, self-judge. First run completed and judged before the
+  machine's Docker went down: `candidate.json` stamp has `split: "held-out"` and `prompt_sha[worker] =
+  17d3cd2cfc3f3b76` (= the proposal's `body_sha`), goals/planner = baseline, judge emitted 8 verdicts →
+  **evidence binds exactly as the gate requires**. The remaining 3 runs (and therefore `rsi_submit.py
+  evidence <id> <run-dir>`) did not finish — the session restart tore down Docker. A full passing verdict
+  (`MinTargetsImproved ≥ 2`) was never the goal here and is not reachable with a weak self-judged model;
+  that belongs to the first *capable-model* live run (`c-f1518c`/`c-772190`).
+
+Fixed along the way (committed): **latent `judge_key` bug** — `run_bench.run` read `args.judge_key` but only
+`prepare()` (probe only) ever set it, so any image-target `eval_suite` crashed with `AttributeError`; it is
+now a real `--judge-key` argparse arg (default `$JUDGE_API_KEY`). **`--corpus-network`** (run_bench +
+eval_suite): attach an image corpus to ARTEX's Docker network and target it by container name, so a bench
+target needs **no** host-gateway egress exception (egress.sh denies the gateway to agent uids — keep it
+that way). **`plan.json` now always written** (`cmd/artex-rsi-propose/run.go`), even when every rule is
+pruned, so the card's "inspect `round-N/plan.json`" works on low-signal real data (previously it was written
+only when a draft fired). All three verified: `go test ./cmd/artex-rsi-propose/...`, benchmark `unittest`
+(`test_run_bench`, `test_eval_suite` 26 tests), and exercised live by the suite run above.
+
 **2026-11-24 — SOCKS5 auth regression after #79 fixed (`c-831dfa`).** `checkCredential` looked up a
 scope-token password in the local registry only, so worker-minted tokens that the remote resolver holds got
 RFC 1929 0x01. It now uses `Traffic.resolveScope` (local, then remote). `TestSOCKS5RemoteScope` now expects
@@ -94,7 +129,8 @@ GitHub/Jira delivery (needs a publicly reachable instance), the sheet in a brows
 on ≥2 tasks across ≥2 scopes, inside the round budget; `--draft-model` (off by default) lets a model
 rewrite the body through the same checks; the drafter must not be the judge. `verify.sh` there fails only
 on `TestSOCKS5RemoteScope` (fix in review, `c-1a74a4`) and the web i18n check (`c-430ba2`). Detail:
-`docs/handoff/2026-11-24-e3-rsi-loops.md`. Not checked: a real instance (`c-4bbf29`).
+`docs/handoff/2026-11-24-e3-rsi-loops.md`. (`c-4bbf29` has since exercised both the fixed-guidance proposer
+and the suite/evidence binding on a real bench instance — see the top entry.)
 
 **2026-11-24 — LLM sampling pin (`c-d73308`, E8; on main via #69).** Migration 0028 adds nullable
 `llm_profiles.sampling_seed`/`sampling_temperature`; `agent/sampling.go` splices them into the wire body
@@ -215,9 +251,10 @@ the full Docker image, the E8 suite) are in `docs/handoff/2026-11-24-current-sta
 ## Triage (next handful)
 
 **Agents' lane**
-0. *(unclaimed)* — **`go test ./traffic` fails on main** (S), card `c-81b834`: `TestSOCKS5RemoteScope`
-   gets auth reply 0x01 since #79's SOCKS5 auth; it stops `scripts/verify.sh` before the web steps. Done = cause found
-   (without loosening auth), verify.sh green.
+0. *(fix landed, confirm)* — **SOCKS5 auth regression after #79** (S), cards `c-831dfa` / `c-81b834`:
+   `TestSOCKS5RemoteScope` (traffic) got auth reply 0x01 since #79; `TestManagerSOCKS5UDPOptInAndAssetBlockRuleDropsDatagram`
+   (server) also failed. Fix is described as landed in Current state (`c-831dfa`: use `Traffic.resolveScope`; UDP test
+   skips on macOS). Done = `scripts/verify.sh` Go steps green on Linux and the listener still refuses unauthenticated clients.
 1. *(unclaimed)* — **E7: worker nodes miss other runtime control-node state** (M), card `c-6bcdd3`: LLM profiles,
    MCP servers, custom tools and similar are rebuilt only at start. Done = each one is followed or listed in
    DISTRIBUTED.md Limits.
@@ -263,6 +300,9 @@ the full Docker image, the E8 suite) are in `docs/handoff/2026-11-24-current-sta
   suite → evidence → adopt (password) → rollback on the bench instance with `ARTEX_RSI_LOOP=on`.
 - **E8 first live held-out run** (card `c-f1518c`): needs a bench instance, an LLM, a judge key and a
   drost-benchmarks checkout. Done = a `report.md` with per-gate passes/n for baseline vs builtin.
+  Fold in the rest of `c-4bbf29`: on that bench instance with real closed tasks, `artex-rsi-propose` dry
+  run, `--post --only <one>`, `eval_suite.py` for that arm, `rsi_submit.py evidence`; record whether the
+  `rules.go` thresholds fire on every rule or none and tune them if so.
 - Revisit tracking: E1–E10 are on the private Composite board (decided 2026-11-23, repo is public).
   File GitHub issues only if the repo goes private or you want them public.
 - Decide engagement-governance direction (E5): how formal the rules-of-engagement/authorization
@@ -319,7 +359,7 @@ Card ids in brackets:
   [`c-da9198`] scheduled sync plus a per-tracker lock (on `ej/20261124-135159-6d9961`, also carried by the
   c-c2bdc8 branch); [`c-c2bdc8`] signed webhooks (in review on `ej/20261124-191156-37e38c`); [`c-ea60a0`] move agent `scan_ingest` onto
   `scanimport`, normalize default ports, and settle two dedup edge cases.
-- **E3** [`c-d25ff9`] — gate built (in review). Follow-ups: hardening `c-0d277f`, UI `c-936308`, first live run `c-772190`, proposer/critic `c-c89f5b` (on main; follow-ups `c-4bbf29` live run, `c-0aaa24` model drafter in review).
+- **E3** [`c-d25ff9`] — gate built (in review). Follow-ups: hardening `c-0d277f`, UI `c-936308`, first live run `c-772190`, proposer/critic `c-c89f5b` (on main; follow-ups `c-4bbf29` real bench-instance run done — dry-run plan + posted proposal + live suite binding confirmed, in review; `c-0aaa24` model drafter in review).
 - **E4** [`c-c0bb07`] Methodology-driven coverage: landed 2026-11-24 (see Current state). Follow-ups:
   [`c-ca2bd0`] an operator-chosen methodology per task (landed, in review; gaps `c-aed5fd`); [`c-ed937d`] checklist completion in the report export (after E1).
 - **E5** [`c-669406`] Engagement governance. The backend is done on `ej/20261124-055929-bd2253`. Follow-ups:
@@ -596,6 +636,8 @@ Card ids in brackets:
 ## Deltas
 
 <!-- composite:deltas · newest first; Composite rewrites this block on every merge (ej handoff merge / merge_handoff) -->
+- **2026-11-25** · claude-code · `ej/20261124-195101-9cd1e0` — c-4bbf29 (in review): drove the proposer + benchmark gate end-to-end on a real Docker **bench** instance (compose bench, `ARTEX_RSI_LOOP=on`, subject + self-judge = local Ollama `inkling-2-mini`). Real dry-run plan from 5 real closed tasks across 2 companies → `plan.json` on disk, all 5 rules correctly pruned (0 findings / <20 tool calls on a weak model is below every rule's floor — not a tuning trigger); confirms on real data the company-from-`task_scope` and timeout-as-closed fixes. Posted a worker-precision proposal (id 1, server `body_sha 17d3cd2cfc3f3b76`, template+marker checks passed). Live held-out `eval_suite` first run completed + judged: `candidate.json` stamp `split: held-out`, `prompt_sha[worker]=17d3cd2cfc3f3b76` (= body_sha), 8 verdicts → **evidence binds**; the other 3 runs + `rsi_submit evidence` were cut off when the machine's Docker went down (full passing verdict needs a capable model, not this self-judged one — `c-f1518c`/`c-772190`). Fixed: latent `judge_key` bug blocking image-target suites (now `--judge-key` argparse arg); added `--corpus-network` (reach image corpora by container name, no host-gateway egress hole); `plan.json` now always written. **Next:** on a capable-model bench instance, finish the 4-run held-out suite and `rsi_submit evidence` (c-f1518c). **Decided:** thresholds unchanged — weak-model outcomes being below the rule floors is correct, not a reason to lower them. (`ej handoff` CLI unavailable; this entry hand-written; conflicts with main resolved keeping both sides.)
+- **2026-11-24 20:05 MST** · claude-code · `ej/20261124-195101-9cd1e0` from `ad3e5b2` — c-4bbf29 (in review): proposer run against a real server (throwaway, seeded closed tasks across 2 companies). Fixed outcome `company_id` (read from task_scope; was always 0), timeout tasks counted as closed, added `--only` for posting one draft. Server accepted the post; arms.py stamp binds to body_sha. **Next:** suite + evidence on a live bench instance with real tasks (c-f1518c, human lane). **Decided:** thresholds unchanged until real outcomes exist; `--post` without `--only` still posts all drafts (backward compatible). (`ej handoff` CLI failed: database format 7 newer than supported, so this entry is hand-written.)
 - **2026-11-24 20:51 MST** · claude-code · `ej/20261124-203755-708a1e` `30a1782`→`dac6220` (1 commit) · `h-8ecb71` — c-0aaa24 (in review): propose.Drafter hook (Input.Drafter, nil = fixed guidance). Build drafts in rank order after the transfer filter and the fixed-body ValidateEdit, so only in-space roles reach the model and a refused body frees its slot. DraftRequest carries code-owned text, counts and the active body only. Output is refused (never repaired) on template-action changes, stray delimiters, empty, unchanged or prior bodies, or a ValidateEdit failure. WriteArm re-checks. CheckDrafter refuses a drafter equal to the judge, or any drafter when no judge is named. CLI: --draft-model/--draft-provider/--draft-url/--judge-model, $ARTEX_DRAFT_API_KEY. New agent.Complete (tool-less one-shot) and agent.FrameData (exported data envelope). Arms carry drafted_by. Hostile-output tests in rsi/propose/drafter_test.go and cmd/artex-rsi-propose/drafter_test.go, mutation-checked. Older Current state blocks moved to docs/handoff/. **Next:** Land ej/20261124-203755-708a1e. Then c-4bbf29: run a real-model --draft-model dry run on a bench instance and send one drafted arm through eval_suite with a different judge. Optional: cap the share of a body a rewrite may delete, if real drafts strip useful content. **Decided:** A refused drafted body skips the rule instead of falling back to the fixed text, so the plan says why and the operator can rerun without the flag. Drafting happens after budget ranking to keep model calls within the round's slots. Drafted proposals are tagged "[drafted rule <id>]" in the rationale, because a rewrite need not contain the guidance text the old pruner matches. An unknown judge counts as a refusal, since independence cannot be checked. Template actions must stay exactly the same set as in the active body.
 - **2026-11-24 19:39 MST** · claude-code · `ej/20261124-191154-865292` `e9fbefe`→`af602b8` (12 commits) · `h-be59c2` — c-bd9b7a (in review on ej/20261124-191154-865292): RouteGuard in the (main) layout (route-access.ts resolver from the sidebar's need, tested) sends a role to its landing page without mounting a page it can't see; c-92bb52's useCan gating re-applied onto main's E9 file layout (system/*, tasks, traffic, chat, findings, assets, records, sync, workspace, agent editor, approvals); task Overview by-model card needs operate; integrations page and findings tracker reads gated. scripts/e2e/role-probe.sh passes for reviewer, operator and client_read; scripts/verify.sh passes. The branch also carries the role probe (c-80fe4e). **Next:** Land ej/20261124-191154-865292 (carries c-80fe4e and c-bd9b7a). Do NOT land ej/20261124-144553-d5978e (c-92bb52): superseded. Then c-601ec6. Optional: port c-92bb52's errorText(e) swaps; hide the Overview "click Re-run all" footnote without operate. **Decided:** c-92bb52's single commit (gating + file splits) conflicted with main's E9 split in ~40 files, so its gating intent was ported onto main's files instead of merging; the traffic row selection stays for read roles (Copy URLs) while the sheet opens only with operate. Route permission comes from the sidebar's need so nav and guard share one source.
 - **2026-11-24 19:35 MST** · claude-code · `ej/20261124-192153-48c72c` `5e3f5b4`→`96e3134` (1 commit) · `h-8712ef` — c-936308 (in review): /system/rsi page — proposals table with newest verdict, expandable per-gate rates (with n), paired gained/lost, regressions with targets, adoption log, prompt-history link; inline Adopt (password + newest evidence_id), Reject, Roll back (reason); ARTEX_RSI_LOOP state from /api/rsi/status. GET /api/rsi/proposals now returns latest_evidence (db.LatestRSIEvidence). Verified with tsc, biome, verify.sh, TestRSIGateEndToEndPG on Postgres 17, and headless Chromium: adopt then rollback in 2 clicks each. Issues: opened c-cce755. **Next:** Land ej/20261124-192153-48c72c. Then c-cce755 (decide whether RSI reject/rollback need admin). The live end-to-end run stays c-772190. **Decided:** Newest evidence is attached to the list response (one DISTINCT ON query) rather than a per-row detail call; the field is additive, so existing API users are unaffected. The loop flag is shown, not toggled: turning it on stays an owner decision in the environment (RSI.md rule 5). Actions are shown to operate sessions to match the current server RBAC; c-cce755 tracks whether that should be admin.

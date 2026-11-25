@@ -45,7 +45,8 @@ func (f *fakeARTEX) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case r.Method == "GET" && p == "/api/tasks":
 		send(map[string]any{"tasks": []map[string]any{
 			{"id": "11", "status": "done", "completed_unix": 3}, {"id": "12", "status": "failed", "completed_unix": 2},
-			{"id": "13", "status": "done", "completed_unix": 1}, {"id": "14", "status": "running"}}})
+			{"id": "13", "status": "done", "completed_unix": 1}, {"id": "15", "status": "timeout", "completed_unix": 4},
+			{"id": "14", "status": "running"}}})
 	case r.Method == "GET" && strings.HasSuffix(p, "/outcome"):
 		company, _ := strconv.Atoi(strings.Split(p, "/")[3])
 		send(map[string]any{"status": "failed", "company_id": company, "category_id": 1, "tool_calls": 40, "skill_misses": 3,
@@ -100,6 +101,9 @@ func TestDryRunWritesAtMostBudgetArms(t *testing.T) {
 		if len(arms) != tc.want || len(res.Drafts) != tc.want || !res.DryRun || len(f.posted) != 0 {
 			t.Fatalf("round %d: %d arms, %d drafts, %d posted; want %d and none posted", res.Round, len(arms), len(res.Drafts), len(f.posted), tc.want)
 		}
+		if tc.want > 0 && res.ReadFrom != 4 {
+			t.Fatalf("read %d closed tasks, want 4 (done, failed and timeout; not running)", res.ReadFrom)
+		}
 		for _, a := range arms {
 			raw, _ := os.ReadFile(a)
 			var arm struct {
@@ -144,5 +148,26 @@ func TestPostOnlyProposesAndNeverAdopts(t *testing.T) {
 			continue
 		}
 		t.Fatalf("unexpected request %s: the proposer may only read and propose", r)
+	}
+}
+
+func TestPostOnlyNamedDraft(t *testing.T) {
+	f := &fakeARTEX{loop: "on"}
+	dry, err := run(start(t, f), options{Out: t.TempDir(), Round: -1}, io.Discard)
+	if err != nil || len(dry.Drafts) < 2 {
+		t.Fatalf("dry run: %v, %d drafts", err, len(dry.Drafts))
+	}
+	name := dry.Drafts[1].Name
+	f = &fakeARTEX{loop: "on"}
+	res, err := run(start(t, f), options{Out: t.TempDir(), Round: -1, Post: true, Only: []string{name}}, io.Discard)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(f.posted) != 1 || len(res.Posted) != 1 || f.posted[0].Target != dry.Drafts[1].Edit.Target {
+		t.Fatalf("--only %s posted %d (%+v)", name, len(f.posted), res.Posted)
+	}
+	f = &fakeARTEX{loop: "on"}
+	if _, err := run(start(t, f), options{Out: t.TempDir(), Round: -1, Post: true, Only: []string{"r0-no-such-rule"}}, io.Discard); err == nil || len(f.posted) != 0 {
+		t.Fatalf("unknown --only name: err %v, posted %d; want an error and nothing posted", err, len(f.posted))
 	}
 }
