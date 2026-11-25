@@ -187,7 +187,7 @@ export function CustomToolDialog({
     };
     try {
       if (isNew) await api.createCustomTool({ key: key.trim(), ...payload });
-      else await api.updateCustomTool(tool!.key, payload);
+      else if (tool) await api.updateCustomTool(tool.key, payload);
       toast.success(isNew ? t("Custom tool created") : t("Saved"));
       onSaved();
     } catch (e) {
@@ -243,10 +243,10 @@ export function CustomToolDialog({
     <Sheet open={!!edit} onOpenChange={(o) => !o && onClose()}>
       <SheetContent
         side="right"
-        className="flex flex-col gap-0 p-0 data-[side=right]:w-[45vw] data-[side=right]:sm:max-w-[45vw] data-[side=right]:min-w-[480px]"
+        className="flex flex-col gap-0 p-0 data-[side=right]:w-[45vw] data-[side=right]:min-w-[480px] data-[side=right]:sm:max-w-[45vw]"
       >
         <SheetHeader className="px-4">
-          <SheetTitle>{isNew ? t("Create custom tool") : t("Edit {key}", { key: tool?.key ?? "" })}</SheetTitle>
+          <SheetTitle>{isNew || !tool ? t("Create custom tool") : t("Edit {key}", { key: tool.key })}</SheetTitle>
           <SheetDescription>
             {t(
               "shell = a bash environment declaration (name + description only, telling the model bash is available); command/script/http need an execution spec.",
@@ -362,13 +362,14 @@ export function CustomToolDialog({
                 <div className="grid gap-1.5">
                   <Label className="text-xs">{t("Proxy URL (empty = direct)")}</Label>
                   <Input
-                    className="font-mono text-xs w-56"
+                    className="w-56 font-mono text-xs"
                     value={ex.proxy}
                     onChange={(e) => setEx({ ...ex, proxy: e.target.value })}
                   />
                 </div>
-                <label className="mt-4 flex items-center gap-2 text-sm">
+                <label htmlFor="ct-1" className="mt-4 flex items-center gap-2 text-sm">
                   <Checkbox
+                    id="ct-1"
                     checked={ex.use_recording_proxy}
                     onCheckedChange={(v) => setEx({ ...ex, use_recording_proxy: !!v })}
                   />
@@ -413,22 +414,26 @@ export function CustomToolDialog({
             <Label className="text-muted-foreground text-xs">{t("Bind agents")}</Label>
             <div className="flex flex-wrap gap-3">
               {agents.map((a) => (
-                <label key={a.key} className="flex items-center gap-2 text-sm">
-                  <Checkbox checked={bound.includes(a.key)} onCheckedChange={() => toggleAgent(a.key)} />
+                <label htmlFor={`ct-${a.key}`} key={a.key} className="flex items-center gap-2 text-sm">
+                  <Checkbox
+                    id={`ct-${a.key}`}
+                    checked={bound.includes(a.key)}
+                    onCheckedChange={() => toggleAgent(a.key)}
+                  />
                   {a.name}
-                  <span className="text-muted-foreground font-mono text-xs">{a.key}</span>
+                  <span className="font-mono text-muted-foreground text-xs">{a.key}</span>
                 </label>
               ))}
             </div>
           </div>
 
           <div className="flex items-center gap-6">
-            <label className="flex items-center gap-2 text-sm">
-              <Switch checked={enabled} onCheckedChange={setEnabled} /> {t("Enable")}
+            <label htmlFor="ct-2" className="flex items-center gap-2 text-sm">
+              <Switch id="ct-2" checked={enabled} onCheckedChange={setEnabled} /> {t("Enable")}
             </label>
             {kind !== "shell" && (
-              <label className="flex items-center gap-2 text-sm">
-                <Switch checked={deferred} onCheckedChange={setDeferred} />{" "}
+              <label htmlFor="ct-3" className="flex items-center gap-2 text-sm">
+                <Switch id="ct-3" checked={deferred} onCheckedChange={setDeferred} />{" "}
                 {t("deferred (enable only for many rarely-used tools)")}
               </label>
             )}
@@ -436,7 +441,7 @@ export function CustomToolDialog({
 
           {kind !== "shell" && canAdmin && (
             <div className="grid gap-1.5 rounded-md border p-3">
-              <Label className="text-xs font-medium">{t("Test run (uses the current form, nothing is saved)")}</Label>
+              <Label className="font-medium text-xs">{t("Test run (uses the current form, nothing is saved)")}</Label>
               <Textarea
                 className="font-mono text-xs"
                 rows={2}
@@ -451,10 +456,7 @@ export function CustomToolDialog({
               </div>
               {testResult && (
                 <pre
-                  className={
-                    "max-h-64 overflow-auto whitespace-pre-wrap break-words rounded bg-muted p-2 font-mono text-xs " +
-                    (testResult.is_error ? "text-destructive" : "")
-                  }
+                  className={`max-h-64 overflow-auto whitespace-pre-wrap break-words rounded bg-muted p-2 font-mono text-xs ${testResult.is_error ? "text-destructive" : ""}`}
                 >
                   {testResult.output || t("(no output)")}
                 </pre>

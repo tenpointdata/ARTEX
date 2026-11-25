@@ -15,9 +15,8 @@ import { t } from "@/i18n";
 import { api } from "@/lib/api";
 import { errorText } from "@/lib/api-errors";
 import { CHAT_SEND_MODE_OPTIONS, type ChatSendMode, setChatSendMode, useChatSendMode } from "@/lib/chat-send-mode";
-import type { Settings } from "@/lib/types";
-
 import { rich } from "@/lib/rich-text";
+import type { Settings } from "@/lib/types";
 
 type SavedProps = { settings: Settings | null; onSaved: (s: Settings) => void };
 
@@ -174,7 +173,7 @@ export function ChatSendModeCard() {
         </CardDescription>
       </CardHeader>
       <CardContent className="flex items-center justify-between gap-4">
-        <Label htmlFor="chat-send-mode" className="text-sm font-normal text-muted-foreground">
+        <Label htmlFor="chat-send-mode" className="font-normal text-muted-foreground text-sm">
           {t("Send mode")}
         </Label>
         <Select value={sendMode} onValueChange={(v) => setChatSendMode(v as ChatSendMode)}>

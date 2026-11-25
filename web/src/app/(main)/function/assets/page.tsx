@@ -4,10 +4,7 @@ import * as React from "react";
 
 import {
   BuildingIcon,
-  ChevronLeftIcon,
-  ChevronRightIcon,
   GlobeIcon,
-  KeyRoundIcon,
   LayoutTemplateIcon,
   LinkIcon,
   type LucideIcon,
@@ -19,7 +16,6 @@ import {
 import { toast } from "sonner";
 
 import { AssetDslSearch } from "@/components/asset-dsl-search";
-import { ScopeTextEditor } from "@/components/scope-text-editor";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -30,78 +26,24 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@/components/ui/dialog";
-import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
-import { Input } from "@/components/ui/input";
-import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import {
-  Sheet,
-  SheetContent,
-  SheetDescription,
-  SheetFooter,
-  SheetHeader,
-  SheetTitle,
-  SheetTrigger,
-} from "@/components/ui/sheet";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { RowDeleteButton } from "./_components/row-delete-button";
 import { useCan } from "@/hooks/use-session";
+import { t } from "@/i18n";
 import { api } from "@/lib/api";
 import { errorText } from "@/lib/api-errors";
-import { parseCompanyScopeText } from "@/lib/company-scope";
-import { httpHref } from "@/lib/http-href";
-import type { Asset, Company, CompanyScopeRule } from "@/lib/types";
+import type { Asset, Company } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { useActiveCompanyID } from "@/stores/company/company-store";
-import { t } from "@/i18n";
 
-const METHOD_COLOR: Record<string, string> = {
-  GET: "bg-emerald-100 text-emerald-700",
-  POST: "bg-blue-100 text-blue-700",
-  PUT: "bg-amber-100 text-amber-700",
-  PATCH: "bg-orange-100 text-orange-700",
-  DELETE: "bg-red-100 text-red-700",
-  HEAD: "bg-purple-100 text-purple-700",
-  OPTIONS: "bg-slate-100 text-slate-600",
-};
-
-function MethodBadge({ method }: { method: string }) {
-  const m = method.toUpperCase();
-  return (
-    <span
-      className={cn(
-        "inline-block rounded px-1.5 py-0.5 font-mono text-[10px] font-semibold leading-none",
-        METHOD_COLOR[m] ?? "bg-muted text-muted-foreground",
-      )}
-    >
-      {m || "—"}
-    </span>
-  );
-}
-
-function statusTone(code: number) {
-  if (code >= 500) return "text-red-500";
-  if (code >= 400) return "text-amber-500";
-  if (code >= 300) return "text-blue-500";
-  if (code >= 200) return "text-emerald-500";
-  return "text-muted-foreground";
-}
-
-const PAGE_SIZES = [25, 50, 100, 200];
+import { ASSET_TAB_SPECS, ASSET_TABS } from "./_components/asset-columns";
+import { type AssetSelection, AssetTable } from "./_components/asset-table";
+import { AppendScopeDialog, CompanyAvatar, CompanyDialog, EditScopeDialog } from "./_components/company-dialogs";
+import { RowDeleteButton } from "./_components/row-delete-button";
 
 const TABS: { key: string; label: string; icon: LucideIcon }[] = [
   { key: "company", label: t("Companies"), icon: BuildingIcon },
@@ -310,8 +252,8 @@ export default function AssetsPage() {
 
   // rows are already the current server-side page.
   const tabData = (type: string): Asset[] => (rowsTab === type ? rows : []);
-  const currentRows = tabData(tab);
-  const slice = <T,>(list: T[]) => list;
+  const cellCtx = { companyName };
+  const selection: AssetSelection = { selected, toggle: toggleSelect, toggleAll: toggleSelectAll };
 
   const searchBox = (
     <AssetDslSearch
@@ -327,10 +269,10 @@ export default function AssetsPage() {
     <div className="flex h-[calc(100vh-6rem)] min-h-0 flex-col gap-4">
       <div className="flex items-center justify-between gap-4">
         <div>
-          <h1 className="text-xl font-semibold tracking-tight">{t("Assets")}</h1>
+          <h1 className="font-semibold text-xl tracking-tight">{t("Assets")}</h1>
         </div>
         <div className="flex items-center gap-3">
-          <span className="text-sm text-muted-foreground tabular-nums">
+          <span className="text-muted-foreground text-sm tabular-nums">
             {t("{count} assets in total", { count: totalAssets })}
           </span>
           {canOperate && selected.size > 0 && (
@@ -352,7 +294,7 @@ export default function AssetsPage() {
               <TabsTrigger key={t.key} value={t.key}>
                 <t.icon className="size-3.5" />
                 {t.label}
-                <span className="ml-1 tabular-nums text-muted-foreground">{tabCounts[t.key]}</span>
+                <span className="ml-1 text-muted-foreground tabular-nums">{tabCounts[t.key]}</span>
               </TabsTrigger>
             ))}
           </TabsList>
@@ -380,18 +322,18 @@ export default function AssetsPage() {
                           <span className="font-medium">{c.name}</span>
                         </div>
                       </TableCell>
-                      <TableCell className="text-right tabular-nums text-sm">{c.asset_count}</TableCell>
+                      <TableCell className="text-right text-sm tabular-nums">{c.asset_count}</TableCell>
                       <TableCell>
                         {c.scope?.length ? (
                           <div className="flex flex-wrap gap-1">
-                            {c.scope.map((s, i) => (
-                              <Badge key={i} variant="secondary" className="font-mono text-[11px]">
+                            {c.scope.map((s) => (
+                              <Badge key={`${s.kind}:${s.raw}`} variant="secondary" className="font-mono text-[11px]">
                                 {s.raw}
                               </Badge>
                             ))}
                           </div>
                         ) : (
-                          <span className="text-xs text-muted-foreground">{t("No scope set")}</span>
+                          <span className="text-muted-foreground text-xs">{t("No scope set")}</span>
                         )}
                       </TableCell>
                       <TableCell className="text-right">
@@ -411,7 +353,7 @@ export default function AssetsPage() {
                   ))}
                   {companies.length === 0 && (
                     <TableRow>
-                      <TableCell colSpan={4} className="py-10 text-center text-sm text-muted-foreground">
+                      <TableCell colSpan={4} className="py-10 text-center text-muted-foreground text-sm">
                         {t(
                           'No companies yet. Click "Add company" in the top-right corner and fill in the asset scope; the system will automatically claim matching assets.',
                         )}
@@ -424,293 +366,20 @@ export default function AssetsPage() {
           </Card>
         </TabsContent>
 
-        {/* Root domains */}
-        <TabsContent value="root_domain" className="mt-0 flex min-h-0 flex-1 flex-col gap-2">
-          {searchBox}
-          <AssetCard
-            cols={["", "Domain", "ICP filing", "Company", ""]}
-            loaded={loaded}
-            total={total}
-            page={page}
-            size={size}
-            onSize={setSize}
-            onPage={setPage}
-            rows={currentRows}
-            selected={selected}
-            onToggleAll={(ids) => toggleSelectAll(ids)}
-          >
-            {slice(tabData("root_domain")).map((a) => (
-              <TableRow key={a.id} className={selected.has(a.id) ? "bg-muted/40" : undefined}>
-                <TableCell className="w-8 pr-0">
-                  <Checkbox checked={selected.has(a.id)} onCheckedChange={() => toggleSelect(a.id)} />
-                </TableCell>
-                <TableCell className="font-mono text-xs font-medium">{a.domain}</TableCell>
-                <TableCell className="text-xs">{a.icp || "—"}</TableCell>
-                <TableCell className="text-xs">
-                  {companyName(a.company_id) || <span className="text-muted-foreground">{t("Unassigned")}</span>}
-                </TableCell>
-                <TableCell className="w-8 pl-0">
-                  <RowDeleteButton
-                    label={t("Delete asset {name}", { name: a.domain || a.id })}
-                    onClick={() => openDelete([a.id])}
-                  />
-                </TableCell>
-              </TableRow>
-            ))}
-          </AssetCard>
-        </TabsContent>
-
-        {/* IP */}
-        <TabsContent value="ip" className="mt-0 flex min-h-0 flex-1 flex-col gap-2">
-          {searchBox}
-          <AssetCard
-            cols={["", "IP", "C-segment", "Bound domains", "Open ports", ""]}
-            loaded={loaded}
-            total={total}
-            page={page}
-            size={size}
-            onSize={setSize}
-            onPage={setPage}
-            rows={currentRows}
-            selected={selected}
-            onToggleAll={(ids) => toggleSelectAll(ids)}
-          >
-            {slice(tabData("ip")).map((a) => (
-              <TableRow key={a.id} className={selected.has(a.id) ? "bg-muted/40" : undefined}>
-                <TableCell className="w-8 pr-0">
-                  <Checkbox checked={selected.has(a.id)} onCheckedChange={() => toggleSelect(a.id)} />
-                </TableCell>
-                <TableCell className="font-mono text-xs font-medium">{a.ip}</TableCell>
-                <TableCell className="font-mono text-xs">{a.c_segment || "—"}</TableCell>
-                <TableCell>
-                  <Chips items={a.bound_domains ?? []} mono />
-                </TableCell>
-                <TableCell>
-                  <Chips
-                    items={(a.open_ports ?? []).map((p) => (p.service ? `${p.port}/${p.service}` : String(p.port)))}
-                    mono
-                  />
-                </TableCell>
-                <TableCell className="w-8 pl-0">
-                  <RowDeleteButton
-                    label={t("Delete asset {name}", { name: a.ip || a.id })}
-                    onClick={() => openDelete([a.id])}
-                  />
-                </TableCell>
-              </TableRow>
-            ))}
-          </AssetCard>
-        </TabsContent>
-
-        {/* Subdomains */}
-        <TabsContent value="subdomain" className="mt-0 flex min-h-0 flex-1 flex-col gap-2">
-          {searchBox}
-          <AssetCard
-            cols={["", "Domain", "Root domain", "Record type", "Record value", ""]}
-            loaded={loaded}
-            total={total}
-            page={page}
-            size={size}
-            onSize={setSize}
-            onPage={setPage}
-            rows={currentRows}
-            selected={selected}
-            onToggleAll={(ids) => toggleSelectAll(ids)}
-          >
-            {slice(tabData("subdomain")).map((a) => (
-              <TableRow key={a.id} className={selected.has(a.id) ? "bg-muted/40" : undefined}>
-                <TableCell className="w-8 pr-0">
-                  <Checkbox checked={selected.has(a.id)} onCheckedChange={() => toggleSelect(a.id)} />
-                </TableCell>
-                <TableCell className="font-mono text-xs font-medium">{a.domain}</TableCell>
-                <TableCell className="font-mono text-xs">{a.root_domain || "—"}</TableCell>
-                <TableCell className="text-xs">{a.record_type || "—"}</TableCell>
-                <TableCell className="max-w-xs truncate font-mono text-xs">
-                  {(Array.isArray(a.record_value) ? a.record_value.join(", ") : a.record_value) || "—"}
-                </TableCell>
-                <TableCell className="w-8 pl-0">
-                  <RowDeleteButton
-                    label={t("Delete asset {name}", { name: a.domain || a.id })}
-                    onClick={() => openDelete([a.id])}
-                  />
-                </TableCell>
-              </TableRow>
-            ))}
-          </AssetCard>
-        </TabsContent>
-
-        {/* Apps */}
-        <TabsContent value="app" className="mt-0 flex min-h-0 flex-1 flex-col gap-2">
-          {searchBox}
-          <AssetCard
-            cols={["", "App name", "Bundle ID", "Category", "ICP filing", ""]}
-            loaded={loaded}
-            total={total}
-            page={page}
-            size={size}
-            onSize={setSize}
-            onPage={setPage}
-            rows={currentRows}
-            selected={selected}
-            onToggleAll={(ids) => toggleSelectAll(ids)}
-          >
-            {slice(tabData("app")).map((a) => (
-              <TableRow key={a.id} className={selected.has(a.id) ? "bg-muted/40" : undefined}>
-                <TableCell className="w-8 pr-0">
-                  <Checkbox checked={selected.has(a.id)} onCheckedChange={() => toggleSelect(a.id)} />
-                </TableCell>
-                <TableCell className="text-xs font-medium">{a.app_name || "—"}</TableCell>
-                <TableCell className="font-mono text-xs">{a.bundle_id || "—"}</TableCell>
-                <TableCell className="text-xs">{a.category || "—"}</TableCell>
-                <TableCell className="text-xs">{a.app_icp || "—"}</TableCell>
-                <TableCell className="w-8 pl-0">
-                  <RowDeleteButton
-                    label={t("Delete asset {name}", { name: a.app_name || a.id })}
-                    onClick={() => openDelete([a.id])}
-                  />
-                </TableCell>
-              </TableRow>
-            ))}
-          </AssetCard>
-        </TabsContent>
-
-        {/* Services */}
-        <TabsContent value="service" className="mt-0 flex min-h-0 flex-1 flex-col gap-2">
-          {searchBox}
-          <AssetCard
-            cols={["", "Service", "Domain", "IP", "Port", "Status", "Title", "Fingerprint", "Auth", ""]}
-            loaded={loaded}
-            total={total}
-            page={page}
-            size={size}
-            onSize={setSize}
-            onPage={setPage}
-            rows={currentRows}
-            selected={selected}
-            onToggleAll={(ids) => toggleSelectAll(ids)}
-          >
-            {slice(tabData("service")).map((a) => {
-              const isHttp = a.service_type === "http";
-              const svc = a.service_name || (isHttp ? "http" : "") || a.service_type || "";
-              let domainCell: React.ReactNode = "—";
-              const href = isHttp ? httpHref(a.url) : undefined;
-              if (href) {
-                domainCell = (
-                  <a
-                    href={href}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="text-blue-600 hover:underline dark:text-blue-400"
-                  >
-                    {a.domain || a.url}
-                  </a>
-                );
-              } else if (a.domain || a.url) {
-                domainCell = a.domain || a.url;
-              }
-              return (
-                <TableRow key={a.id} className={selected.has(a.id) ? "bg-muted/40" : undefined}>
-                  <TableCell className="w-8 pr-0">
-                    <Checkbox checked={selected.has(a.id)} onCheckedChange={() => toggleSelect(a.id)} />
-                  </TableCell>
-                  <TableCell className="text-xs">
-                    <Badge variant={isHttp ? "default" : "secondary"} className="font-mono text-[10px]">
-                      {svc || "—"}
-                    </Badge>
-                  </TableCell>
-                  <TableCell className="max-w-[14rem] truncate font-mono text-xs" title={a.domain || a.url}>
-                    {domainCell}
-                  </TableCell>
-                  <TableCell className="font-mono text-xs">{a.ip || "—"}</TableCell>
-                  <TableCell className="font-mono text-xs tabular-nums">{a.port || "—"}</TableCell>
-                  <TableCell>
-                    {a.status_code != null ? (
-                      <span className={cn("font-mono text-xs font-semibold tabular-nums", statusTone(a.status_code))}>
-                        {a.status_code}
-                      </span>
-                    ) : (
-                      "—"
-                    )}
-                  </TableCell>
-                  <TableCell className="max-w-[12rem] truncate text-xs" title={a.page_title}>
-                    {a.page_title || "—"}
-                  </TableCell>
-                  <TableCell>
-                    <Chips items={a.technologies ?? []} />
-                  </TableCell>
-                  <TableCell>
-                    {(a.auth ?? []).length === 0 ? (
-                      <span className="text-xs text-muted-foreground">—</span>
-                    ) : (
-                      (a.auth ?? []).map((authItem, i) => {
-                        const item = authItem as Record<string, string>;
-                        const label = item.type || item.username || t("Auth");
-                        return (
-                          <span key={i} className="inline-flex items-center gap-1 text-[11px]">
-                            <KeyRoundIcon className="size-3 text-muted-foreground" />
-                            <span className="font-mono">{label}</span>
-                          </span>
-                        );
-                      })
-                    )}
-                  </TableCell>
-                  <TableCell className="w-8 pl-0">
-                    <RowDeleteButton
-                      label={t("Delete asset {name}", { name: a.url || a.id })}
-                      onClick={() => openDelete([a.id])}
-                    />
-                  </TableCell>
-                </TableRow>
-              );
-            })}
-          </AssetCard>
-        </TabsContent>
-
-        {/* Endpoints */}
-        <TabsContent value="endpoint" className="mt-0 flex min-h-0 flex-1 flex-col gap-2">
-          {searchBox}
-          <AssetCard
-            cols={["", "Method", "Full URL", "Params", ""]}
-            loaded={loaded}
-            total={total}
-            page={page}
-            size={size}
-            onSize={setSize}
-            onPage={setPage}
-            rows={currentRows}
-            selected={selected}
-            onToggleAll={(ids) => toggleSelectAll(ids)}
-          >
-            {slice(tabData("endpoint")).map((a) => (
-              <TableRow key={a.id} className={selected.has(a.id) ? "bg-muted/40" : undefined}>
-                <TableCell className="w-8 pr-0">
-                  <Checkbox checked={selected.has(a.id)} onCheckedChange={() => toggleSelect(a.id)} />
-                </TableCell>
-                <TableCell className="w-16">
-                  <MethodBadge method={a.method || ""} />
-                </TableCell>
-                <TableCell className="max-w-sm truncate font-mono text-xs" title={a.url}>
-                  {a.url || "—"}
-                </TableCell>
-                <TableCell>
-                  <Chips
-                    items={(a.params ?? []).map((p) => {
-                      const item = p as Record<string, string>;
-                      return item.name ? `${item.name}(${item.location || "?"})` : "?";
-                    })}
-                    mono
-                  />
-                </TableCell>
-                <TableCell className="w-8 pl-0">
-                  <RowDeleteButton
-                    label={t("Delete asset {name}", { name: a.url || a.id })}
-                    onClick={() => openDelete([a.id])}
-                  />
-                </TableCell>
-              </TableRow>
-            ))}
-          </AssetCard>
-        </TabsContent>
+        {ASSET_TABS.map((key) => (
+          <TabsContent key={key} value={key} className="mt-0 flex min-h-0 flex-1 flex-col gap-2">
+            {searchBox}
+            <AssetTable
+              spec={ASSET_TAB_SPECS[key]}
+              rows={tabData(key)}
+              ctx={cellCtx}
+              loaded={loaded}
+              paging={{ total, page, size, onSize: setSize, onPage: setPage }}
+              selection={canOperate ? selection : undefined}
+              onDelete={canOperate ? openDelete : undefined}
+            />
+          </TabsContent>
+        ))}
       </Tabs>
 
       <AlertDialog open={deleteOpen} onOpenChange={setDeleteOpen}>
@@ -771,7 +440,7 @@ export default function AssetsPage() {
                   />
                   <span className="text-sm leading-snug">
                     {t("Also delete all assets under this company")}
-                    <span className="block text-xs text-muted-foreground">
+                    <span className="block text-muted-foreground text-xs">
                       {t("Leave unchecked to keep the assets and only remove the ownership")}
                     </span>
                   </span>
@@ -795,421 +464,5 @@ export default function AssetsPage() {
         </AlertDialogContent>
       </AlertDialog>
     </div>
-  );
-}
-
-function AssetCard({
-  cols,
-  loaded,
-  total,
-  page,
-  size,
-  onSize,
-  onPage,
-  rows: dataRows,
-  selected,
-  onToggleAll,
-  children,
-}: {
-  cols: string[];
-  loaded: boolean;
-  total: number;
-  page: number;
-  size: number;
-  onSize: React.Dispatch<React.SetStateAction<number>>;
-  onPage: React.Dispatch<React.SetStateAction<number>>;
-  rows?: Asset[];
-  selected?: Set<number>;
-  onToggleAll?: (ids: number[]) => void;
-  children: React.ReactNode;
-}) {
-  const childRows = React.Children.toArray(children);
-  const pageCount = Math.max(1, Math.ceil(total / size));
-  const start = total === 0 ? 0 : page * size + 1;
-  const end = page * size + childRows.length;
-
-  const pageIds = dataRows?.map((r) => r.id) ?? [];
-  const allSelected = pageIds.length > 0 && selected != null && pageIds.every((id) => selected.has(id));
-  const someSelected = selected != null && pageIds.some((id) => selected.has(id));
-
-  return (
-    <Card className="flex min-h-0 flex-1 flex-col overflow-hidden py-0">
-      <div className="min-h-0 flex-1 overflow-auto scrollbar-thin scrollbar-track-transparent">
-        <Table>
-          <TableHeader className="sticky top-0 z-10 bg-card">
-            <TableRow>
-              {cols.map((c, i) =>
-                c === "" && i === 0 && onToggleAll ? (
-                  <TableHead key={i} className="w-8 pr-0">
-                    <Checkbox
-                      checked={allSelected ? true : someSelected ? "indeterminate" : false}
-                      onCheckedChange={() => onToggleAll(pageIds)}
-                    />
-                  </TableHead>
-                ) : (
-                  <TableHead key={c + i}>{c && t(c)}</TableHead>
-                ),
-              )}
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {childRows.length > 0 ? (
-              childRows
-            ) : (
-              <TableRow>
-                <TableCell colSpan={cols.length} className="py-12 text-center text-sm text-muted-foreground">
-                  {loaded ? t("No data.") : t("Loading…")}
-                </TableCell>
-              </TableRow>
-            )}
-          </TableBody>
-        </Table>
-      </div>
-      {total > 0 && (
-        <div className="flex shrink-0 items-center gap-2 border-t px-3 py-1.5 text-xs text-muted-foreground">
-          <Select value={String(size)} onValueChange={(v) => onSize(Number(v))}>
-            <SelectTrigger size="sm" className="h-7 w-24">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectGroup>
-                {PAGE_SIZES.map((n) => (
-                  <SelectItem key={n} value={String(n)}>
-                    {t("{count} / page", { count: n })}
-                  </SelectItem>
-                ))}
-              </SelectGroup>
-            </SelectContent>
-          </Select>
-          <span className="tabular-nums">
-            {start}–{end} / {total}
-          </span>
-          {pageCount > 1 && (
-            <div className="flex items-center gap-2">
-              <Button
-                variant="outline"
-                size="icon"
-                className="size-7"
-                disabled={page <= 0}
-                onClick={() => onPage((p) => Math.max(0, p - 1))}
-              >
-                <ChevronLeftIcon />
-              </Button>
-              <span className="tabular-nums">
-                {page + 1} / {pageCount}
-              </span>
-              <Button
-                variant="outline"
-                size="icon"
-                className="size-7"
-                disabled={page + 1 >= pageCount}
-                onClick={() => onPage((p) => Math.min(pageCount - 1, p + 1))}
-              >
-                <ChevronRightIcon />
-              </Button>
-            </div>
-          )}
-        </div>
-      )}
-    </Card>
-  );
-}
-
-function Chips({ items, mono }: { items: string[]; mono?: boolean }) {
-  const clean = items.filter(Boolean);
-  if (clean.length === 0) return <span className="text-xs text-muted-foreground">—</span>;
-  return (
-    <div className="flex flex-wrap gap-1">
-      {clean.map((s, i) => (
-        <Badge key={i} variant="outline" className={cn("text-[10px]", mono && "font-mono")}>
-          {s}
-        </Badge>
-      ))}
-    </div>
-  );
-}
-
-function CompanyAvatar({ name, logo }: { name: string; logo?: string }) {
-  const initial = (name.trim()[0] ?? "?").toUpperCase();
-  return (
-    <Avatar className="size-7 shrink-0">
-      {logo ? <AvatarImage src={logo} alt={name} /> : null}
-      <AvatarFallback className="text-xs">{initial}</AvatarFallback>
-    </Avatar>
-  );
-}
-
-// Warnings from the backend describe pre-existing data problems (not errors in the submitted lines); the save itself
-// already succeeded. Show them longer because the user must fix specific assets — a glance at the title is not enough.
-function showScopeWarnings(warnings?: string[]) {
-  for (const warning of warnings ?? []) {
-    toast.warning(warning, { duration: 15000 });
-  }
-}
-
-function savedScopeRules(company: Company): CompanyScopeRule[] {
-  return (company.scope ?? [])
-    .map((scope) => ({ kind: scope.kind, value: scope.raw.trim() }))
-    .filter((scope) => scope.value);
-}
-
-function savedScopeText(company: Company): string {
-  return savedScopeRules(company)
-    .map((scope) => scope.value)
-    .join("\n");
-}
-
-// Creating a company uses the same right-side drawer as tasks and LLM editing.
-function CompanyDialog({ onSaved }: { onSaved: () => void }) {
-  const [open, setOpen] = React.useState(false);
-  const [name, setName] = React.useState("");
-  const [scopeText, setScopeText] = React.useState("");
-  const [busy, setBusy] = React.useState(false);
-  const parsedScope = React.useMemo(() => parseCompanyScopeText(scopeText), [scopeText]);
-
-  React.useEffect(() => {
-    if (!open) return;
-    setName("");
-    setScopeText("");
-  }, [open]);
-
-  const submit = async () => {
-    if (!name.trim()) {
-      toast.error(t("Please enter a company name"));
-      return;
-    }
-    if (parsedScope.errors.length > 0) {
-      toast.error(t("Please fix the invalid asset scope"));
-      return;
-    }
-    setBusy(true);
-    try {
-      const res = await api.createCompany(name.trim(), parsedScope.rules);
-      const added = res.scope_added ?? 0;
-      const invalid = res.scope_invalid ?? 0;
-      if (invalid > 0)
-        toast.warning(t("Company created, {added} scopes added; {invalid} invalid lines", { added, invalid }));
-      else toast.success(t("Company created, {added} scopes added", { added }));
-      setOpen(false);
-      onSaved();
-    } catch (e) {
-      const msg = errorText(e);
-      if (/:\s*409$/.test(msg)) toast.error(t("Company already exists; try a different name"));
-      else toast.error(t("Save failed: {error}", { error: msg }));
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  return (
-    <Sheet open={open} onOpenChange={setOpen}>
-      <SheetTrigger asChild>
-        <Button size="sm">
-          <BuildingIcon data-icon="inline-start" /> {t("Add company")}
-        </Button>
-      </SheetTrigger>
-      <SheetContent className="w-full! max-w-none! gap-0 p-0 sm:w-[520px]! sm:max-w-[520px]!">
-        <SheetHeader className="border-b p-6">
-          <SheetTitle>{t("Add company")}</SheetTitle>
-          <SheetDescription>
-            {t(
-              "Configure the company and its asset scope. Keywords only serve as agent hints and do not automatically assign assets.",
-            )}
-          </SheetDescription>
-        </SheetHeader>
-        <div className="flex-1 overflow-y-auto p-6">
-          <FieldGroup>
-            <Field>
-              <FieldLabel htmlFor="cn-name">{t("Company name")}</FieldLabel>
-              <Input
-                id="cn-name"
-                placeholder={t("e.g. Acme Corp (name must be unique)")}
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-              />
-            </Field>
-            <ScopeTextEditor id="cn-scope" value={scopeText} onValueChange={setScopeText} parsed={parsedScope} />
-          </FieldGroup>
-        </div>
-        <SheetFooter className="flex-row justify-end gap-2 border-t p-4">
-          <Button variant="outline" onClick={() => setOpen(false)} disabled={busy}>
-            {t("Cancel")}
-          </Button>
-          <Button onClick={submit} disabled={busy || !name.trim() || parsedScope.errors.length > 0}>
-            {busy ? t("Saving…") : t("Save")}
-          </Button>
-        </SheetFooter>
-      </SheetContent>
-    </Sheet>
-  );
-}
-
-// Edit (overwrite) asset scope dialog
-function EditScopeDialog({ company, onSaved }: { company: Company; onSaved: () => void }) {
-  const [open, setOpen] = React.useState(false);
-  const [scopeText, setScopeText] = React.useState("");
-  const [reason, setReason] = React.useState("");
-  const [busy, setBusy] = React.useState(false);
-  const preservedScopeRules = React.useMemo(() => savedScopeRules(company), [company]);
-  const parsedScope = React.useMemo(
-    () => parseCompanyScopeText(scopeText, { preservedRules: preservedScopeRules }),
-    [preservedScopeRules, scopeText],
-  );
-
-  React.useEffect(() => {
-    if (!open) return;
-    setScopeText(savedScopeText(company));
-    setReason("");
-  }, [open, company]);
-
-  const submit = async () => {
-    if (parsedScope.errors.length > 0) {
-      toast.error(t("Please fix the invalid asset scope"));
-      return;
-    }
-    setBusy(true);
-    try {
-      const res = await api.updateCompanyScope(company.id, parsedScope.rules, reason);
-      const errCount = res.invalid ?? 0;
-      if (errCount > 0) toast.warning(t("Saved; {count} invalid lines", { count: errCount }));
-      else toast.success(t("Scope updated, {count} entries in total", { count: res.added }));
-      showScopeWarnings(res.warnings);
-      setOpen(false);
-      onSaved();
-    } catch (e) {
-      toast.error(t("Save failed: {error}", { error: errorText(e) }));
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  return (
-    <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger asChild>
-        <Button variant="outline" size="sm" className="h-7">
-          {t("Edit")}
-        </Button>
-      </DialogTrigger>
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>{t("Edit asset scope · {name}", { name: company.name })}</DialogTitle>
-          <DialogDescription>
-            {t(
-              "Saving replaces all existing scopes. ICP matches assets exactly; company keywords only serve as agent hints.",
-            )}
-          </DialogDescription>
-        </DialogHeader>
-        <FieldGroup className="py-2">
-          <ScopeTextEditor
-            id={`edit-company-scope-${company.id}`}
-            value={scopeText}
-            onValueChange={setScopeText}
-            parsed={parsedScope}
-          />
-          <Field>
-            <FieldLabel htmlFor="es-reason">{t("Attribution basis (optional)")}</FieldLabel>
-            <Input
-              id="es-reason"
-              placeholder={t("e.g. certificate / whois / ASN evidence")}
-              value={reason}
-              onChange={(e) => setReason(e.target.value)}
-            />
-          </Field>
-        </FieldGroup>
-        <DialogFooter>
-          <Button variant="outline" onClick={() => setOpen(false)} disabled={busy}>
-            {t("Cancel")}
-          </Button>
-          <Button onClick={submit} disabled={busy || parsedScope.errors.length > 0}>
-            {busy ? t("Saving…") : t("Overwrite save")}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  );
-}
-
-// Append asset scope dialog
-function AppendScopeDialog({ company, onSaved }: { company: Company; onSaved: () => void }) {
-  const [open, setOpen] = React.useState(false);
-  const [scopeText, setScopeText] = React.useState("");
-  const [reason, setReason] = React.useState("");
-  const [busy, setBusy] = React.useState(false);
-  const parsedScope = React.useMemo(() => parseCompanyScopeText(scopeText), [scopeText]);
-
-  React.useEffect(() => {
-    if (!open) return;
-    setScopeText("");
-    setReason("");
-  }, [open]);
-
-  const submit = async () => {
-    if (parsedScope.rules.length === 0) {
-      toast.error(t("Please enter the scopes to append"));
-      return;
-    }
-    if (parsedScope.errors.length > 0) {
-      toast.error(t("Please fix the invalid asset scope"));
-      return;
-    }
-    setBusy(true);
-    try {
-      const res = await api.addCompanyScope(company.id, parsedScope.rules, reason);
-      const errCount = res.invalid ?? 0;
-      if (errCount > 0) toast.warning(t("Saved; {count} invalid lines", { count: errCount }));
-      else toast.success(t("Appended {count} scopes", { count: res.added }));
-      showScopeWarnings(res.warnings);
-      setOpen(false);
-      onSaved();
-    } catch (e) {
-      toast.error(t("Save failed: {error}", { error: errorText(e) }));
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  return (
-    <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger asChild>
-        <Button variant="outline" size="sm" className="h-7">
-          {t("Append")}
-        </Button>
-      </DialogTrigger>
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>{t("Append asset scope · {name}", { name: company.name })}</DialogTitle>
-          <DialogDescription>
-            {t(
-              "New scopes are appended to the existing ones. ICP matches assets exactly; company keywords only serve as agent hints.",
-            )}
-          </DialogDescription>
-        </DialogHeader>
-        <FieldGroup className="py-2">
-          <ScopeTextEditor
-            id={`append-company-scope-${company.id}`}
-            value={scopeText}
-            onValueChange={setScopeText}
-            parsed={parsedScope}
-          />
-          <Field>
-            <FieldLabel htmlFor="as-reason">{t("Attribution basis (optional)")}</FieldLabel>
-            <Input
-              id="as-reason"
-              placeholder={t("e.g. certificate / whois / ASN evidence")}
-              value={reason}
-              onChange={(e) => setReason(e.target.value)}
-            />
-          </Field>
-        </FieldGroup>
-        <DialogFooter>
-          <Button variant="outline" onClick={() => setOpen(false)} disabled={busy}>
-            {t("Cancel")}
-          </Button>
-          <Button onClick={submit} disabled={busy || parsedScope.rules.length === 0 || parsedScope.errors.length > 0}>
-            {busy ? t("Saving…") : t("Append")}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
   );
 }

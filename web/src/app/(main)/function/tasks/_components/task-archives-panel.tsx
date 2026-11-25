@@ -46,6 +46,12 @@ const ARCHIVE_PROCESSING_STATES = new Set<TaskArchiveState>([
 
 const ARCHIVE_FAILED_STATES = new Set<TaskArchiveState>(["archive_failed", "restore_failed", "delete_failed"]);
 
+function archivePhaseLabel(phase: string): string {
+  if (phase === "upload_and_verify") return t("Uploading and verifying");
+  if (phase === "download_and_verify") return t("Downloading and verifying");
+  return t(phase);
+}
+
 function archiveStateLabel(state: TaskArchiveState): string {
   const labels: Record<TaskArchiveState, string> = {
     archive_queued: t("Archive queued"),
@@ -360,11 +366,12 @@ export function TaskArchivesPanel({ onChanged }: { onChanged: () => void }) {
             </>
           )}
         </div>
-        {loading ? (
+        {loading && (
           <div className="flex justify-center py-20">
             <Spinner />
           </div>
-        ) : archives.length === 0 ? (
+        )}
+        {!loading && archives.length === 0 && (
           <Empty className="mx-4 border border-dashed lg:mx-6">
             <EmptyHeader>
               <EmptyTitle>{t("No task archives")}</EmptyTitle>
@@ -373,7 +380,8 @@ export function TaskArchivesPanel({ onChanged }: { onChanged: () => void }) {
               </EmptyDescription>
             </EmptyHeader>
           </Empty>
-        ) : (
+        )}
+        {!loading && archives.length > 0 && (
           <Table className="**:data-[slot='table-cell']:px-4 **:data-[slot='table-head']:px-4">
             <TableHeader className="[&_tr]:border-t">
               <TableRow>
@@ -427,7 +435,7 @@ export function TaskArchivesPanel({ onChanged }: { onChanged: () => void }) {
                         <span className="truncate font-medium">
                           {archive.task_name || archive.task_description || t("Task #{id}", { id: archive.task_id })}
                         </span>
-                        <span className="text-muted-foreground truncate text-xs">
+                        <span className="truncate text-muted-foreground text-xs">
                           #{archive.task_id} · {archive.task_description}
                         </span>
                       </div>
@@ -438,7 +446,7 @@ export function TaskArchivesPanel({ onChanged }: { onChanged: () => void }) {
                     <TableCell className="text-muted-foreground">
                       {archive.category_name || t("Uncategorized")}
                     </TableCell>
-                    <TableCell className="text-muted-foreground whitespace-nowrap text-xs">
+                    <TableCell className="whitespace-nowrap text-muted-foreground text-xs">
                       {archiveDate(archive.archived_at || archive.requested_at)}
                     </TableCell>
                     <TableCell
@@ -471,12 +479,7 @@ export function TaskArchivesPanel({ onChanged }: { onChanged: () => void }) {
                           </p>
                         ))}
                         <span className="text-muted-foreground text-xs">
-                          {archive.phase === "upload_and_verify"
-                            ? t("Uploading and verifying")
-                            : archive.phase === "download_and_verify"
-                              ? t("Downloading and verifying")
-                              : t(archive.phase)}{" "}
-                          · {archive.progress}%
+                          {archivePhaseLabel(archive.phase)} · {archive.progress}%
                         </span>
                       </div>
                     </TableCell>

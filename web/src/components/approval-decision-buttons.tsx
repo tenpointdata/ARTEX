@@ -45,6 +45,6 @@ const decidedStyle = {
 export function ApprovalDecidedBadge({ decided }: { decided: keyof typeof decidedStyle }) {
   const label = { allowed: t("Allowed"), timeout: t("Timed out"), denied: t("Denied") }[decided];
   return (
-    <span className={`shrink-0 rounded px-2 py-0.5 text-[11px] font-medium ${decidedStyle[decided]}`}>{label}</span>
+    <span className={`shrink-0 rounded px-2 py-0.5 font-medium text-[11px] ${decidedStyle[decided]}`}>{label}</span>
   );
 }

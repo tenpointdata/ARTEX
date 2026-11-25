@@ -24,6 +24,28 @@ import { cn } from "@/lib/utils";
 // AgentTriggersTab manages a custom agent's P3 triggers: list + add + delete.
 // Each trigger fires (schedule/finding found/goal met/task timeout/tool call, multi-select) → a new conversation runs
 // in parallel with the base user message + auto context appended by the backend.
+type RunMode = "serial" | "parallel";
+type MergeMode = "by_task" | "all" | "none";
+
+function runModeHint(runMode: RunMode, mergeMode: MergeMode): string {
+  if (runMode === "parallel") {
+    return t(
+      "Parallel: each trigger immediately starts its own concurrent session, no merging; triggers beyond the max concurrency queue for a free slot.",
+    );
+  }
+  if (mergeMode === "by_task") {
+    return t(
+      "Serial · merge by task: one run at a time per agent; queued events for the same task merge into one conversation.",
+    );
+  }
+  if (mergeMode === "all") {
+    return t(
+      "Serial · merge all: one run at a time per agent; when dequeuing, all currently queued triggers merge into one conversation.",
+    );
+  }
+  return t("Serial · no merge: one run at a time per agent; each trigger gets its own conversation.");
+}
+
 export function AgentTriggersTab({ agentKey, agent }: { agentKey: string; agent?: Agent }) {
   // Creating a trigger and the handling policy live under /api/agents (admin);
   // updating or deleting an existing trigger is /api/triggers/{id} (operate).
@@ -125,7 +147,7 @@ export function AgentTriggersTab({ agentKey, agent }: { agentKey: string; agent?
     setTaskTimeoutMsg(trg.task_timeout_message);
     setToolCallMsg(trg.tool_call_message);
     setTaskCreateMsg(trg.task_create_message);
-    setToolNames(trg.tool_names ?? []);
+    setToolNames(trg.tool_names);
   }
 
   // submit creates or saves changes based on editingId; editing keeps the trigger's enabled state.
@@ -240,7 +262,7 @@ export function AgentTriggersTab({ agentKey, agent }: { agentKey: string; agent?
               onValueChange={(v) => {
                 const rm = v as "serial" | "parallel";
                 setRunMode(rm);
-                saveBehavior({ trigger_run_mode: rm });
+                void saveBehavior({ trigger_run_mode: rm });
               }}
             >
               <SelectTrigger size="sm" className="h-8 w-40">
@@ -261,7 +283,7 @@ export function AgentTriggersTab({ agentKey, agent }: { agentKey: string; agent?
               onValueChange={(v) => {
                 const mm = v as "by_task" | "all" | "none";
                 setMergeMode(mm);
-                saveBehavior({ trigger_merge_mode: mm });
+                void saveBehavior({ trigger_merge_mode: mm });
               }}
             >
               <SelectTrigger size="sm" className="h-8 w-44">
@@ -290,27 +312,13 @@ export function AgentTriggersTab({ agentKey, agent }: { agentKey: string; agent?
                 onBlur={() => {
                   const n = Math.max(0, Math.floor(Number(maxParallel) || 0));
                   setMaxParallel(String(n));
-                  saveBehavior({ trigger_max_parallel: n });
+                  void saveBehavior({ trigger_max_parallel: n });
                 }}
               />
             </div>
           )}
         </div>
-        <p className="text-muted-foreground text-xs">
-          {runMode === "parallel"
-            ? t(
-                "Parallel: each trigger immediately starts its own concurrent session, no merging; triggers beyond the max concurrency queue for a free slot.",
-              )
-            : mergeMode === "by_task"
-              ? t(
-                  "Serial · merge by task: one run at a time per agent; queued events for the same task merge into one conversation.",
-                )
-              : mergeMode === "all"
-                ? t(
-                    "Serial · merge all: one run at a time per agent; when dequeuing, all currently queued triggers merge into one conversation.",
-                  )
-                : t("Serial · no merge: one run at a time per agent; each trigger gets its own conversation.")}
-        </p>
+        <p className="text-muted-foreground text-xs">{runModeHint(runMode, mergeMode)}</p>
       </fieldset>
 
       {/* create / edit trigger */}
@@ -324,8 +332,9 @@ export function AgentTriggersTab({ agentKey, agent }: { agentKey: string; agent?
 
           {/* schedule */}
           <div className="grid gap-1.5">
-            <label className="flex items-center gap-2 text-sm">
-              <Checkbox checked={onInterval} onCheckedChange={(v) => setOnInterval(!!v)} /> {t("Scheduled trigger")}
+            <label htmlFor="tr-trig-1" className="flex items-center gap-2 text-sm">
+              <Checkbox id="tr-trig-1" checked={onInterval} onCheckedChange={(v) => setOnInterval(!!v)} />{" "}
+              {t("Scheduled trigger")}
             </label>
             {onInterval && (
               <div className="grid gap-1.5">
@@ -356,8 +365,9 @@ export function AgentTriggersTab({ agentKey, agent }: { agentKey: string; agent?
 
           {/* finding */}
           <div className="grid gap-1.5">
-            <label className="flex items-center gap-2 text-sm">
-              <Checkbox checked={onFinding} onCheckedChange={(v) => setOnFinding(!!v)} /> {t("Trigger on finding")}
+            <label htmlFor="tr-trig-2" className="flex items-center gap-2 text-sm">
+              <Checkbox id="tr-trig-2" checked={onFinding} onCheckedChange={(v) => setOnFinding(!!v)} />{" "}
+              {t("Trigger on finding")}
             </label>
             {onFinding && (
               <Textarea
@@ -374,8 +384,9 @@ export function AgentTriggersTab({ agentKey, agent }: { agentKey: string; agent?
 
           {/* goal met */}
           <div className="grid gap-1.5">
-            <label className="flex items-center gap-2 text-sm">
-              <Checkbox checked={onGoalMet} onCheckedChange={(v) => setOnGoalMet(!!v)} /> {t("Trigger on goal met")}
+            <label htmlFor="tr-trig-3" className="flex items-center gap-2 text-sm">
+              <Checkbox id="tr-trig-3" checked={onGoalMet} onCheckedChange={(v) => setOnGoalMet(!!v)} />{" "}
+              {t("Trigger on goal met")}
             </label>
             {onGoalMet && (
               <Textarea
@@ -392,8 +403,8 @@ export function AgentTriggersTab({ agentKey, agent }: { agentKey: string; agent?
 
           {/* task timeout */}
           <div className="grid gap-1.5">
-            <label className="flex items-center gap-2 text-sm">
-              <Checkbox checked={onTaskTimeout} onCheckedChange={(v) => setOnTaskTimeout(!!v)} />{" "}
+            <label htmlFor="tr-trig-4" className="flex items-center gap-2 text-sm">
+              <Checkbox id="tr-trig-4" checked={onTaskTimeout} onCheckedChange={(v) => setOnTaskTimeout(!!v)} />{" "}
               {t("Trigger on task timeout")}
             </label>
             {onTaskTimeout && (
@@ -409,8 +420,9 @@ export function AgentTriggersTab({ agentKey, agent }: { agentKey: string; agent?
 
           {/* tool call */}
           <div className="grid gap-1.5">
-            <label className="flex items-center gap-2 text-sm">
-              <Checkbox checked={onToolCall} onCheckedChange={(v) => setOnToolCall(!!v)} /> {t("Trigger on tool call")}
+            <label htmlFor="tr-trig-5" className="flex items-center gap-2 text-sm">
+              <Checkbox id="tr-trig-5" checked={onToolCall} onCheckedChange={(v) => setOnToolCall(!!v)} />{" "}
+              {t("Trigger on tool call")}
             </label>
             {onToolCall && (
               <div className="grid gap-1.5">
@@ -428,8 +440,9 @@ export function AgentTriggersTab({ agentKey, agent }: { agentKey: string; agent?
                   )}
                   <div className="grid gap-1">
                     {tools.map((tool) => (
-                      <label key={tool.key} className="flex items-start gap-2 text-xs">
+                      <label htmlFor={`tr-trig-${tool.key}`} key={tool.key} className="flex items-start gap-2 text-xs">
                         <Checkbox
+                          id={`tr-trig-${tool.key}`}
                           className="mt-0.5"
                           checked={toolNames.includes(tool.key)}
                           onCheckedChange={() => toggleTool(tool.key)}
@@ -437,7 +450,7 @@ export function AgentTriggersTab({ agentKey, agent }: { agentKey: string; agent?
                         <span className="min-w-0">
                           <span className="font-medium">{tool.key}</span>
                           {tool.description && (
-                            <span className="text-muted-foreground line-clamp-1"> {tool.description}</span>
+                            <span className="line-clamp-1 text-muted-foreground"> {tool.description}</span>
                           )}
                         </span>
                       </label>
@@ -459,8 +472,8 @@ export function AgentTriggersTab({ agentKey, agent }: { agentKey: string; agent?
 
           {/* task created */}
           <div className="grid gap-1.5">
-            <label className="flex items-center gap-2 text-sm">
-              <Checkbox checked={onTaskCreate} onCheckedChange={(v) => setOnTaskCreate(!!v)} />{" "}
+            <label htmlFor="tr-trig-6" className="flex items-center gap-2 text-sm">
+              <Checkbox id="tr-trig-6" checked={onTaskCreate} onCheckedChange={(v) => setOnTaskCreate(!!v)} />{" "}
               {t("Trigger on task created")}
             </label>
             {onTaskCreate && (
@@ -511,12 +524,12 @@ export function AgentTriggersTab({ agentKey, agent }: { agentKey: string; agent?
               <div className="flex flex-wrap items-center gap-1.5">
                 <span className="font-medium">{condLabel(trg)}</span>
                 {!trg.enabled && (
-                  <Badge variant="outline" className="text-destructive px-1 py-0 text-[9px]">
+                  <Badge variant="outline" className="px-1 py-0 text-[9px] text-destructive">
                     {t("Disabled")}
                   </Badge>
                 )}
               </div>
-              <div className="text-muted-foreground grid gap-0.5 text-xs">
+              <div className="grid gap-0.5 text-muted-foreground text-xs">
                 {trg.interval_sec > 0 && trg.interval_message && (
                   <div className="line-clamp-1">{t("Schedule: {message}", { message: trg.interval_message })}</div>
                 )}

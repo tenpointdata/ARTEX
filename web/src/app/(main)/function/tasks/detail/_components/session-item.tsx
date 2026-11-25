@@ -42,6 +42,13 @@ function statusIcon(status: SessionStatus) {
   }
 }
 
+function sessionIcon(s: Session, deleted?: boolean) {
+  if (deleted) return <Trash2Icon className="size-3.5 text-destructive" />;
+  if (s.role === "worker") return statusIcon(s.status);
+  if (s.live) return <Loader2Icon className="size-3.5 animate-spin text-blue-500" />;
+  return null;
+}
+
 export function SessionItem({
   s,
   active,
@@ -63,13 +70,7 @@ export function SessionItem({
   controlling?: boolean;
   deleted?: boolean;
 }) {
-  const icon = deleted ? (
-    <Trash2Icon className="size-3.5 text-destructive" />
-  ) : s.role === "worker" ? (
-    statusIcon(s.status)
-  ) : s.live ? (
-    <Loader2Icon className="size-3.5 animate-spin text-blue-500" />
-  ) : null;
+  const icon = sessionIcon(s, deleted);
 
   const cancellable =
     s.role === "worker" &&
@@ -91,7 +92,7 @@ export function SessionItem({
       >
         {icon ?? <span className="size-3.5 shrink-0" />}
         {s.intent_id && (
-          <span className="shrink-0 rounded bg-muted px-1 py-0.5 font-mono text-[10px] tabular-nums text-muted-foreground">
+          <span className="shrink-0 rounded bg-muted px-1 py-0.5 font-mono text-[10px] text-muted-foreground tabular-nums">
             #{s.intent_id}
           </span>
         )}
@@ -101,7 +102,7 @@ export function SessionItem({
           </Badge>
         )}
         <span
-          className={cn("min-w-0 flex-1 truncate text-sm font-medium", deleted && "text-muted-foreground line-through")}
+          className={cn("min-w-0 flex-1 truncate font-medium text-sm", deleted && "text-muted-foreground line-through")}
         >
           {displayTitle}
         </span>
@@ -112,12 +113,12 @@ export function SessionItem({
         )}
         {hasPending && <ShieldAlertIcon className="size-3.5 shrink-0 text-amber-500" />}
         {!active && unread ? (
-          <span className="inline-flex min-w-4 items-center justify-center rounded-full bg-blue-500/15 px-1 text-[10px] font-medium tabular-nums text-blue-600 dark:text-blue-400">
+          <span className="inline-flex min-w-4 items-center justify-center rounded-full bg-blue-500/15 px-1 font-medium text-[10px] text-blue-600 tabular-nums dark:text-blue-400">
             {unread > 99 ? "99+" : unread}
           </span>
         ) : null}
         {s.live && (
-          <span className="inline-flex items-center gap-1 rounded bg-blue-500/15 px-1.5 py-0.5 text-[10px] font-medium text-blue-600 dark:text-blue-400">
+          <span className="inline-flex items-center gap-1 rounded bg-blue-500/15 px-1.5 py-0.5 font-medium text-[10px] text-blue-600 dark:text-blue-400">
             <span className="size-1 animate-pulse rounded-full bg-blue-500" />
             {t("Live")}
           </span>

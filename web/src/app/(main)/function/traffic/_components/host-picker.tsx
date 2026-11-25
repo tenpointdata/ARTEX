@@ -51,12 +51,12 @@ export function HostPicker({
         </Button>
       </PopoverTrigger>
       <PopoverContent
-        className="w-[calc(100vw-2rem)] p-0 data-open:animate-none data-closed:animate-none sm:w-80"
+        className="w-[calc(100vw-2rem)] p-0 data-closed:animate-none data-open:animate-none sm:w-80"
         align="start"
         collisionPadding={16}
       >
         <div className="flex items-center justify-between border-b px-3 py-2">
-          <span className="text-xs font-medium text-muted-foreground">{t("Batch delete by target")}</span>
+          <span className="font-medium text-muted-foreground text-xs">{t("Batch delete by target")}</span>
           <div className="flex items-center gap-1">
             {hosts.length > 0 && (
               <Tooltip>
@@ -95,7 +95,7 @@ export function HostPicker({
         </div>
         <div className="max-h-64 overflow-y-auto">
           {hosts.length === 0 ? (
-            <div className="px-3 py-6 text-center text-xs text-muted-foreground">{t("No traffic records")}</div>
+            <div className="px-3 py-6 text-center text-muted-foreground text-xs">{t("No traffic records")}</div>
           ) : (
             sortedHosts.map((h, index) => (
               <label
@@ -113,7 +113,7 @@ export function HostPicker({
                   }
                 />
                 <span className="truncate font-mono">{h.host}</span>
-                <span className="ml-auto shrink-0 tabular-nums text-muted-foreground">{h.count}</span>
+                <span className="ml-auto shrink-0 text-muted-foreground tabular-nums">{h.count}</span>
               </label>
             ))
           )}

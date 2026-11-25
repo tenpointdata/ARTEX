@@ -22,7 +22,7 @@ export function BulkTriageControls({
 }) {
   return (
     <div className="flex items-center gap-2">
-      <span className="text-xs text-muted-foreground tabular-nums">{t("{count} selected", { count: count })}</span>
+      <span className="text-muted-foreground text-xs tabular-nums">{t("{count} selected", { count: count })}</span>
       <Select
         value=""
         onValueChange={(v) => {

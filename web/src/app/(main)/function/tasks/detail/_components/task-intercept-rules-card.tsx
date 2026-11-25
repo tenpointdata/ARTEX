@@ -135,7 +135,7 @@ export function TaskInterceptRulesCard({ taskId }: { taskId: string }) {
       <CardHeader>
         <CardTitle className="flex items-center gap-2 text-base">
           <ShieldCheckIcon className="size-4 text-sky-500" /> {t("Task-level asset intercept / allow")}
-          <span className="text-muted-foreground text-xs font-normal">
+          <span className="font-normal text-muted-foreground text-xs">
             {t("(this task only, never global; block rules evaluate before allow rules, {count} in total)", {
               count: rules.length,
             })}
@@ -181,7 +181,7 @@ export function TaskInterceptRulesCard({ taskId }: { taskId: string }) {
             <Button size="sm" variant="outline" disabled={busy || !newPattern.trim()} onClick={() => void add()}>
               <PlusIcon className="size-3.5" /> {t("Add")}
             </Button>
-            {err && <span className="text-xs text-red-500">{err}</span>}
+            {err && <span className="text-red-500 text-xs">{err}</span>}
           </div>
         )}
         {/* Rule list */}
@@ -257,10 +257,10 @@ export function TaskInterceptRulesCard({ taskId }: { taskId: string }) {
                   >
                     {r.action === "allow" ? t("Allow") : t("Block")}
                   </span>
-                  <span className="text-muted-foreground shrink-0 text-xs">{TASK_RULE_KIND_LABEL[r.kind]}</span>
-                  <code className="bg-muted min-w-0 flex-1 truncate rounded px-1.5 py-0.5 text-xs">{r.pattern}</code>
+                  <span className="shrink-0 text-muted-foreground text-xs">{TASK_RULE_KIND_LABEL[r.kind]}</span>
+                  <code className="min-w-0 flex-1 truncate rounded bg-muted px-1.5 py-0.5 text-xs">{r.pattern}</code>
                   {r.note && (
-                    <span className="text-muted-foreground max-w-[120px] shrink-0 truncate text-xs">{r.note}</span>
+                    <span className="max-w-[120px] shrink-0 truncate text-muted-foreground text-xs">{r.note}</span>
                   )}
                   <Switch checked={r.enabled} onCheckedChange={() => void toggle(r)} disabled={!isAdmin} />
                   {isAdmin && (

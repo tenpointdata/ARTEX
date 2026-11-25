@@ -21,8 +21,8 @@ import { Field, tRich } from "./shared";
 
 // fmtTokens compacts token counts (1.2k / 3.4M) for approval usage stats.
 function fmtTokens(n: number): string {
-  if (n >= 1_000_000) return (n / 1_000_000).toFixed(1) + "M";
-  if (n >= 1000) return (n / 1000).toFixed(1) + "k";
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1000) return `${(n / 1000).toFixed(1)}k`;
   return String(n);
 }
 
@@ -31,7 +31,7 @@ function JudgeStat({ label, value }: { label: string; value: string }) {
   return (
     <div className="rounded-lg border bg-muted/20 px-3 py-2">
       <div className="text-[10px] text-muted-foreground">{label}</div>
-      <div className="mt-0.5 text-lg font-semibold tabular-nums">{value}</div>
+      <div className="mt-0.5 font-semibold text-lg tabular-nums">{value}</div>
     </div>
   );
 }
@@ -108,12 +108,12 @@ export function JudgeCard() {
   }, []);
 
   React.useEffect(() => {
-    load();
+    void load();
   }, [load]);
 
   // Once enabled (including when the first load reads the switch as true), fetch approval usage stats.
   React.useEffect(() => {
-    if (cfg.enabled) loadUsage();
+    if (cfg.enabled) void loadUsage();
   }, [cfg.enabled, loadUsage]);
 
   function patch(p: Partial<JudgeConfig>) {
@@ -159,8 +159,8 @@ export function JudgeCard() {
         <div className="flex items-center gap-2.5">
           <BotIcon className={`h-5 w-5 shrink-0 ${cfg.enabled ? "text-violet-600" : "text-muted-foreground"}`} />
           <div>
-            <p className="text-sm font-semibold leading-tight">{t("Model fallback approval")}</p>
-            <p className="text-xs text-muted-foreground mt-0.5">
+            <p className="font-semibold text-sm leading-tight">{t("Model fallback approval")}</p>
+            <p className="mt-0.5 text-muted-foreground text-xs">
               {tRich(
                 "Only commands inside the {scope} that {norule} are semantically judged by the model (allow / escalate to human / block)",
                 {
@@ -172,7 +172,7 @@ export function JudgeCard() {
           </div>
         </div>
         <div className="flex shrink-0 items-center gap-2">
-          <span className="text-xs text-muted-foreground">{cfg.enabled ? t("Enabled") : t("Disabled")}</span>
+          <span className="text-muted-foreground text-xs">{cfg.enabled ? t("Enabled") : t("Disabled")}</span>
           <Switch
             checked={cfg.enabled}
             disabled={loading || !canAdmin}
@@ -187,8 +187,8 @@ export function JudgeCard() {
           <CardContent className="p-4">
             <div className="mb-3 flex items-center justify-between">
               <div>
-                <p className="text-sm font-medium">{t("Approval token consumption")}</p>
-                <p className="text-xs text-muted-foreground">
+                <p className="font-medium text-sm">{t("Approval token consumption")}</p>
+                <p className="text-muted-foreground text-xs">
                   {t(
                     "Cumulative model fallback approval usage, metered separately (worker=judge), not mixed with per-model config stats",
                   )}
@@ -207,7 +207,7 @@ export function JudgeCard() {
             </div>
             {usage.daily.length > 0 && (
               <div className="mt-4">
-                <p className="mb-2 text-[10px] uppercase tracking-wider text-muted-foreground">
+                <p className="mb-2 text-[10px] text-muted-foreground uppercase tracking-wider">
                   {t("Daily consumption over the last 30 days (input + output)")}
                 </p>
                 <JudgeSparkbars daily={usage.daily} />
@@ -224,8 +224,8 @@ export function JudgeCard() {
             <CardContent className="flex h-full flex-col gap-2 p-4">
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-sm font-medium">{t("Approval prompt")}</p>
-                  <p className="text-xs text-muted-foreground">
+                  <p className="font-medium text-sm">{t("Approval prompt")}</p>
+                  <p className="text-muted-foreground text-xs">
                     {t("The model decides ALLOW / ASK / DENY based on this; directly editable")}
                   </p>
                 </div>
@@ -253,7 +253,7 @@ export function JudgeCard() {
           <Card className="lg:col-span-2">
             <CardContent className="space-y-5 p-4">
               <div className="space-y-4">
-                <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                <p className="font-semibold text-[10px] text-muted-foreground uppercase tracking-wider">
                   {t("Judge model and policy")}
                 </p>
                 <Field label={t("Approval model")}>
@@ -315,7 +315,7 @@ export function JudgeCard() {
               <Separator />
 
               <div className="space-y-4">
-                <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                <p className="font-semibold text-[10px] text-muted-foreground uppercase tracking-wider">
                   {t('Human approval (when the model decides "ask")')}
                 </p>
                 <Field label={t("Approval wait timeout (seconds)")}>

@@ -15,6 +15,11 @@ import { t } from "@/i18n";
 export type TrafficDeleteMode = "filter" | "selected" | "all";
 
 // TrafficDeleteDialog confirms a host-scoped delete or the full purge.
+function confirmLabel(deleting: boolean, purging: boolean): string {
+  if (deleting) return purging ? t("Purging…") : t("Deleting…");
+  return purging ? t("Confirm purge") : t("Confirm delete");
+}
+
 export function TrafficDeleteDialog({
   mode,
   deleting,
@@ -65,25 +70,19 @@ export function TrafficDeleteDialog({
                 </span>
               </>
             )}
-            {mode === "selected" && (
-              <>
-                {t(
-                  "This will permanently delete all traffic records for {count} targets ({hosts}), including raw requests/responses. This action cannot be undone.",
-                  {
-                    count: selectedHosts.length,
-                    hosts: `${selectedHosts.slice(0, 3).join(", ")}${selectedHosts.length > 3 ? "…" : ""}`,
-                  },
-                )}
-              </>
-            )}
-            {mode === "filter" && (
-              <>
-                {t(
-                  "This will permanently delete all traffic records for hosts containing {host} (including raw requests/responses). This action cannot be undone.",
-                  { host: hostQ },
-                )}
-              </>
-            )}
+            {mode === "selected" &&
+              t(
+                "This will permanently delete all traffic records for {count} targets ({hosts}), including raw requests/responses. This action cannot be undone.",
+                {
+                  count: selectedHosts.length,
+                  hosts: `${selectedHosts.slice(0, 3).join(", ")}${selectedHosts.length > 3 ? "…" : ""}`,
+                },
+              )}
+            {mode === "filter" &&
+              t(
+                "This will permanently delete all traffic records for hosts containing {host} (including raw requests/responses). This action cannot be undone.",
+                { host: hostQ },
+              )}
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
@@ -96,7 +95,7 @@ export function TrafficDeleteDialog({
             disabled={deleting}
             className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
           >
-            {deleting ? (purging ? t("Purging…") : t("Deleting…")) : purging ? t("Confirm purge") : t("Confirm delete")}
+            {confirmLabel(deleting, purging)}
           </AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>

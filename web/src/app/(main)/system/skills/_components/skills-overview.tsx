@@ -2,7 +2,6 @@
 
 import * as React from "react";
 
-
 import { Badge } from "@/components/ui/badge";
 import { Label } from "@/components/ui/label";
 import { intlLocale, t } from "@/i18n";
@@ -38,7 +37,7 @@ export function SkillsOverview({
     const neverUsed = skills.filter((s) => s.calls === 0);
     const recent = skills
       .filter((s) => s.last_used)
-      .sort((a, b) => (a.last_used! < b.last_used! ? 1 : -1))
+      .sort((a, b) => ((a.last_used ?? "") < (b.last_used ?? "") ? 1 : -1))
       .slice(0, 6);
     const missingCalls = missing.reduce((n, m) => n + m.calls, 0);
     return {
@@ -55,7 +54,7 @@ export function SkillsOverview({
   if (skills.length === 0) {
     return (
       <div className="flex h-full items-center justify-center">
-        <p className="text-sm text-muted-foreground">
+        <p className="text-muted-foreground text-sm">
           {t('No skills yet — click "Create" or "Upload archive" on the left to get started')}
         </p>
       </div>
@@ -80,7 +79,7 @@ export function SkillsOverview({
   return (
     <div className="mx-auto w-full max-w-3xl space-y-6">
       <div>
-        <h2 className="text-base font-semibold">{t("Skill library overview")}</h2>
+        <h2 className="font-semibold text-base">{t("Skill library overview")}</h2>
         <p className="text-muted-foreground text-sm">
           {t(
             "Select a skill on the left to view details and call history, or get a quick picture of overall usage here.",
@@ -92,18 +91,18 @@ export function SkillsOverview({
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         {stats.map((s) => (
           <div key={s.label} className="rounded-lg border p-3">
-            <p className="text-2xl font-semibold tabular-nums">{s.value}</p>
-            <p className="text-xs font-medium">{s.label}</p>
-            {s.hint && <p className="text-muted-foreground mt-0.5 text-[11px]">{s.hint}</p>}
+            <p className="font-semibold text-2xl tabular-nums">{s.value}</p>
+            <p className="font-medium text-xs">{s.label}</p>
+            {s.hint && <p className="mt-0.5 text-[11px] text-muted-foreground">{s.hint}</p>}
           </div>
         ))}
       </div>
 
       {/* call ranking */}
       <div className="space-y-2">
-        <Label className="text-xs text-muted-foreground">{t("Call ranking")}</Label>
+        <Label className="text-muted-foreground text-xs">{t("Call ranking")}</Label>
         {agg.ranked.length === 0 ? (
-          <p className="text-muted-foreground rounded-lg border border-dashed p-4 text-center text-xs">
+          <p className="rounded-lg border border-dashed p-4 text-center text-muted-foreground text-xs">
             {t("No skill call records yet.")}
           </p>
         ) : (
@@ -124,7 +123,7 @@ export function SkillsOverview({
                     style={{ width: `${agg.topCalls > 0 ? (s.calls / agg.topCalls) * 100 : 0}%` }}
                   />
                 </span>
-                <span className="w-16 shrink-0 text-right text-xs tabular-nums text-muted-foreground">
+                <span className="w-16 shrink-0 text-right text-muted-foreground text-xs tabular-nums">
                   {t("{count} calls", { count: s.calls })}
                 </span>
               </button>
@@ -136,7 +135,7 @@ export function SkillsOverview({
       <div className="grid gap-6 sm:grid-cols-2">
         {/* recent calls */}
         <div className="space-y-2">
-          <Label className="text-xs text-muted-foreground">{t("Recent calls")}</Label>
+          <Label className="text-muted-foreground text-xs">{t("Recent calls")}</Label>
           {agg.recent.length === 0 ? (
             <p className="text-muted-foreground text-xs">{t("No records yet.")}</p>
           ) : (
@@ -151,7 +150,7 @@ export function SkillsOverview({
                   <span className="min-w-0 flex-1 truncate font-mono text-xs" title={s.name}>
                     {s.name}
                   </span>
-                  <span className="shrink-0 text-[11px] tabular-nums text-muted-foreground">
+                  <span className="shrink-0 text-[11px] text-muted-foreground tabular-nums">
                     {fmtTime(s.last_used)}
                   </span>
                 </button>
@@ -162,7 +161,7 @@ export function SkillsOverview({
 
         {/* unused (candidates for cleanup / exposure) */}
         <div className="space-y-2">
-          <Label className="text-xs text-muted-foreground">
+          <Label className="text-muted-foreground text-xs">
             {t("Unused skills")}
             {agg.neverUsed.length > 0 && <span className="ml-1 font-normal"> ({agg.neverUsed.length})</span>}
           </Label>
@@ -174,7 +173,7 @@ export function SkillsOverview({
                 <button key={s.name} type="button" onClick={() => onSelect(s.name)} title={s.name}>
                   <Badge
                     variant="outline"
-                    className="max-w-[12rem] cursor-pointer truncate font-mono text-xs font-normal hover:bg-muted"
+                    className="max-w-[12rem] cursor-pointer truncate font-mono font-normal text-xs hover:bg-muted"
                   >
                     {s.name}
                   </Badge>

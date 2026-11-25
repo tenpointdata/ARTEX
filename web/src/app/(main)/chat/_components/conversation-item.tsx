@@ -127,7 +127,7 @@ export const ConversationItem = React.memo(function ConversationItem({
               onCancelRename();
             }
           }}
-          className="border-input bg-background min-w-0 flex-1 rounded-md border px-2 py-1 text-sm"
+          className="min-w-0 flex-1 rounded-md border border-input bg-background px-2 py-1 text-sm"
         />
       ) : (
         <button
@@ -138,7 +138,7 @@ export const ConversationItem = React.memo(function ConversationItem({
           className="min-w-0 flex-1 rounded-md px-2 py-1.5 text-left"
         >
           <div className="flex min-w-0 items-center gap-1.5">
-            {pinned && <PinIcon className="text-primary size-3 shrink-0" aria-label={t("Pinned")} />}
+            {pinned && <PinIcon className="size-3 shrink-0 text-primary" aria-label={t("Pinned")} />}
             <div className="truncate text-sm">{conv.title || t("New conversation")}</div>
             {conv.running ? (
               <Badge variant="secondary" className="shrink-0 gap-1" title={t("Agent is running")}>
@@ -147,7 +147,7 @@ export const ConversationItem = React.memo(function ConversationItem({
               </Badge>
             ) : null}
           </div>
-          <div className="text-muted-foreground flex min-w-0 items-center gap-1 text-[11px]">
+          <div className="flex min-w-0 items-center gap-1 text-[11px] text-muted-foreground">
             {showAgent && (
               <>
                 <Bot className="size-3 shrink-0" />
@@ -173,7 +173,7 @@ export const ConversationItem = React.memo(function ConversationItem({
             <Button
               variant="ghost"
               size="icon-sm"
-              className="text-muted-foreground shrink-0"
+              className="shrink-0 text-muted-foreground"
               aria-label={t('Manage conversation "{title}"', { title: conv.title || t("New conversation") })}
             >
               <MoreHorizontalIcon />

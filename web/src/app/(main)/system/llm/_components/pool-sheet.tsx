@@ -16,10 +16,9 @@ import { t } from "@/i18n";
 import { api } from "@/lib/api";
 import { errorText } from "@/lib/api-errors";
 import { setVisibleInterval } from "@/lib/polling";
+import { rich } from "@/lib/rich-text";
 import type { LLMPoolMember, LLMPoolStatus, LLMProfile } from "@/lib/types";
 import { cn } from "@/lib/utils";
-
-import { rich } from "@/lib/rich-text";
 
 function cooldownText(secs: number) {
   if (secs <= 0) return "";
