@@ -1,6 +1,6 @@
 # HANDOFF.md — ARTEX
 
-**Last updated:** 2026-11-24 16:40 MST, by claude-code: c-548e8b (E7, now in review): worker nodes reach the control API (node RPC) over TLS with the CA pinned by default. Earlier hand-offs are under Deltas and in `ej handoff log`.
+**Last updated:** 2026-11-24 17:40 MST, by claude-code: c-6e9c74 live check of the E7 TLS proxy hop (helm template on/off, compose tcpdump): passes, no template fix; follow-up c-67993f. Earlier hand-offs are under Deltas and in `ej handoff log`.
 
 > Single entry point for whoever picks this up next (any agent or human), with no access to the
 > originating conversation. Read this first, then the sections of the code it points at.
@@ -58,6 +58,22 @@ See `docs/ARCHITECTURE.md` for the code-level map. Summary:
 - `docs/` — `ARCHITECTURE.md`, `OPS.md`, traffic docs, `RSI.md` (self-improvement governance contract).
 
 ## Current state
+
+**2026-11-24 — E7 TLS proxy hop live-checked (`c-6e9c74`) on branch `ej/20261124-163818-870578` @
+`1ee19398` (c-677166, not yet on main; it conflicts with main's c-d60149 squash #46 and must be rebased by
+its owner).** `helm template` (`docker run alpine/helm`) renders with `controlTLS.enabled` true and false,
+`helm lint` passes and kubeconform validates every manifest. TLS on: proxy `127.0.0.1:8788`, `proxy-tls` containerPort and Service
+targetPort 8789, worker `ARTEX_CONTROL_PROXY=https://<rel>-control-proxy:8789` +
+`ARTEX_CONTROL_PROXY_TLS_NAME=<rel>-control` (a SAN of the generated cert), NetworkPolicy port 8789.
+TLS off: `0.0.0.0:8788`, `http://…:8788`, policy port 8788. A custom `proxyTLSPort` and the
+certManager/secret sources also work; no template fix needed. Compose run (isolated project, distributed overlay,
+python `http.server` target, `tcpdump` in the control container's netns): a request from worker-1 through its
+relay with a scope token reached the target and was recorded under task 1. The worker→`artex:8789` leg
+carried 14.7 KB of TLS records only (SNI `artex`), with no request line, path, header, `Proxy-Authorization` or
+token. Without a token, or with an unknown one, the request is refused (502) through the relay, at the front
+directly and at plain `:8788`; dialling the front without the CA fails verification. Plaintext appears only
+on the control-internal loopback front→proxy leg. Caveats: the token row was inserted the way
+`remoteTaskProxy` does it (no LLM keys here), and this was one Docker host, not kind: card `c-67993f`.
 
 **2026-11-24 — TLS between worker nodes and the control node by default (`c-548e8b`, E7; in review).**
 Worker nodes reach the control API (node RPC) over **TLS with the CA pinned**: `ARTEX_CONTROL_CA`
@@ -260,8 +276,10 @@ body, through the versioned prompt API, and the starting bodies are restored aft
   pre-registration, adopted-lesson retire sync. Done = Postgres tests for each.
 - *(unclaimed)* — **RSI gate web UI** (M), card `c-936308`. Done = adopt/rollback from a proposals table in ≤2 clicks + password.
 
-- *(unclaimed)* — **E7: TLS on the worker→control proxy hop** (M), card `c-677166`. Done = a plain-HTTP
+- *(unclaimed)* — **E7: TLS on the worker→control proxy hop** (M), card `c-677166` — built on `ej/20261124-163818-870578`, live-checked (c-6e9c74); needs rebase onto main (#46) and review. Done = a plain-HTTP
   target request from a worker crosses the network inside TLS; Helm/compose default to it.
+- *(unclaimed)* — **E7: agent-driven TLS hop check on kind / multi-host** (S), card `c-67993f`. Done = an
+  LLM-driven worker task's traffic to `<rel>-control-proxy:8789` is TLS-only on a pod-network capture.
 
 **Human lane**
 - **First live run through the RSI gate** (card `c-772190`, after `c-f1518c`): propose → held-out
@@ -358,6 +376,14 @@ Card ids in brackets:
 
 ## Known issues and gotchas
 
+- **No helm binary here:** `docker run --rm -v "$PWD/deploy/helm/artex":/chart:ro alpine/helm:latest template rel /chart [--set …]`
+  (`lint` likewise); validate with `docker run -i ghcr.io/yannh/kubeconform -ignore-missing-schemas -`.
+- **Compose distributed overlay (c-677166) keeps the plain proxy on `0.0.0.0:8788`** for the host port, so it
+  is reachable unencrypted on the Docker network. It refuses token-less clients (checked live), but a worker
+  set to `ARTEX_CONTROL_PROXY=http://artex:8788` would send traffic and token in clear (it logs a WARNING).
+- **Live-testing beside another stack:** `docker compose -p <name>` with an override that `!reset`s `ports`
+  and the `./data`/`./keys` mounts and uses its own image tag (others run `artex:local`). A kind cluster
+  `artex-e7` may be running; leave it alone.
 - **`next dev` writes `web/AGENTS.md`** (Next 16 agent rules) on start. Delete it before committing; it
   is not this repo's file.
 - **SSE in dev goes through the Next rewrite** (`/api/*` → `AUTOPENTEST_API`, default :8787). Keep
