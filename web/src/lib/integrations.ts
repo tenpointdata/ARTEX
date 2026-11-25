@@ -20,6 +20,15 @@ export const PUSH_BATCH = 200;
 // The server-side option every tracker config may carry (server/ticket_api.go trackerOptionKeys).
 export const INCLUDE_EVIDENCE = "include_evidence";
 
+// Tracker kinds that accept signed push updates (ticketing.Webhooks), and the
+// route they post to (server/ticket_webhook.go ticketWebhookPrefix).
+export const WEBHOOK_KINDS: ReadonlySet<string> = new Set(["github", "jira"]);
+export const WEBHOOK_SECRET = "webhook_secret";
+
+export function webhookURL(origin: string, trackerId: number): string {
+  return `${origin.replace(/\/+$/, "")}/api/hooks/trackers/${trackerId}`;
+}
+
 export function evidenceEnabled(config: ConfigValues): boolean {
   return config[INCLUDE_EVIDENCE] === true;
 }
