@@ -59,6 +59,12 @@ See `docs/ARCHITECTURE.md` for the code-level map. Summary:
 
 ## Current state
 
+**2026-11-24 — Stale `worker_nodes` rows pruned (`c-597b06`, E7; in review).** Under Kubernetes the
+node id is the pod name, so each rollout left dead rows. `db.NodeRetention` (20 × NodeTTL = 15 min):
+`ListNodes` hides older rows and every node heartbeat runs `PruneNodes` (`db/worker_nodes.go`,
+`server/node.go`). Test `db/worker_nodes_test.go` passes on Postgres 18; documented in
+`docs/DISTRIBUTED.md` ("Node registry"). Not re-run on a kind cluster.
+
 **2026-11-24 — TLS between worker nodes and the control node by default (`c-548e8b`, E7; in review).**
 Worker nodes reach the control API (node RPC) over **TLS with the CA pinned**: `ARTEX_CONTROL_CA`
 (`server/node_tls.go`) makes the worker accept only `https://` and trust only that CA, never the system
@@ -133,36 +139,9 @@ switches between them and reads each one's findings and report; all 51 `/api` re
 
 **2026-11-24 — E5 web UI (`c-869050`, in review).** Detail moved to `docs/handoff/2026-11-24-e5-web-ui.md`.
 
-**2026-11-24 (c-d25ff9, E3)** — The `RSI.md` Loop C benchmark gate and Loop B lesson graduation are built,
-flag off (`ARTEX_RSI_LOOP`, default off, read per request). Pure core `rsi/` (search-space allowlist:
-`prompt_body` for goals/planner/worker and `lesson`; immutable and git-reviewed surfaces refused;
-annealed budget 4,2,1,1…; `Evaluate` recomputes per-gate and paired results from raw E8 arm records,
-binds them to the exact body sha / lesson set, refuses proposed-from targets, net regressions and
-gains on fewer than 2 targets). API `/api/rsi/*` (`server/rsi_loop.go`); migration **0020**
-(`rsi_proposals`, `rsi_proposal_evidence`, append-only `rsi_adoption_log`). Adoption = owner
-password + newest passing evidence id + evidence baseline equal to the live prompt; it appends an
-`agent_prompts` version; rollback is a pointer change (refused if an owner edited since, open
-with the flag off). `ARTEX_RSI_LESSONS` gains `adopted` (only graduated lessons) and `bench` (a
-pinned set, `PUT /api/rsi/bench-lessons`). This branch merges the unmerged E8 suite branch
-(`ej/20261124-084655-ccdab2`); harness gains lesson arms and `scripts/benchmark/rsi_submit.py`.
-An adversarial review (opus) found real-upload breakage (string task ids) and replay/forgery
-paths; fixed here: task ledger across proposals, `suite_run` invariant, 3 uploads per proposal,
-crashed candidate runs count as losses, rendered + normalized marker checks, ≤4 open proposals
-with forward-only rounds, split agent lock, lesson block sha and unedited-role shas re-checked at
-adoption. Remaining findings: `c-0d277f`. Verified: `go test ./rsi`, the RSI DB and server tests
-against Postgres 16, 65 benchmark Python tests, `scripts/verify.sh`. Not verified: any live suite run through the gate (`c-772190`); no UI
-(`c-936308`).
+**2026-11-24 (c-d25ff9, E3)** — RSI Loop C gate and Loop B lesson graduation built, flag off (`ARTEX_RSI_LOOP`). Detail moved to `docs/handoff/2026-11-24-e3-rsi-loops.md`.
 
-**2026-11-24 (c-c0bb07, E4)** — Methodology-driven coverage: OWASP WSTG 4.2 (97 tests) and the OWASP
-API Security Top 10 2023 are typed checklists in `methodology/` (data in `methodology/data/*.json`,
-embedded and validated). A task's applicable checklists come from its goal and description (no
-column). `db/coverage_methodology.go` scores them from the coverage ledger, findings (vulnclass)
-and intents citing an item (`payload.methodology_item`). The planner gets a `[Methodology coverage]`
-block each round, and `add_intent` takes `methodology_item`, which is validated and stored as the
-canonical item id. `GET /api/tasks/{id}/coverage` returns `methodologies`, and the task overview's
-coverage card shows a filterable table of the items. Verified by the methodology, agent and
-db unit tests, a Postgres integration test (`TestMethodologyCoverage`), `tsc` and `scripts/verify.sh`.
-The UI was not checked in a browser.
+**2026-11-24 (c-c0bb07, E4)** — OWASP WSTG 4.2 and API Top 10 2023 checklists drive coverage (`methodology/`). Detail moved to `docs/handoff/2026-11-24-e4-methodology-coverage.md`.
 
 **2026-11-24 (c-75c593)** — The benchmark subject instance (`docker-compose.bench.yml`) now builds from a
 clean clone: production `Dockerfile`, a sibling Postgres, named volumes, committed `bench/.env.example`
