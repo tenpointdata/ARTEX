@@ -380,7 +380,7 @@ Card ids in brackets:
   expected rows from the embedded files, so adding a migration needs no test edit. As of 2026-11-24 17:40
   main's newest is **0024** (`0024_code_security_lane`, E10, landed); still to renumber when they land:
   `0017_finding_classification` (E1, 083744-02fa3c), `0021_lesson_scope_scrub` (131958/140001/144555),
-  `0023_finding_import_links` (150542-76d507), `0023_change_notify` (170157-3aeba5), and one of the two
+  `0023_finding_import_links` (150542-76d507), and one of the two
   `0026`s (`0026_task_drain_acks` on 164948/165722 vs `0026_rsi_arm_ledger` on 165538). `0025_session_transcripts`
   is fine if it lands before any other 0025. `0023_integrations` (150533-1ba29e) is E2's file, already
   on main as 0015: drop it (see the E2/E10 bullet below).
