@@ -85,7 +85,7 @@ async function probeRole(browser, role, user, pages) {
   const judge = (method, url) => {
     const p = new URL(url).pathname;
     const need = permOf(method, p);
-    if (perms && need && !perms.includes(need)) denied.push({ need, method, path: p, where });
+    if (perms && need && !perms.includes(need)) denied.push({ need, method, path: p, route: routeOf(method, p), where });
   };
   await page.route("**/api/**", async (route) => {
     const req = route.request();
@@ -132,8 +132,28 @@ async function probeRole(browser, role, user, pages) {
     clicks += await explore(page, pg, (w) => { where = w; });
     if (shots) await page.screenshot({ path: path.join(shots, `${role}-${pg.path.replace(/\W+/g, "_")}.png`) }).catch(() => {});
   }
+  // The traffic sheet's stream view of the recorded WebSocket. Raw traffic needs
+  // operate: a role with it must see the messages; any other role must get there
+  // without a 4xx (the response check above) or not at all.
+  where = "/function/traffic :: WebSocket stream view";
+  const stream = await streamView(page);
+  if (perms.includes("operate")) check(`${role}: the WebSocket exchange's stream view shows its messages`, stream === "shows", stream);
+  else console.log(`  ${role}: WebSocket stream view: ${stream}`);
   await ctx.close();
-  return { role, sidebar, bad, denied, errors, clicks };
+  return { role, sidebar, bad, denied, errors, clicks, stream };
+}
+
+// Opens the WebSocket exchange on the traffic page and its Stream tab; says what it found.
+async function streamView(page) {
+  await page.goto(`${base}/function/traffic`, { waitUntil: "networkidle", timeout: 60000 }).catch(() => {});
+  const row = page.locator("tbody tr", { hasText: "ws://" }).first();
+  if (!(await row.count())) return "no WebSocket row listed";
+  await row.click({ timeout: 3000 }).catch(() => {});
+  const tab = page.getByRole("tab", { name: /Stream/ }).first();
+  if (!(await tab.waitFor({ timeout: 8000 }).then(() => true, () => false))) return "the sheet has no Stream tab";
+  await tab.click({ timeout: 3000 }).catch(() => {});
+  const shown = await page.getByText("probe-hello").first().waitFor({ timeout: 8000 }).then(() => true, () => false);
+  return shown ? "shows" : "Stream tab without the messages";
 }
 
 // Clicks every enabled control on the page once (deduped by scope and name), the
@@ -179,6 +199,25 @@ async function explore(page, pg, setWhere) {
 
 let rules = [];
 
+// routeOf names the policy rule a request falls under (its path), or the request path
+// with numeric segments collapsed when the default permission applies.
+function routeOf(method, p) {
+  const r = policy.matchRule(rules, method, p);
+  const below = r && r.prefix && policy.pathSegments(p).length > policy.pathSegments(r.path).length;
+  return r ? r.path + (below ? "/…" : "") : p.replace(/\/\d+(?=\/|$)/g, "/{id}");
+}
+
+// group folds findings that share key(x) into one line with a count and first example.
+function group(xs, key) {
+  const m = new Map();
+  for (const x of xs) {
+    const k = key(x);
+    if (m.has(k)) m.get(k).n++;
+    else m.set(k, { ...x, n: 1 });
+  }
+  return [...m.values()];
+}
+
 (async () => {
   rules = policy.load();
   check("rbac policy parsed from server/rbac_policy.go", rules.length > 10, `${rules.length} rules`);
@@ -210,13 +249,15 @@ let rules = [];
 
     const results = await Promise.all(roles.map((r) => probeRole(browser, r, s.users[r], pages)));
     for (const r of results) {
-      const dedupe = (xs, k) => [...new Map(xs.map((x) => [k(x), x])).values()];
-      const bad = dedupe(r.bad, (b) => `${b.status} ${b.method} ${b.path.split("?")[0]}`);
-      const denied = dedupe(r.denied, (d) => `${d.method} ${d.path} ${d.where.split(" :: ")[0]}`);
+      const pageOf = (w) => w.split(" :: ")[0];
+      const bad = group(r.bad, (b) => `${b.status} ${b.method} ${routeOf(b.method, b.path.split("?")[0])} ${pageOf(b.where)}`);
+      const denied = group(r.denied, (d) => `${d.method} ${d.route} ${pageOf(d.where)}`);
+      const times = (n) => (n > 1 ? ` (x${n})` : "");
       check(`${r.role}: no /api response >= 400 (${r.clicks} controls clicked)`, bad.length === 0,
-        bad.map((b) => `\n    ${b.status} ${b.method} ${b.path}  @ ${b.where}`).join(""));
+        bad.map((b) => `\n    ${b.status} ${b.method} ${b.path}${times(b.n)}  @ ${b.where}`).join(""));
       check(`${r.role}: no request needs a permission the role lacks`, denied.length === 0,
-        denied.map((d) => `\n    needs ${d.need}: ${d.method} ${d.path}  @ ${d.where}`).join(""));
+        denied.map((d) => `\n    needs ${d.need}: ${d.method} ${d.route}${times(d.n)}  @ ${d.where}`).join(""));
+      if (shots) fs.writeFileSync(path.join(shots, `role-probe-${r.role}.json`), JSON.stringify({ ...r, bad, denied }, null, 1));
       if (r.errors.length) console.log(`  ${r.role}: ${r.errors.length} page errors (not failures), first: ${r.errors.slice(0, 3).join(" | ")}`);
     }
   } finally {

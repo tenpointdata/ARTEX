@@ -73,11 +73,18 @@ function pathMatches(rule, segs) {
   return segs.length === pat.length || rule.prefix;
 }
 
-function requiredPermission(rules, method, urlPath) {
+// matchRule is the rule that decides (method, urlPath), or null when the default applies.
+function matchRule(rules, method, urlPath) {
   const m = method.toUpperCase();
   const segs = pathSegments(urlPath);
-  for (const r of rules) if (methodMatches(r, m) && pathMatches(r, segs)) return r.need;
+  return rules.find((r) => methodMatches(r, m) && pathMatches(r, segs)) || null;
+}
+
+function requiredPermission(rules, method, urlPath) {
+  const r = matchRule(rules, method, urlPath);
+  if (r) return r.need;
+  const m = method.toUpperCase();
   return m === "GET" || m === "HEAD" ? "read" : "operate";
 }
 
-module.exports = { load, requiredPermission, pathSegments };
+module.exports = { load, matchRule, requiredPermission, pathSegments };

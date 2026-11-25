@@ -1,7 +1,7 @@
 // Seeds one row of each kind the role probe (role-probe-e2e.js) opens, through the
 // admin API (`api`, a fetch bound to an admin browser session) and psql (`dsn`, a
-// throwaway database). Tasks, findings and pending approvals go in with SQL so no
-// agent ever starts. The WebSocket exchange is recorded through the real proxy.
+// throwaway database). Findings and pending approvals go in with SQL; the task
+// through the API, created before any LLM profile exists and paused (see seed()). The WebSocket exchange is recorded through the real proxy.
 //
 // Returns { users, companyId, taskId, findingId, agentKey, wsUrl }; throws on any
 // seed that fails, so the probe never runs against a half-seeded instance.
@@ -49,6 +49,18 @@ async function seed({ api, dsn, proxy, log = () => {} }) {
   const companyId = Number(company.id ?? company.company?.id);
   if (!companyId) throw new Error(`seed company: no id in ${JSON.stringify(company).slice(0, 200)}`);
 
+  // The task goes in through the API (the Manager keeps tasks in memory; a row
+  // inserted with SQL stays invisible to it) before any LLM profile exists, so the
+  // engine has no model to call, and is paused at once. The profile seeded below
+  // points at a closed loopback port: no agent ever runs.
+  const task = await post("task", "/api/tasks", {
+    name: "Probe task", description: "role probe",
+    goal: "[targetless] Role probe seed task: never runs; it exists so the console's task detail page has a row to show.", company_ids: [companyId], coverage_enabled: false,
+  });
+  const taskId = Number(task.id);
+  if (!taskId) throw new Error(`seed task: no id in ${JSON.stringify(task).slice(0, 200)}`);
+  await post("task pause", `/api/tasks/${taskId}/control`, { action: "pause" }).catch((e) => log(`task pause skipped: ${e.message}`));
+
   const users = {};
   for (const [key, u] of Object.entries(USERS)) {
     const made = await post(`user ${u.username}`, "/api/users", u);
@@ -86,12 +98,6 @@ async function seed({ api, dsn, proxy, log = () => {} }) {
     name: "probe-rule", enabled: false, priority: 1, match_target: "tool_name", match_type: "string", pattern: "bash", action: "ask", message: "probe",
   });
 
-  // A task that never runs (status created, nothing queued), its finding, and approvals.
-  const taskId = Number(sql(
-    `WITH e AS (INSERT INTO explorations (goal) VALUES ('probe goal') RETURNING id)
-     INSERT INTO tasks (name, description, goal, exploration_id, company_id)
-     SELECT 'Probe task', 'role probe', 'probe goal', e.id, ${companyId} FROM e RETURNING id`,
-  ));
   const findingId = Number(sql(
     `INSERT INTO findings (task_id, name, vulnclass, severity, status, summary, evidence)
      VALUES (${taskId}, 'Probe finding', 'xss', 'medium', 'pending', 'probe summary', 'probe evidence') RETURNING id`,

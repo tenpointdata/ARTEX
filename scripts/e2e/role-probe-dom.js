@@ -9,7 +9,8 @@ const OVERLAY = "[role=dialog]:visible, [role=alertdialog]:visible, [role=menu]:
 // are navigation, not controls, and are left out, as is the display-preferences
 // popover (language, theme, layout: browser-local state, no /api request). Each control is tagged with
 // data-probe-id so the caller can click it; key = scope + kind + accessible name, so
-// one of each repeated row button is clicked, not every row's.
+// one of each repeated row button is clicked, not every row's. Clickable table rows
+// count too (the first two of each table).
 function inventory() {
   const SEL = 'button, [role=button], [role=menuitem], [role=menuitemcheckbox], [role=menuitemradio], [role=switch], ' +
     '[role=checkbox], [role=tab], [role=option], [role=combobox], input, textarea, select';
@@ -39,6 +40,14 @@ function inventory() {
       const fill = (tag === "input" && !["checkbox", "radio", "button", "submit", "reset", "range", "color"].includes(type)) || tag === "textarea";
       if (!el.dataset.probeId) el.dataset.probeId = String(n++);
       out.push({ id: el.dataset.probeId, key: `${scopeOf(el)} ${kind} "${name}"`, name, type, disabled, fill });
+    }
+    // Clickable table rows (they open sheets and detail pages): the first two per table.
+    for (const table of root.querySelectorAll("table")) {
+      const label = table.getAttribute("aria-label") || (table.querySelector("thead")?.innerText || "").replace(/\s+/g, " ").trim().slice(0, 40);
+      [...table.querySelectorAll("tbody tr")].filter((tr) => visible(tr) && getComputedStyle(tr).cursor === "pointer").slice(0, 2).forEach((tr, i) => {
+        if (!tr.dataset.probeId) tr.dataset.probeId = String(n++);
+        out.push({ id: tr.dataset.probeId, key: `${scopeOf(tr)} tr "${label}" #${i}`, name: `row ${i}`, type: "", disabled: false, fill: false });
+      });
     }
   }
   document.body.dataset.probeNext = String(n);
