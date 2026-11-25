@@ -172,6 +172,8 @@ func TestRBACPolicyByRole(t *testing.T) {
 		{"GET", "/api/traffic/blob", permOperate},
 		{"GET", "/api/traffic/export/har", permOperate},
 		{"GET", "/api/traffic/stream", permOperate},
+		{"POST", "/api/traffic/bulk-delete", permOperate},
+		{"POST", "/api/traffic/bulk-export", permOperate},
 		{"GET", "/api/conversations/3/messages/7", permOperate},
 		{"GET", "/api/traffic/hosts", permRead},
 		{"GET", "/api/intercept/history/chain", permRead},
