@@ -59,14 +59,10 @@ See `docs/ARCHITECTURE.md` for the code-level map. Summary:
 
 ## Current state
 
-**2026-11-24 — Finding detail hides controls the role is refused (`c-81193b`; in review).** Severity,
-triage status and report stage pickers need `review`; Start retest, Link traffic (and edit/reorder/remove)
-and the retest session links need `operate` (`server/rbac_policy.go`). `FindingRetestPanel` and
-`FindingTrafficPanel` gate themselves with `useCan`, so every consumer is covered. The branch merges the
-c-119206 branch (`ej/20261124-171041-463f80`, not yet on main), so landing it lands c-119206 too; its
-imports-page conflict with main's Lanes/anchor work was resolved by re-applying the `canImport` gate.
-`scripts/e2e/integrations.sh` passes 51 checks, including the new reviewer/client detail probes in
-`roles-e2e.js`; it also needed a locator fix after main's Lanes column.
+**2026-11-24 — Finding detail hides controls the role is refused (`c-81193b`; in review).** Triage pickers
+need `review`; Start retest, Link traffic and retest session links need `operate`; the retest and traffic panels
+gate themselves with `useCan`. The branch merges c-119206's (`ej/20261124-171041-463f80`), so landing it lands
+both. `scripts/e2e/integrations.sh` passes 51 checks.
 
 **2026-11-24 — Stale `worker_nodes` rows pruned (`c-597b06`, E7; in review).** Under Kubernetes the
 node id is the pod name, so each rollout left dead rows. `db.NodeRetention` (20 × NodeTTL = 15 min):
@@ -168,41 +164,11 @@ With `ARTEX_PG_DSN`, `go test ./...` fails only `TestGateOffTaskIsUnchanged` (`c
 
 **2026-11-24 — client_read bound to companies (card `c-5b5421`, in review).** Detail (branch, verification, gaps) moved to `docs/handoff/2026-11-24-client-read-company-bindings.md`.
 
-**2026-11-23** — Fixes for the High and Medium findings from the 2026-11-23 security audit are on
-`main` (PR #1, branch `ej/20261123-145205-6a3af6`); the Linux/Docker verification fixes come from
-`ej/20261123-152406-fccff3`. It covers audit findings #1–#16 except as listed under Open work.
-Verified 2026-11-23 (card `c-dadc14`, done):
-- `go vet ./...` + `go test ./...` **as root on Linux** (golang:1.26.11-bookworm, arm64) with
-  `ARTEX_PG_DSN` set: all packages ok, including the `*AsRoot` executor/isolation tests,
-  `TestExecHomePerRunDirAsRoot` and the MCP uid-10002 split. Two test fixes were needed (commit
-  `fc8c3f9`): the isolation probe could not exec the `go test` binary from its 0700 build dir (also
-  broken on main), and `TestGateOffTaskIsUnchanged` still expected zero lookups with the gate off.
-- Docker egress: through the real `docker-compose.yml` (NET_ADMIN) on a slim image of the same
-  runtime base, `[artex] egress: installed` is logged, `-m owner`/`-m addrtype` load on bookworm's
-  nf_tables iptables 1.8.9, and the executor is refused for 169.254.169.254, 100.100.100.200, the
-  gateway, host.docker.internal (root reaches the host service) and :8787 on every local address,
-  while a LAN router, another container and the internet stay reachable. The full image gives the
-  same results (2026-11-24, `c-a6891b`, below).
-- Web: `npm ci` and `npx tsc --noEmit` clean. `npm run lint` fails with 84 errors, all already on main
-  and none in the changed files (`c-834a5a`). Headless Chromium: setup, login, Sign out over the
-  HttpOnly SameSite=Strict cookie work and `document.cookie` is empty, **but a token copied before
-  logout stays valid for 7 days** (`c-a0af33`).
-- The stock compose cannot start on Docker Desktop for Mac: bind mounts ignore permissions, so the
-  isolation self-test fails closed (also on main; `c-775dc2`). Use named volumes there.
+**2026-11-23** — Security-audit High/Medium fixes are on `main` (PR #1). Detail moved to `docs/handoff/2026-11-24-state-archive.md`.
 
 Operator-facing changes from that audit (unsandboxed-start refusal, TLS on non-loopback binds, and more): `docs/handoff/2026-11-23-security-audit-operator-changes.md`.
 
-**2026-11-24: full Docker image verified (card `c-a6891b`).** The complete image (bbot, chromium,
-Playwright) built from `1abe24f` with the committed Dockerfile on Docker Desktop arm64 in 34 min. The
-bbot layer's own dry-run grep passed: trufflehog installed cleanly this time, with no ERRR. Run through
-`docker-compose.yml` with named volumes, it logs `[artex] egress: installed for uid 10001 (ipv4)…(ipv6)`
-and the isolation self-test passes. Checked with `scripts/docker-egress-probe.sh` (new): the executor
-gets REJECT on 169.254.169.254, 127.0.0.1:8787, the container IP's :8787 and host.docker.internal; root
-reaches all of them except metadata, which Docker Desktop doesn't serve (timeout). Both reach the LAN
-router and example.com. `scripts/docker-login-probe.js` (new, uses the image's Playwright) passes
-login, HttpOnly + SameSite=Strict cookie, token hidden from scripts, Sign out → /login and 401. Replaying
-the pre-logout cookie still gets 200 because revocation (`c-a0af33`) is not on main yet. Not re-run on
-the newer main (`-exec-uid-range`, #18).
+**2026-11-24: full Docker image verified (card `c-a6891b`).** Detail moved to `docs/handoff/2026-11-24-state-archive.md`.
 
 **2026-11-24: E8 evaluation suite** (card `c-5487e8`) is in `scripts/benchmark`. `eval_suite.py run` runs a
 baseline and a candidate prompt arm over a held-out suite. Both arms share one stamp: model chain, schedule
