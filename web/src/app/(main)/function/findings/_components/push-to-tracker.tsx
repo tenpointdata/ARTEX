@@ -5,6 +5,7 @@ import * as React from "react";
 import { toast } from "sonner";
 
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { useCan } from "@/hooks/use-session";
 import { t } from "@/i18n";
 import { pushableFindingIds, summarizePush } from "@/lib/integrations";
 import { integrationsApi } from "@/lib/integrations-api";
@@ -42,8 +43,9 @@ export function PushToTrackerSelect({
   onPushed?: (results: TicketPushResult[]) => void;
   className?: string;
 }) {
+  const canOperate = useCan("operate"); // POST /api/integrations/trackers/{id}/push
   const [busy, setBusy] = React.useState(false);
-  if (trackers.length === 0) return null;
+  if (trackers.length === 0 || !canOperate) return null;
 
   async function push(trackerId: number) {
     const ids = pushableFindingIds(findingIds);

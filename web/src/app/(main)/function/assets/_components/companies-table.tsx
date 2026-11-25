@@ -1,15 +1,14 @@
 "use client";
 
-import { Trash2Icon } from "lucide-react";
-
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { useCan } from "@/hooks/use-session";
 import { t } from "@/i18n";
 import type { Company } from "@/lib/types";
 
 import { AppendScopeDialog, CompanyAvatar, EditScopeDialog } from "./company-dialogs";
+import { RowDeleteButton } from "./row-delete-button";
 
 export function CompaniesTable({
   companies,
@@ -20,6 +19,7 @@ export function CompaniesTable({
   onSaved: () => void;
   onDelete: (c: Company) => void;
 }) {
+  const canOperate = useCan("operate"); // scope edits and company deletes
   return (
     <Card className="flex min-h-0 flex-1 flex-col overflow-hidden py-0">
       <div className="min-h-0 flex-1 overflow-auto">
@@ -57,17 +57,9 @@ export function CompaniesTable({
                 </TableCell>
                 <TableCell className="text-right">
                   <div className="flex items-center justify-end gap-1.5">
-                    <EditScopeDialog company={c} onSaved={onSaved} />
-                    <AppendScopeDialog company={c} onSaved={onSaved} />
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="size-7 text-muted-foreground hover:text-destructive"
-                      onClick={() => onDelete(c)}
-                      aria-label={t("Delete company {name}", { name: c.name })}
-                    >
-                      <Trash2Icon className="size-3.5" />
-                    </Button>
+                    {canOperate && <EditScopeDialog company={c} onSaved={onSaved} />}
+                    {canOperate && <AppendScopeDialog company={c} onSaved={onSaved} />}
+                    <RowDeleteButton label={t("Delete company {name}", { name: c.name })} onClick={() => onDelete(c)} />
                   </div>
                 </TableCell>
               </TableRow>

@@ -9,6 +9,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Kbd } from "@/components/ui/kbd";
+import { useCan } from "@/hooks/use-session";
 import { intlLocale, t } from "@/i18n";
 import { api } from "@/lib/api";
 import { APPROVAL_VERDICTS, type ApprovalDecision } from "@/lib/triage";
@@ -343,7 +344,8 @@ export function DecisionActions({
   decide: Decide;
   shortcuts?: boolean;
 }) {
-  if (row.status !== "pending") return null;
+  const canReview = useCan("review"); // deciding needs the review permission
+  if (row.status !== "pending" || !canReview) return null;
   const keyOf = (decision: ApprovalDecision) => APPROVAL_VERDICTS.find((v) => v.status === decision)?.key ?? "";
   return (
     <div className="flex flex-wrap gap-2">
@@ -375,6 +377,7 @@ export function DecisionActions({
 // AlwaysAllowAction creates an argv allow rule from a pending Bash request.
 // The prefix comes from the server; the request itself stays pending.
 export function AlwaysAllowAction({ id, prefix }: { id: number; prefix?: string }) {
+  const canAdmin = useCan("admin"); // creating an intercept rule is an admin action
   const [busy, setBusy] = React.useState(false);
   async function create() {
     setBusy(true);
@@ -391,6 +394,7 @@ export function AlwaysAllowAction({ id, prefix }: { id: number; prefix?: string 
       setBusy(false);
     }
   }
+  if (!canAdmin) return null;
   return (
     <div className="flex flex-col gap-1">
       <Button size="sm" variant="outline" className="self-start" disabled={busy} onClick={() => void create()}>

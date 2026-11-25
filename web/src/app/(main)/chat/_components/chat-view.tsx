@@ -9,6 +9,7 @@ import { TodoPopover } from "@/components/todo-popover";
 import { Transcript } from "@/components/transcript";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { useCan } from "@/hooks/use-session";
 import { useSideQuestions } from "@/hooks/use-side-questions";
 import { t } from "@/i18n";
 import { mergeActivities } from "@/lib/activity-merge";
@@ -49,6 +50,7 @@ export function ChatView({
   onTitleMaybeChanged: () => void;
   onConvUpdated: () => void;
 }) {
+  const canOperate = useCan("operate"); // messages, send, stop and profile switching all need operate
   const approvalFocus = useApprovalFocus({ conversationId: conv.id });
   const [messages, setMessages] = React.useState<Activity[]>([]);
   const [running, setRunning] = React.useState(false);
@@ -102,6 +104,10 @@ export function ChatView({
     setMessages([]);
     setHistoryLoaded(false);
     setRunning(false);
+    if (!canOperate) {
+      setHistoryLoaded(true); // GET messages needs operate: skip rather than show a 403
+      return;
+    }
     let live = true;
     api
       .conversationHistory(conv.id, 0, HISTORY_PAGE)
@@ -123,7 +129,7 @@ export function ChatView({
     return () => {
       live = false;
     };
-  }, [conv.id]);
+  }, [conv.id, canOperate]);
 
   // A trigger or another tab may start a turn while this conversation is open.
   // A false list snapshot must not stop the tail before its final messages load.
@@ -133,7 +139,7 @@ export function ChatView({
 
   // poll while a turn is running: pull new steps after the cursor.
   React.useEffect(() => {
-    if (!running) return;
+    if (!running || !canOperate) return;
     let live = true;
     let timer: ReturnType<typeof setTimeout>;
     const tick = async () => {
@@ -160,7 +166,7 @@ export function ChatView({
       live = false;
       clearTimeout(timer);
     };
-  }, [running, conv.id, onTitleMaybeChanged]);
+  }, [running, canOperate, conv.id, onTitleMaybeChanged]);
 
   const loadFocusPage = React.useCallback(
     (before: number) => api.conversationHistory(conv.id, before, HISTORY_PAGE),
@@ -365,7 +371,9 @@ export function ChatView({
         <div className="min-w-0 max-w-full px-4 py-3" ref={contentRef}>
           {messages.length === 0 && !running ? (
             <div className="text-muted-foreground py-10 text-center text-sm">
-              {t('Start a conversation with "{name}"', { name: agent?.name ?? conv.agent_key })}
+              {canOperate
+                ? t('Start a conversation with "{name}"', { name: agent?.name ?? conv.agent_key })
+                : t("Conversation messages are only available to operators.")}
             </div>
           ) : (
             <>
@@ -386,32 +394,36 @@ export function ChatView({
         </div>
       </ScrollArea>
 
-      <Composer
-        value={input}
-        onChange={setInput}
-        onSend={send}
-        disabled={running || sending}
-        allowBtw
-        placeholder={
-          running
-            ? t("Agent is replying; type /btw to ask a side question…")
-            : t("Type a message, @ to reference records, Enter to send")
-        }
-        running={running}
-        onStop={stop}
-        stopDisabled={stopping}
-        attachments={attachments}
-        onPickFiles={pickFiles}
-        onRemoveAttachment={(path) => setAttachments((p) => p.filter((x) => x.path !== path))}
-        uploading={uploading}
-      />
-      <LLMProfileRow
-        profiles={profiles}
-        selected={currentProfileId}
-        onChange={changeProfile}
-        disabled={running || sending}
-        rightSlot={<TodoPopover seq={latestTodoSeq} fetchDetail={fetchDetail} />}
-      />
+      {canOperate && (
+        <>
+          <Composer
+            value={input}
+            onChange={setInput}
+            onSend={send}
+            disabled={running || sending}
+            allowBtw
+            placeholder={
+              running
+                ? t("Agent is replying; type /btw to ask a side question…")
+                : t("Type a message, @ to reference records, Enter to send")
+            }
+            running={running}
+            onStop={stop}
+            stopDisabled={stopping}
+            attachments={attachments}
+            onPickFiles={pickFiles}
+            onRemoveAttachment={(path) => setAttachments((p) => p.filter((x) => x.path !== path))}
+            uploading={uploading}
+          />
+          <LLMProfileRow
+            profiles={profiles}
+            selected={currentProfileId}
+            onChange={changeProfile}
+            disabled={running || sending}
+            rightSlot={<TodoPopover seq={latestTodoSeq} fetchDetail={fetchDetail} />}
+          />
+        </>
+      )}
     </SideQuestionWorkspace>
   );
 }

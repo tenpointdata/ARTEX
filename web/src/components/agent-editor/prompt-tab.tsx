@@ -23,6 +23,7 @@ import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { useCan } from "@/hooks/use-session";
 import { intlLocale, t } from "@/i18n";
 import type { AgentDetail, PromptVar, PromptVersion } from "@/lib/types";
 
@@ -85,12 +86,13 @@ export function PromptTab(p: PromptTabProps) {
     savePrompt,
     resetPrompt,
   } = p;
+  const canAdmin = useCan("admin"); // saving config / prompts needs admin; others get a read-only view
   const [viewVer, setViewVer] = React.useState<PromptVersion | null>(null);
   const [diffVer, setDiffVer] = React.useState<PromptVersion | null>(null);
   return (
     <div className="grid gap-4">
       {(showLLM || showConfig || showWebSearch || showInteractiveShell) && (
-        <div className="grid gap-3 rounded-md border p-3">
+        <fieldset disabled={!canAdmin} className="grid min-w-0 gap-3 rounded-md border p-3">
           {showLLM && (
             <div className="grid gap-1.5">
               <Label htmlFor="llm-profile" className="text-xs">
@@ -154,9 +156,11 @@ export function PromptTab(p: PromptTabProps) {
                 </div>
               </>
             )}
-            <Button size="sm" variant="outline" onClick={saveConfig}>
-              <SaveIcon /> {t("Save config")}
-            </Button>
+            {canAdmin && (
+              <Button size="sm" variant="outline" onClick={saveConfig}>
+                <SaveIcon /> {t("Save config")}
+              </Button>
+            )}
           </div>
           {showWebSearch && (
             <div className="flex items-center gap-3 border-t pt-3">
@@ -193,7 +197,7 @@ export function PromptTab(p: PromptTabProps) {
               </div>
             </div>
           )}
-        </div>
+        </fieldset>
       )}
 
       <div className="grid gap-2">
@@ -206,6 +210,7 @@ export function PromptTab(p: PromptTabProps) {
               <TooltipTrigger asChild>
                 <button
                   type="button"
+                  disabled={!canAdmin}
                   onClick={() => setPrompt((p) => `${p}{{.${v.name}}}`)}
                   className="hover:bg-muted inline-flex items-center gap-1 rounded-md border bg-muted/40 px-2 py-1 font-mono text-xs"
                 >
@@ -229,36 +234,39 @@ export function PromptTab(p: PromptTabProps) {
         className="font-mono text-xs"
         rows={16}
         value={prompt}
+        readOnly={!canAdmin}
         placeholder={t("Leave empty to use the built-in default prompt")}
         onChange={(e) => setPrompt(e.target.value)}
       />
 
-      <div className="flex flex-wrap gap-2">
-        <Dialog>
-          <DialogTrigger asChild>
-            <Button variant="outline" size="sm" onClick={doPreview}>
-              <EyeIcon /> {t("Render preview")}
-            </Button>
-          </DialogTrigger>
-          <DialogContent className="sm:max-w-2xl">
-            <DialogHeader>
-              <DialogTitle>{t("Render preview")}</DialogTitle>
-              <DialogDescription>
-                {t("All {var} have been replaced by the backend with sample values.", { var: "{{.Var}}" })}
-              </DialogDescription>
-            </DialogHeader>
-            <div className="max-h-[60vh] overflow-auto rounded-md border bg-muted/30 p-3">
-              <Markdown text={preview} />
-            </div>
-          </DialogContent>
-        </Dialog>
-        <Button size="sm" onClick={savePrompt}>
-          <SaveIcon /> {t("Save as new version")}
-        </Button>
-        <Button variant="outline" size="sm" onClick={resetPrompt}>
-          <RotateCcwIcon /> {t("Restore default")}
-        </Button>
-      </div>
+      {canAdmin && (
+        <div className="flex flex-wrap gap-2">
+          <Dialog>
+            <DialogTrigger asChild>
+              <Button variant="outline" size="sm" onClick={doPreview}>
+                <EyeIcon /> {t("Render preview")}
+              </Button>
+            </DialogTrigger>
+            <DialogContent className="sm:max-w-2xl">
+              <DialogHeader>
+                <DialogTitle>{t("Render preview")}</DialogTitle>
+                <DialogDescription>
+                  {t("All {var} have been replaced by the backend with sample values.", { var: "{{.Var}}" })}
+                </DialogDescription>
+              </DialogHeader>
+              <div className="max-h-[60vh] overflow-auto rounded-md border bg-muted/30 p-3">
+                <Markdown text={preview} />
+              </div>
+            </DialogContent>
+          </Dialog>
+          <Button size="sm" onClick={savePrompt}>
+            <SaveIcon /> {t("Save as new version")}
+          </Button>
+          <Button variant="outline" size="sm" onClick={resetPrompt}>
+            <RotateCcwIcon /> {t("Restore default")}
+          </Button>
+        </div>
+      )}
 
       <Separator />
       <div className="grid gap-2">
@@ -355,22 +363,24 @@ export function PromptTab(p: PromptTabProps) {
                 <GitCompareIcon className="mr-1 size-3.5" /> {t("Compare with current")}
               </Button>
             )}
-            <Button
-              size="sm"
-              onClick={() => {
-                if (viewVer) {
-                  setPrompt(viewVer.template_text);
-                  setViewVer(null);
-                  toast.success(
-                    t('Loaded v{version} into the editor; click "Save as new version" to confirm', {
-                      version: viewVer.version,
-                    }),
-                  );
-                }
-              }}
-            >
-              {t("Load into editor")}
-            </Button>
+            {canAdmin && (
+              <Button
+                size="sm"
+                onClick={() => {
+                  if (viewVer) {
+                    setPrompt(viewVer.template_text);
+                    setViewVer(null);
+                    toast.success(
+                      t('Loaded v{version} into the editor; click "Save as new version" to confirm', {
+                        version: viewVer.version,
+                      }),
+                    );
+                  }
+                }}
+              >
+                {t("Load into editor")}
+              </Button>
+            )}
           </div>
         </DialogContent>
       </Dialog>

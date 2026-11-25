@@ -21,6 +21,7 @@ import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger } from "@
 import { Separator } from "@/components/ui/separator";
 import { SidebarTrigger } from "@/components/ui/sidebar";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { useCan } from "@/hooks/use-session";
 import { intlLocale, t } from "@/i18n";
 import { api } from "@/lib/api";
 import { statusMeta } from "@/lib/status";
@@ -70,6 +71,8 @@ function FindingDetailInner() {
   const [finding, setFinding] = React.useState<Finding | null>(null);
   const [loaded, setLoaded] = React.useState(false);
   const [tab, setTab] = React.useState("overview");
+  const canReview = useCan("review"); // severity, status and report stage are PATCH triage
+  const canOperate = useCan("operate"); // retest and evidence link/edit need operate
 
   const load = React.useCallback(() => {
     if (!id) {
@@ -202,7 +205,12 @@ function FindingDetailInner() {
                   <p className="text-sm leading-relaxed whitespace-pre-wrap">{finding.summary || t("(no digest)")}</p>
                 </CardContent>
               </Card>
-              <FindingRetestPanel key={`retest-${id}`} findingId={id} readOnly={finding.inherited} onCompleted={load} />
+              <FindingRetestPanel
+                key={`retest-${id}`}
+                findingId={id}
+                readOnly={finding.inherited || !canOperate}
+                onCompleted={load}
+              />
               <Card>
                 <CardHeader>
                   <CardTitle className="text-sm">{t("Evidence / PoC")}</CardTitle>
@@ -242,7 +250,7 @@ function FindingDetailInner() {
                 key={`traffic-${id}`}
                 findingId={id}
                 contextTask={contextTaskId || undefined}
-                readOnly={finding.inherited}
+                readOnly={finding.inherited || !canOperate}
                 onChanged={load}
               />
               {/* Below evidence: detailed report (rendered Markdown) */}
@@ -283,7 +291,7 @@ function FindingDetailInner() {
 
                 {/* Severity */}
                 <FieldRow label={t("Severity")}>
-                  {finding.inherited ? (
+                  {finding.inherited || !canReview ? (
                     <StatusBadge domain="severity" value={finding.severity} dot />
                   ) : (
                     <Select value={finding.severity} onValueChange={(v) => changeSeverity(v as Severity)}>
@@ -305,7 +313,7 @@ function FindingDetailInner() {
 
                 {/* Triage status */}
                 <FieldRow label={t("Triage status")}>
-                  {finding.inherited ? (
+                  {finding.inherited || !canReview ? (
                     <StatusBadge domain="finding" value={finding.status} dot />
                   ) : (
                     <Select value={finding.status} onValueChange={(v) => changeStatus(v as FindingStatus)}>
@@ -326,7 +334,7 @@ function FindingDetailInner() {
                 </FieldRow>
 
                 <FieldRow label={t("Report stage")}>
-                  {finding.inherited ? (
+                  {finding.inherited || !canReview ? (
                     <ReportStateBadge state={finding.report_state} />
                   ) : (
                     <Select

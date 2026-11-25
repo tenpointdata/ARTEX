@@ -13,6 +13,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
+import { useCan } from "@/hooks/use-session";
 import { t } from "@/i18n";
 import { api } from "@/lib/api";
 import type { Agent, AgentTrigger, Tool } from "@/lib/types";
@@ -23,6 +24,8 @@ import { rich } from "./rich";
 // Each trigger fires (schedule/finding found/goal met/task timeout/tool call, multi-select) → a new conversation runs
 // in parallel with the base user message + auto context appended by the backend.
 export function AgentTriggersTab({ agentKey, agent }: { agentKey: string; agent?: Agent }) {
+  const canAdmin = useCan("admin"); // the post-trigger policy is agent config
+  const canOperate = useCan("operate"); // creating, editing, toggling and deleting triggers
   const [triggers, setTriggers] = React.useState<AgentTrigger[]>([]);
   const [tools, setTools] = React.useState<Tool[]>([]);
   // post-trigger handling policy (per agent); initial value comes from agent detail, saved on change.
@@ -222,7 +225,7 @@ export function AgentTriggersTab({ agentKey, agent }: { agentKey: string; agent?
       </p>
 
       {/* post-trigger handling policy */}
-      <div className="grid gap-3 rounded-md border p-3">
+      <fieldset disabled={!canAdmin} className="grid min-w-0 gap-3 rounded-md border p-3">
         <Label className="text-muted-foreground text-xs">
           {t("Post-trigger handling policy (how triggers are queued/merged to run)")}
         </Label>
@@ -305,186 +308,188 @@ export function AgentTriggersTab({ agentKey, agent }: { agentKey: string; agent?
                   )
                 : t("Serial · no merge: one run at a time per agent; each trigger gets its own conversation.")}
         </p>
-      </div>
+      </fieldset>
 
       {/* create / edit trigger */}
-      <div className="grid gap-3 rounded-md border p-3">
-        <Label className="text-muted-foreground text-xs">
-          {editingId != null
-            ? t('Edit trigger #{id} (click "Save changes" when done)', { id: editingId })
-            : t("New trigger (each condition can have its own user message)")}
-        </Label>
+      {(canAdmin || editingId != null) && (
+        <fieldset disabled={!canOperate} className="grid min-w-0 gap-3 rounded-md border p-3">
+          <Label className="text-muted-foreground text-xs">
+            {editingId != null
+              ? t('Edit trigger #{id} (click "Save changes" when done)', { id: editingId })
+              : t("New trigger (each condition can have its own user message)")}
+          </Label>
 
-        {/* schedule */}
-        <div className="grid gap-1.5">
-          <label htmlFor="tr-onInterval" className="flex items-center gap-2 text-sm">
-            <Checkbox id="tr-onInterval" checked={onInterval} onCheckedChange={(v) => setOnInterval(!!v)} />{" "}
-            {t("Scheduled trigger")}
-          </label>
-          {onInterval && (
-            <div className="grid gap-1.5">
-              <div className="flex items-center gap-2">
-                <Label htmlFor="tr-interval" className="text-xs">
-                  {t("Every")}
-                </Label>
-                <Input
-                  id="tr-interval"
-                  type="number"
-                  min={1}
-                  className="h-8 w-24"
-                  value={intervalSec}
-                  onChange={(e) => setIntervalSec(e.target.value)}
-                />
-                <span className="text-muted-foreground text-xs">{t("seconds")}</span>
-              </div>
-              <Textarea
-                className="text-xs"
-                rows={2}
-                value={intervalMsg}
-                placeholder={t("Message sent to the agent when the schedule fires, e.g. inspect all tasks")}
-                onChange={(e) => setIntervalMsg(e.target.value)}
-              />
-            </div>
-          )}
-        </div>
-
-        {/* finding */}
-        <div className="grid gap-1.5">
-          <label htmlFor="tr-onFinding" className="flex items-center gap-2 text-sm">
-            <Checkbox id="tr-onFinding" checked={onFinding} onCheckedChange={(v) => setOnFinding(!!v)} />{" "}
-            {t("Trigger on finding")}
-          </label>
-          {onFinding && (
-            <Textarea
-              className="text-xs"
-              rows={2}
-              value={findingMsg}
-              placeholder={t(
-                "Message sent to the agent when a finding is found (the system attaches task and finding details)",
-              )}
-              onChange={(e) => setFindingMsg(e.target.value)}
-            />
-          )}
-        </div>
-
-        {/* goal met */}
-        <div className="grid gap-1.5">
-          <label htmlFor="tr-onGoalMet" className="flex items-center gap-2 text-sm">
-            <Checkbox id="tr-onGoalMet" checked={onGoalMet} onCheckedChange={(v) => setOnGoalMet(!!v)} />{" "}
-            {t("Trigger on goal met")}
-          </label>
-          {onGoalMet && (
-            <Textarea
-              className="text-xs"
-              rows={2}
-              value={goalMsg}
-              placeholder={t(
-                "Message sent to the agent when a goal is met (the system attaches the task and the met goal)",
-              )}
-              onChange={(e) => setGoalMsg(e.target.value)}
-            />
-          )}
-        </div>
-
-        {/* task timeout */}
-        <div className="grid gap-1.5">
-          <label htmlFor="tr-onTaskTimeout" className="flex items-center gap-2 text-sm">
-            <Checkbox id="tr-onTaskTimeout" checked={onTaskTimeout} onCheckedChange={(v) => setOnTaskTimeout(!!v)} />{" "}
-            {t("Trigger on task timeout")}
-          </label>
-          {onTaskTimeout && (
-            <Textarea
-              className="text-xs"
-              rows={2}
-              value={taskTimeoutMsg}
-              placeholder={t("Message sent to the agent on task timeout (the system attaches the task id and goals)")}
-              onChange={(e) => setTaskTimeoutMsg(e.target.value)}
-            />
-          )}
-        </div>
-
-        {/* tool call */}
-        <div className="grid gap-1.5">
-          <label htmlFor="tr-onToolCall" className="flex items-center gap-2 text-sm">
-            <Checkbox id="tr-onToolCall" checked={onToolCall} onCheckedChange={(v) => setOnToolCall(!!v)} />{" "}
-            {t("Trigger on tool call")}
-          </label>
-          {onToolCall && (
-            <div className="grid gap-1.5">
-              <div className="text-muted-foreground text-xs">
-                {rich(
-                  t(
-                    "Select the tools to watch (at least one); each time these tools finish a <b>call</b> during task execution, a trigger fires. {count} selected.",
-                    { count: toolNames.length },
-                  ),
-                )}
-              </div>
-              <div className="max-h-40 overflow-y-auto rounded-md border p-2">
-                {tools.length === 0 && (
-                  <span className="text-muted-foreground text-xs">{t("(tool list is empty)")}</span>
-                )}
-                <div className="grid gap-1">
-                  {tools.map((tool) => (
-                    <label key={tool.key} htmlFor={`tr-tool-${tool.key}`} className="flex items-start gap-2 text-xs">
-                      <Checkbox
-                        id={`tr-tool-${tool.key}`}
-                        className="mt-0.5"
-                        checked={toolNames.includes(tool.key)}
-                        onCheckedChange={() => toggleTool(tool.key)}
-                      />
-                      <span className="min-w-0">
-                        <span className="font-medium">{tool.key}</span>
-                        {tool.description && (
-                          <span className="text-muted-foreground line-clamp-1"> {tool.description}</span>
-                        )}
-                      </span>
-                    </label>
-                  ))}
+          {/* schedule */}
+          <div className="grid gap-1.5">
+            <label htmlFor="tr-onInterval" className="flex items-center gap-2 text-sm">
+              <Checkbox id="tr-onInterval" checked={onInterval} onCheckedChange={(v) => setOnInterval(!!v)} />{" "}
+              {t("Scheduled trigger")}
+            </label>
+            {onInterval && (
+              <div className="grid gap-1.5">
+                <div className="flex items-center gap-2">
+                  <Label htmlFor="tr-interval" className="text-xs">
+                    {t("Every")}
+                  </Label>
+                  <Input
+                    id="tr-interval"
+                    type="number"
+                    min={1}
+                    className="h-8 w-24"
+                    value={intervalSec}
+                    onChange={(e) => setIntervalSec(e.target.value)}
+                  />
+                  <span className="text-muted-foreground text-xs">{t("seconds")}</span>
                 </div>
+                <Textarea
+                  className="text-xs"
+                  rows={2}
+                  value={intervalMsg}
+                  placeholder={t("Message sent to the agent when the schedule fires, e.g. inspect all tasks")}
+                  onChange={(e) => setIntervalMsg(e.target.value)}
+                />
               </div>
+            )}
+          </div>
+
+          {/* finding */}
+          <div className="grid gap-1.5">
+            <label htmlFor="tr-onFinding" className="flex items-center gap-2 text-sm">
+              <Checkbox id="tr-onFinding" checked={onFinding} onCheckedChange={(v) => setOnFinding(!!v)} />{" "}
+              {t("Trigger on finding")}
+            </label>
+            {onFinding && (
               <Textarea
                 className="text-xs"
                 rows={2}
-                value={toolCallMsg}
+                value={findingMsg}
                 placeholder={t(
-                  "Message sent to the agent when a tool is called (the system attaches task info, tool input and output)",
+                  "Message sent to the agent when a finding is found (the system attaches task and finding details)",
                 )}
-                onChange={(e) => setToolCallMsg(e.target.value)}
+                onChange={(e) => setFindingMsg(e.target.value)}
               />
-            </div>
-          )}
-        </div>
+            )}
+          </div>
 
-        {/* task created */}
-        <div className="grid gap-1.5">
-          <label htmlFor="tr-onTaskCreate" className="flex items-center gap-2 text-sm">
-            <Checkbox id="tr-onTaskCreate" checked={onTaskCreate} onCheckedChange={(v) => setOnTaskCreate(!!v)} />{" "}
-            {t("Trigger on task created")}
-          </label>
-          {onTaskCreate && (
-            <Textarea
-              className="text-xs"
-              rows={2}
-              value={taskCreateMsg}
-              placeholder={t(
-                "Message sent to the agent when a task is created (the system attaches the task id and goals)",
-              )}
-              onChange={(e) => setTaskCreateMsg(e.target.value)}
-            />
-          )}
-        </div>
+          {/* goal met */}
+          <div className="grid gap-1.5">
+            <label htmlFor="tr-onGoalMet" className="flex items-center gap-2 text-sm">
+              <Checkbox id="tr-onGoalMet" checked={onGoalMet} onCheckedChange={(v) => setOnGoalMet(!!v)} />{" "}
+              {t("Trigger on goal met")}
+            </label>
+            {onGoalMet && (
+              <Textarea
+                className="text-xs"
+                rows={2}
+                value={goalMsg}
+                placeholder={t(
+                  "Message sent to the agent when a goal is met (the system attaches the task and the met goal)",
+                )}
+                onChange={(e) => setGoalMsg(e.target.value)}
+              />
+            )}
+          </div>
 
-        <div className="flex items-center gap-2">
-          <Button size="sm" onClick={submit} disabled={saving}>
-            <SaveIcon /> {editingId != null ? t("Save changes") : t("Add trigger")}
-          </Button>
-          {editingId != null && (
-            <Button size="sm" variant="ghost" onClick={resetForm} disabled={saving}>
-              <XIcon /> {t("Cancel edit")}
+          {/* task timeout */}
+          <div className="grid gap-1.5">
+            <label htmlFor="tr-onTaskTimeout" className="flex items-center gap-2 text-sm">
+              <Checkbox id="tr-onTaskTimeout" checked={onTaskTimeout} onCheckedChange={(v) => setOnTaskTimeout(!!v)} />{" "}
+              {t("Trigger on task timeout")}
+            </label>
+            {onTaskTimeout && (
+              <Textarea
+                className="text-xs"
+                rows={2}
+                value={taskTimeoutMsg}
+                placeholder={t("Message sent to the agent on task timeout (the system attaches the task id and goals)")}
+                onChange={(e) => setTaskTimeoutMsg(e.target.value)}
+              />
+            )}
+          </div>
+
+          {/* tool call */}
+          <div className="grid gap-1.5">
+            <label htmlFor="tr-onToolCall" className="flex items-center gap-2 text-sm">
+              <Checkbox id="tr-onToolCall" checked={onToolCall} onCheckedChange={(v) => setOnToolCall(!!v)} />{" "}
+              {t("Trigger on tool call")}
+            </label>
+            {onToolCall && (
+              <div className="grid gap-1.5">
+                <div className="text-muted-foreground text-xs">
+                  {rich(
+                    t(
+                      "Select the tools to watch (at least one); each time these tools finish a <b>call</b> during task execution, a trigger fires. {count} selected.",
+                      { count: toolNames.length },
+                    ),
+                  )}
+                </div>
+                <div className="max-h-40 overflow-y-auto rounded-md border p-2">
+                  {tools.length === 0 && (
+                    <span className="text-muted-foreground text-xs">{t("(tool list is empty)")}</span>
+                  )}
+                  <div className="grid gap-1">
+                    {tools.map((tool) => (
+                      <label key={tool.key} htmlFor={`tr-tool-${tool.key}`} className="flex items-start gap-2 text-xs">
+                        <Checkbox
+                          id={`tr-tool-${tool.key}`}
+                          className="mt-0.5"
+                          checked={toolNames.includes(tool.key)}
+                          onCheckedChange={() => toggleTool(tool.key)}
+                        />
+                        <span className="min-w-0">
+                          <span className="font-medium">{tool.key}</span>
+                          {tool.description && (
+                            <span className="text-muted-foreground line-clamp-1"> {tool.description}</span>
+                          )}
+                        </span>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+                <Textarea
+                  className="text-xs"
+                  rows={2}
+                  value={toolCallMsg}
+                  placeholder={t(
+                    "Message sent to the agent when a tool is called (the system attaches task info, tool input and output)",
+                  )}
+                  onChange={(e) => setToolCallMsg(e.target.value)}
+                />
+              </div>
+            )}
+          </div>
+
+          {/* task created */}
+          <div className="grid gap-1.5">
+            <label htmlFor="tr-onTaskCreate" className="flex items-center gap-2 text-sm">
+              <Checkbox id="tr-onTaskCreate" checked={onTaskCreate} onCheckedChange={(v) => setOnTaskCreate(!!v)} />{" "}
+              {t("Trigger on task created")}
+            </label>
+            {onTaskCreate && (
+              <Textarea
+                className="text-xs"
+                rows={2}
+                value={taskCreateMsg}
+                placeholder={t(
+                  "Message sent to the agent when a task is created (the system attaches the task id and goals)",
+                )}
+                onChange={(e) => setTaskCreateMsg(e.target.value)}
+              />
+            )}
+          </div>
+
+          <div className="flex items-center gap-2">
+            <Button size="sm" onClick={submit} disabled={saving}>
+              <SaveIcon /> {editingId != null ? t("Save changes") : t("Add trigger")}
             </Button>
-          )}
-        </div>
-      </div>
+            {editingId != null && (
+              <Button size="sm" variant="ghost" onClick={resetForm} disabled={saving}>
+                <XIcon /> {t("Cancel edit")}
+              </Button>
+            )}
+          </div>
+        </fieldset>
+      )}
 
       {/* existing triggers */}
       <div className="grid gap-2">
@@ -498,7 +503,12 @@ export function AgentTriggersTab({ agentKey, agent }: { agentKey: string; agent?
               editingId === trg.id && "border-primary bg-primary/5",
             )}
           >
-            <Switch checked={trg.enabled} onCheckedChange={() => toggleEnabled(trg)} className="mt-0.5" />
+            <Switch
+              checked={trg.enabled}
+              disabled={!canOperate}
+              onCheckedChange={() => toggleEnabled(trg)}
+              className="mt-0.5"
+            />
             <div className="min-w-0 flex-1">
               <div className="flex flex-wrap items-center gap-1.5">
                 <span className="font-medium">{condLabel(trg)}</span>
@@ -538,26 +548,30 @@ export function AgentTriggersTab({ agentKey, agent }: { agentKey: string; agent?
                 )}
               </div>
             </div>
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              className="text-muted-foreground hover:text-foreground"
-              onClick={() => startEdit(trg)}
-              title={t("Edit")}
-              aria-label={t("Edit")}
-            >
-              <PencilIcon className="size-3.5" />
-            </Button>
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              className="text-muted-foreground hover:text-destructive"
-              onClick={() => del(trg.id)}
-              title={t("Delete")}
-              aria-label={t("Delete")}
-            >
-              <Trash2Icon className="size-3.5" />
-            </Button>
+            {canOperate && (
+              <>
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  className="text-muted-foreground hover:text-foreground"
+                  onClick={() => startEdit(trg)}
+                  title={t("Edit")}
+                  aria-label={t("Edit")}
+                >
+                  <PencilIcon className="size-3.5" />
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  className="text-muted-foreground hover:text-destructive"
+                  onClick={() => del(trg.id)}
+                  title={t("Delete")}
+                  aria-label={t("Delete")}
+                >
+                  <Trash2Icon className="size-3.5" />
+                </Button>
+              </>
+            )}
           </div>
         ))}
       </div>

@@ -24,6 +24,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Select, SelectContent, SelectItem, SelectTrigger } from "@/components/ui/select";
 import { Spinner } from "@/components/ui/spinner";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { useCan } from "@/hooks/use-session";
 import { useTriageKeys } from "@/hooks/use-triage-keys";
 import { t } from "@/i18n";
 import { statusMeta } from "@/lib/status";
@@ -110,6 +111,7 @@ export function FindingsTable({
   triageBusy,
   onTriage,
 }: FindingsTableProps) {
+  const canOperate = useCan("operate"); // retest, deepen, delete
   const keys = items.map(findingRowKey);
   const openIndex = expandedKey === null ? -1 : keys.indexOf(expandedKey);
   const openFinding = openIndex >= 0 ? items[openIndex] : null;
@@ -250,7 +252,7 @@ export function FindingsTable({
                   )}
                 </TableCell>
                 <TableCell onClick={(e) => e.stopPropagation()}>
-                  {f.finding_id ? (
+                  {f.finding_id && canTriage ? (
                     <Select value={f.status} onValueChange={(v) => onStatusChange(f, v as FindingStatus)}>
                       <SelectTrigger size="sm" className="h-7 w-full border-none px-1 shadow-none focus-visible:ring-0">
                         <StatusBadge domain="finding" value={f.status} dot />
@@ -268,7 +270,7 @@ export function FindingsTable({
                   )}
                 </TableCell>
                 <TableCell onClick={(e) => e.stopPropagation()}>
-                  {f.finding_id ? (
+                  {f.finding_id && canTriage ? (
                     <Select
                       value={f.report_state ?? "none"}
                       onValueChange={(v) => onReportStateChange(f, v as FindingReportState)}
@@ -314,7 +316,7 @@ export function FindingsTable({
                         </Link>
                       </Button>
                     ) : null}
-                    {!retest && f.finding_id && !f.inherited ? (
+                    {canOperate && !retest && f.finding_id && !f.inherited ? (
                       <Button
                         size="sm"
                         variant="ghost"
@@ -325,13 +327,13 @@ export function FindingsTable({
                         {t("Retest")}
                       </Button>
                     ) : null}
-                    {f.finding_id && f.task_id && (
+                    {canOperate && f.finding_id && f.task_id && (
                       <Button size="sm" variant="ghost" onClick={() => onDeepen(f)}>
                         <FlaskConicalIcon data-icon="inline-start" />
                         {t("Deepen")}
                       </Button>
                     )}
-                    {f.finding_id && (
+                    {canOperate && f.finding_id && (
                       <AlertDialog>
                         <AlertDialogTrigger asChild>
                           <Button
@@ -368,7 +370,7 @@ export function FindingsTable({
                   finding={f}
                   columnCount={COLUMN_COUNT}
                   report={reports[rowKey]}
-                  edit={edit}
+                  edit={canTriage ? edit : null}
                   onEditChange={onEditChange}
                   saving={saving}
                   onSave={onSave}

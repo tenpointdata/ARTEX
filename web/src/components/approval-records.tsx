@@ -23,6 +23,7 @@ import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/
 import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
+import { useCan } from "@/hooks/use-session";
 import { t } from "@/i18n";
 import { api } from "@/lib/api";
 import { setVisibleInterval } from "@/lib/polling";
@@ -46,6 +47,7 @@ export function ApprovalRecords({ taskId }: { taskId?: string }) {
   const [error, setError] = React.useState("");
   const [pendingError, setPendingError] = React.useState("");
   const [deciding, setDeciding] = React.useState(false);
+  const canReview = useCan("review"); // allow/deny, batch decisions and the A/D triage keys
   const [revision, setRevision] = React.useState(0);
   const [selected, setSelected] = React.useState<Set<number>>(() => new Set());
   const [batchDecision, setBatchDecision] = React.useState<"allowed" | "denied" | null>(null);
@@ -387,27 +389,33 @@ export function ApprovalRecords({ taskId }: { taskId?: string }) {
             decide={decide}
             revision={revision}
             label={t("Pending approvals")}
-            selection={selection}
-            triage={triage}
+            selection={canReview ? selection : undefined}
+            triage={canReview ? triage : undefined}
           />
-          <div className="flex flex-wrap items-center justify-between gap-2 border-t px-4 py-3 text-sm">
-            <span className="text-muted-foreground">{t("{count} selected", { count: selectedRows.length })}</span>
-            <div className="flex flex-wrap gap-2">
-              <Button size="sm" disabled={deciding || !selectedRows.length} onClick={() => setBatchDecision("allowed")}>
-                <CheckIcon data-icon="inline-start" />
-                {t("Approve selected")}
-              </Button>
-              <Button
-                size="sm"
-                variant="destructive"
-                disabled={deciding || !selectedRows.length}
-                onClick={() => setBatchDecision("denied")}
-              >
-                <XIcon data-icon="inline-start" />
-                {t("Deny selected")}
-              </Button>
+          {canReview && (
+            <div className="flex flex-wrap items-center justify-between gap-2 border-t px-4 py-3 text-sm">
+              <span className="text-muted-foreground">{t("{count} selected", { count: selectedRows.length })}</span>
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  size="sm"
+                  disabled={deciding || !selectedRows.length}
+                  onClick={() => setBatchDecision("allowed")}
+                >
+                  <CheckIcon data-icon="inline-start" />
+                  {t("Approve selected")}
+                </Button>
+                <Button
+                  size="sm"
+                  variant="destructive"
+                  disabled={deciding || !selectedRows.length}
+                  onClick={() => setBatchDecision("denied")}
+                >
+                  <XIcon data-icon="inline-start" />
+                  {t("Deny selected")}
+                </Button>
+              </div>
             </div>
-          </div>
+          )}
         </section>
       ) : null}
       <AlertDialog

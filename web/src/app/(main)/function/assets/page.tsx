@@ -19,6 +19,7 @@ import { toast } from "sonner";
 import { AssetDslSearch } from "@/components/asset-dsl-search";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { useCan } from "@/hooks/use-session";
 import { t } from "@/i18n";
 import { api } from "@/lib/api";
 import type { Asset, Company } from "@/lib/types";
@@ -42,6 +43,7 @@ const TABS: { key: string; label: string; icon: LucideIcon }[] = [
 ];
 
 export default function AssetsPage() {
+  const canOperate = useCan("operate"); // asset/company edits and deletes
   // The sidebar's company switcher narrows the data tabs to that company.
   const companyId = useActiveCompanyID();
   const [rows, setRows] = React.useState<Asset[]>([]);
@@ -262,7 +264,7 @@ export default function AssetsPage() {
           <span className="text-sm text-muted-foreground tabular-nums">
             {t("{count} assets in total", { count: totalAssets })}
           </span>
-          {selected.size > 0 && (
+          {canOperate && selected.size > 0 && (
             <div className="flex items-center gap-1">
               <Button variant="destructive" size="sm" onClick={() => openDelete(Array.from(selected))}>
                 <Trash2Icon className="size-3.5" /> {t("Delete selected ({count})", { count: selected.size })}
@@ -281,7 +283,7 @@ export default function AssetsPage() {
           <Button variant="outline" size="sm" onClick={refresh} disabled={loading}>
             <RefreshCwIcon className={cn("size-4", loading && "animate-spin")} /> {t("Refresh")}
           </Button>
-          <CompanyDialog onSaved={refresh} />
+          {canOperate && <CompanyDialog onSaved={refresh} />}
         </div>
       </div>
 

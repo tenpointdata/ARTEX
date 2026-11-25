@@ -2978,5 +2978,7 @@
   "Seed: openai / ollama only": "Tohum: yalnızca openai / ollama",
   "Temperature": "Sıcaklık",
   "Temperature 0–2 (empty = not pinned)": "Sıcaklık 0–2 (boş = sabitlenmez)",
-  "Pins sampling so replicates of an evaluation suite vary less; the suite stamps both values. The seed is sent only on the openai and ollama formats. The temperature applies when the calling code sets none of its own.": "Değerlendirme paketinin tekrarları daha az değişsin diye örneklemeyi sabitler; paket iki değeri de damgalar. Tohum yalnızca openai ve ollama biçimlerinde gönderilir. Sıcaklık, çağıran kod kendi sıcaklığını belirlemediğinde uygulanır."
+  "Pins sampling so replicates of an evaluation suite vary less; the suite stamps both values. The seed is sent only on the openai and ollama formats. The temperature applies when the calling code sets none of its own.": "Değerlendirme paketinin tekrarları daha az değişsin diye örneklemeyi sabitler; paket iki değeri de damgalar. Tohum yalnızca openai ve ollama biçimlerinde gönderilir. Sıcaklık, çağıran kod kendi sıcaklığını belirlemediğinde uygulanır.",
+  "Conversation messages are only available to operators.": "Sohbet mesajları yalnızca operatörler tarafından görüntülenebilir.",
+  "Select a conversation to view it. Starting and reading conversations requires the operator role.": "Görüntülemek için bir sohbet seçin. Sohbet başlatmak ve okumak operatör rolü gerektirir."
 }

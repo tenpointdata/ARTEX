@@ -24,6 +24,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Spinner } from "@/components/ui/spinner";
+import { useCan } from "@/hooks/use-session";
 import { intlLocale, t } from "@/i18n";
 import type { Agent, Conversation } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -68,6 +69,7 @@ export const ConversationItem = React.memo(function ConversationItem({
   selectedForDelete: boolean;
   onSelectedForDeleteChange: (id: number, checked: boolean) => void;
 }) {
+  const canOperate = useCan("operate"); // rename, pin, delete and bulk select are mutations
   const [deleteOpen, setDeleteOpen] = React.useState(false);
   const renameInputRef = React.useRef<HTMLInputElement>(null);
   const cancelRenameRef = React.useRef(false);
@@ -87,7 +89,7 @@ export const ConversationItem = React.memo(function ConversationItem({
         active ? "bg-accent text-accent-foreground" : "hover:bg-accent/50",
       )}
     >
-      {selectionMode && (
+      {selectionMode && canOperate && (
         <Checkbox
           checked={selectedForDelete}
           onCheckedChange={(checked) => onSelectedForDeleteChange(conv.id, checked === true)}
@@ -95,7 +97,7 @@ export const ConversationItem = React.memo(function ConversationItem({
           className="ml-1 shrink-0"
         />
       )}
-      {renaming ? (
+      {renaming && canOperate ? (
         <input
           ref={renameInputRef}
           value={renameText}
@@ -117,8 +119,8 @@ export const ConversationItem = React.memo(function ConversationItem({
         <button
           type="button"
           onClick={() => onSelect(conv.id)}
-          onDoubleClick={() => onStartRename(conv)}
-          title={t("Double-click to rename")}
+          onDoubleClick={canOperate ? () => onStartRename(conv) : undefined}
+          title={canOperate ? t("Double-click to rename") : undefined}
           className="min-w-0 flex-1 rounded-md px-2 py-1.5 text-left"
         >
           <div className="flex min-w-0 items-center gap-1.5">
@@ -151,37 +153,39 @@ export const ConversationItem = React.memo(function ConversationItem({
           </div>
         </button>
       )}
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <Button
-            variant="ghost"
-            size="icon-sm"
-            className="text-muted-foreground shrink-0"
-            aria-label={t('Manage conversation "{title}"', { title: conv.title || t("New conversation") })}
-          >
-            <MoreHorizontalIcon />
-          </Button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="end">
-          <DropdownMenuGroup>
-            <DropdownMenuItem onSelect={() => onStartRename(conv)}>
-              <PencilIcon />
-              {t("Rename")}
-            </DropdownMenuItem>
-            <DropdownMenuItem onSelect={() => onTogglePinned(conv)}>
-              {pinned ? <PinOffIcon /> : <PinIcon />}
-              {pinned ? t("Unpin") : t("Pin")}
-            </DropdownMenuItem>
-          </DropdownMenuGroup>
-          <DropdownMenuSeparator />
-          <DropdownMenuGroup>
-            <DropdownMenuItem variant="destructive" onSelect={() => setDeleteOpen(true)}>
-              <Trash2Icon />
-              {t("Delete")}
-            </DropdownMenuItem>
-          </DropdownMenuGroup>
-        </DropdownMenuContent>
-      </DropdownMenu>
+      {canOperate && (
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              className="text-muted-foreground shrink-0"
+              aria-label={t('Manage conversation "{title}"', { title: conv.title || t("New conversation") })}
+            >
+              <MoreHorizontalIcon />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            <DropdownMenuGroup>
+              <DropdownMenuItem onSelect={() => onStartRename(conv)}>
+                <PencilIcon />
+                {t("Rename")}
+              </DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => onTogglePinned(conv)}>
+                {pinned ? <PinOffIcon /> : <PinIcon />}
+                {pinned ? t("Unpin") : t("Pin")}
+              </DropdownMenuItem>
+            </DropdownMenuGroup>
+            <DropdownMenuSeparator />
+            <DropdownMenuGroup>
+              <DropdownMenuItem variant="destructive" onSelect={() => setDeleteOpen(true)}>
+                <Trash2Icon />
+                {t("Delete")}
+              </DropdownMenuItem>
+            </DropdownMenuGroup>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      )}
       <AlertDialog open={deleteOpen} onOpenChange={setDeleteOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>
