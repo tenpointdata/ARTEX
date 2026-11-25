@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/Autumn-27/artex/db"
+	"github.com/Autumn-27/artex/scanimport"
 	"github.com/Autumn-27/artex/traffic"
 )
 
@@ -330,6 +331,9 @@ type FindingDTO struct {
 	VerificationNote      string                     `json:"verification_note"`
 	Counterevidence       string                     `json:"counterevidence,omitempty"`      // what was tested and did not work; optional
 	ConfidenceRationale   string                     `json:"confidence_rationale,omitempty"` // why the conclusion holds; optional
+	// Source is where a scanner-imported finding came from (lane, tool, rule,
+	// code location); absent for a finding from ARTEX's workers (runtime lane).
+	Source *FindingSourceDTO `json:"source,omitempty"`
 
 	ID          string `json:"id"`
 	FindingID   string `json:"finding_id,omitempty"` // standalone findings-table id — the handle for status updates
@@ -459,6 +463,29 @@ func findingAssetDTOs(ids []int64, assets map[int64]*db.Asset) []FindingAssetDTO
 	return out
 }
 
+// FindingSourceDTO is the client-safe part of a finding's import provenance:
+// the same fields the task report's Source line shows. The raw scanner record
+// and dedup key stay behind GET /findings/{id}/integrations (read).
+type FindingSourceDTO struct {
+	Lane     string `json:"lane"` // runtime | sast | sca
+	Tool     string `json:"tool"`
+	RuleID   string `json:"rule_id,omitempty"`
+	Location string `json:"location,omitempty"` // repo-relative path (code lanes)
+	Line     int    `json:"line,omitempty"`
+	ImportID *int64 `json:"import_id,omitempty"`
+}
+
+func findingSourceDTO(s *db.FindingImportSource) *FindingSourceDTO {
+	if s == nil {
+		return nil
+	}
+	lane := s.Lane
+	if lane == "" {
+		lane = string(scanimport.LaneRuntime)
+	}
+	return &FindingSourceDTO{Lane: lane, Tool: s.Tool, RuleID: s.RuleID, Location: s.Location, Line: s.Line, ImportID: s.ImportID}
+}
+
 // findingFromDB converts a standalone DBFinding row to a FindingDTO. task_id and
 // task_description are empty when the originating task has been deleted (NULL).
 func findingFromDB(f *db.DBFinding, assets map[int64]*db.Asset) FindingDTO {
@@ -477,6 +504,7 @@ func findingFromDB(f *db.DBFinding, assets map[int64]*db.Asset) FindingDTO {
 		ReportStale: f.Report != "" && f.EvidenceVersion != f.ReportEvidenceVersion, TrafficBindings: f.TrafficBindings,
 		PoELevel: f.PoELevel, VerificationStatus: f.VerificationStatus, VerificationNote: f.VerificationNote,
 		Counterevidence: f.Counterevidence, ConfidenceRationale: f.ConfidenceRationale,
+		Source:      findingSourceDTO(f.ImportSource),
 		VulnClass:   f.VulnClass,
 		Name:        f.Name,
 		Severity:    f.Severity,

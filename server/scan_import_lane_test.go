@@ -3,6 +3,7 @@ package server
 import (
 	"encoding/json"
 	"fmt"
+	"net/http/httptest"
 	"os"
 	"strings"
 	"testing"
@@ -142,6 +143,55 @@ func TestCodeScanJoinsTaskGraphAndReport(t *testing.T) {
 	data, _ := os.ReadFile("../scanimport/testdata/semgrep.sarif")
 	if w := request("POST", fmt.Sprintf("/api/integrations/imports?format=sarif&task_id=%d&asset_ids=987654321", taskID), string(data)); w.Code != 400 {
 		t.Fatalf("unknown anchor: %d %s", w.Code, w.Body.String())
+	}
+	_ = pg.QueryRow(`SELECT count(*) FROM scan_imports`).Scan(&after)
+	if after != before {
+		t.Fatalf("a refused import left %d import rows", after-before)
+	}
+
+	codeLaneInFindingsAndExports(t, request, taskID, lanes["sca"])
+}
+
+// codeLaneInFindingsAndExports checks the lane outside the task report
+// (c-d059ae): the findings list filters by lane and carries each finding's
+// source, and the CSV and Markdown exports show it.
+func codeLaneInFindingsAndExports(t *testing.T, request func(method, path, body string) *httptest.ResponseRecorder, taskID int64, wantSCA int) {
+	t.Helper()
+	w := request("GET", fmt.Sprintf("/api/exploration/findings?task_id=%d&lane=sca&limit=50", taskID), "")
+	if w.Code != 200 {
+		t.Fatalf("findings?lane=sca: %d %s", w.Code, w.Body.String())
+	}
+	var page struct {
+		Items []FindingDTO `json:"items"`
+		Total int          `json:"total"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &page); err != nil {
+		t.Fatal(err)
+	}
+	if page.Total != wantSCA {
+		t.Fatalf("lane=sca: total %d, want %d", page.Total, wantSCA)
+	}
+	for _, f := range page.Items {
+		if f.Source == nil || f.Source.Lane != "sca" || f.Source.Location == "" || f.Source.ImportID == nil {
+			t.Fatalf("lane=sca row without its source: %+v", f.Source)
+		}
+	}
+	w = request("GET", fmt.Sprintf("/api/exploration/findings?task_id=%d&lane=runtime&limit=50", taskID), "")
+	page.Items = nil // decoding into reused elements would keep their Source
+	_ = json.Unmarshal(w.Body.Bytes(), &page)
+	if page.Total != 1 || page.Items[0].Source != nil {
+		t.Fatalf("lane=runtime: total %d, items %+v", page.Total, page.Items)
+	}
+
+	w = request("GET", fmt.Sprintf("/api/exploration/findings/export?scope=filtered&format=csv&task_id=%d&lane=sca", taskID), "")
+	csv := w.Body.String()
+	if w.Code != 200 || !strings.Contains(csv, "Lane,Source Tool,Source Rule,Source Location,Import ID") ||
+		!strings.Contains(csv, ",sca,trivy,CVE-2022-24999,web/package-lock.json:1,") {
+		t.Fatalf("csv export: %d\n%s", w.Code, csv)
+	}
+	w = request("GET", fmt.Sprintf("/api/exploration/findings/export?scope=filtered&format=md-single&task_id=%d&lane=sca", taskID), "")
+	if md := w.Body.String(); w.Code != 200 || !strings.Contains(md, "- **Source**: dependency scan (SCA), imported from trivy rule `CVE-2022-24999` at `web/package-lock.json:1`") {
+		t.Fatalf("markdown export: %d\n%s", w.Code, md)
 	}
 }
 

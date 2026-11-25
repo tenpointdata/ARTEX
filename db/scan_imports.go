@@ -16,24 +16,27 @@ import (
 
 // ScanImport is one uploaded scanner file and its outcome counters.
 type ScanImport struct {
-	ID               int64     `json:"id"`
-	Format           string    `json:"format"`
-	ToolName         string    `json:"tool_name"`
-	ToolVersion      string    `json:"tool_version"`
-	FileName         string    `json:"file_name"`
-	FileSHA256       string    `json:"file_sha256"`
-	TaskID           *int64    `json:"task_id,omitempty"`
-	ImportedBy       string    `json:"imported_by"`
-	Records          int       `json:"records"`
-	Assets           int       `json:"assets"`
-	FindingsNew      int       `json:"findings_new"`
-	FindingsExisting int       `json:"findings_existing"`
-	Skipped          int       `json:"skipped"`
-	Informational    int       `json:"informational"`
-	Truncated        bool      `json:"truncated"`
-	FactNodeID       *int64    `json:"fact_node_id,omitempty"`     // the import's exploration fact (task imports)
-	AnchorAssetIDs   []int64   `json:"anchor_asset_ids,omitempty"` // runtime assets the code findings anchor to
-	CreatedAt        time.Time `json:"created_at"`
+	ID               int64   `json:"id"`
+	Format           string  `json:"format"`
+	ToolName         string  `json:"tool_name"`
+	ToolVersion      string  `json:"tool_version"`
+	FileName         string  `json:"file_name"`
+	FileSHA256       string  `json:"file_sha256"`
+	TaskID           *int64  `json:"task_id,omitempty"`
+	ImportedBy       string  `json:"imported_by"`
+	Records          int     `json:"records"`
+	Assets           int     `json:"assets"`
+	FindingsNew      int     `json:"findings_new"`
+	FindingsExisting int     `json:"findings_existing"`
+	Skipped          int     `json:"skipped"`
+	Informational    int     `json:"informational"`
+	Truncated        bool    `json:"truncated"`
+	FactNodeID       *int64  `json:"fact_node_id,omitempty"`     // the import's exploration fact (task imports)
+	AnchorAssetIDs   []int64 `json:"anchor_asset_ids,omitempty"` // runtime assets the code findings anchor to
+	// LaneCounts counts the findings this import created, per lane (runtime |
+	// sast | sca); filled by ListScanImports.
+	LaneCounts map[string]int `json:"lane_counts,omitempty"`
+	CreatedAt  time.Time      `json:"created_at"`
 }
 
 func nullTask(id *int64) any {
@@ -79,7 +82,10 @@ func (d *DB) ListScanImports(ctx context.Context, limit, offset int) ([]*ScanImp
 
 func (d *DB) scanImportPage(ctx context.Context, limit, offset int) ([]*ScanImport, error) {
 	rows, err := d.QueryContext(ctx, `SELECT id, format, tool_name, tool_version, file_name, file_sha256, task_id, imported_by,
-	records, assets, findings_new, findings_existing, skipped, informational, truncated, fact_node_id, anchor_asset_ids, created_at
+	records, assets, findings_new, findings_existing, skipped, informational, truncated, fact_node_id, anchor_asset_ids, created_at,
+	(SELECT COALESCE(jsonb_object_agg(l.lane, l.n), '{}'::jsonb) FROM (
+		SELECT CASE WHEN s.lane = '' THEN 'runtime' ELSE s.lane END AS lane, count(*) AS n
+		FROM finding_import_sources s WHERE s.import_id = scan_imports.id GROUP BY 1) l)
 FROM scan_imports ORDER BY created_at DESC, id DESC LIMIT $1 OFFSET $2`, limit, offset)
 	if err != nil {
 		return nil, err
@@ -89,16 +95,17 @@ FROM scan_imports ORDER BY created_at DESC, id DESC LIMIT $1 OFFSET $2`, limit, 
 	for rows.Next() {
 		var im ScanImport
 		var task, fact sql.NullInt64
-		var anchors []byte
+		var anchors, lanes []byte
 		if err := rows.Scan(&im.ID, &im.Format, &im.ToolName, &im.ToolVersion, &im.FileName, &im.FileSHA256, &task, &im.ImportedBy,
 			&im.Records, &im.Assets, &im.FindingsNew, &im.FindingsExisting, &im.Skipped, &im.Informational, &im.Truncated,
-			&fact, &anchors, &im.CreatedAt); err != nil {
+			&fact, &anchors, &im.CreatedAt, &lanes); err != nil {
 			return nil, err
 		}
 		if fact.Valid {
 			im.FactNodeID = &fact.Int64
 		}
 		_ = json.Unmarshal(anchors, &im.AnchorAssetIDs)
+		_ = json.Unmarshal(lanes, &im.LaneCounts)
 		if task.Valid {
 			im.TaskID = &task.Int64
 		}

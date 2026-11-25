@@ -41,6 +41,28 @@ func sourceFromPayload(raw json.RawMessage) Source {
 	return Source{Imported: true, Lane: p.Lane, Tool: p.Tool, RuleID: p.RuleID, Location: p.Location, Line: p.Line, ImportID: p.ImportID}
 }
 
+// SourceOf is the Source of a findings-table row: its import provenance, or
+// a worker's runtime finding when it has none.
+func SourceOf(f *db.DBFinding) Source {
+	is := f.ImportSource
+	if is == nil {
+		return Source{}
+	}
+	out := Source{Imported: true, Lane: is.Lane, Tool: is.Tool, RuleID: is.RuleID, Location: is.Location, Line: is.Line}
+	if is.ImportID != nil {
+		out.ImportID = *is.ImportID
+	}
+	return out
+}
+
+// codeLocation is path:line (or just the path when the line is unknown).
+func (s Source) codeLocation() string {
+	if s.Location == "" || s.Line <= 0 {
+		return s.Location
+	}
+	return fmt.Sprintf("%s:%d", s.Location, s.Line)
+}
+
 // LaneKey is the lane a finding is counted under.
 func (s Source) LaneKey() string {
 	if s.Lane == "" {
@@ -82,11 +104,7 @@ func (s Source) bullet() string {
 	if s.RuleID != "" {
 		fmt.Fprintf(&b, " rule %s", codeSpan(s.RuleID))
 	}
-	if s.Location != "" {
-		loc := s.Location
-		if s.Line > 0 {
-			loc = fmt.Sprintf("%s:%d", loc, s.Line)
-		}
+	if loc := s.codeLocation(); loc != "" {
 		fmt.Fprintf(&b, " at %s", codeSpan(loc))
 	}
 	if s.ImportID > 0 {

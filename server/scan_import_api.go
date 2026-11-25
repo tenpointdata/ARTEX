@@ -94,8 +94,6 @@ func runScanImport(ctx context.Context, pg *db.DB, req scanImportRequest) (*scan
 		if _, err := pg.AddScanImportFact(ctx, im, importFactPayload(im, res), req.AnchorAssetIDs); err != nil {
 			return nil, err
 		}
-	} else if len(req.AnchorAssetIDs) > 0 {
-		return nil, errAnchorsNeedTask
 	}
 	byHost := map[string][]int64{}
 	as := pg.Assets()

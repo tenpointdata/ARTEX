@@ -205,6 +205,28 @@ FROM finding_import_sources WHERE finding_id = ANY($1::bigint[])`, ids)
 	return out, rows.Err()
 }
 
+// attachImportSources sets ImportSource on the imported findings of fs (one
+// query for the batch).
+func (d *DB) attachImportSources(fs []*DBFinding) error {
+	if len(fs) == 0 {
+		return nil
+	}
+	ids := make([]int64, len(fs))
+	for i, f := range fs {
+		ids[i] = f.ID
+	}
+	src, err := d.ImportSourcesByFindingIDs(context.Background(), ids)
+	if err != nil {
+		return err
+	}
+	for _, f := range fs {
+		if s, ok := src[f.ID]; ok {
+			f.ImportSource = &s
+		}
+	}
+	return nil
+}
+
 func (d *DB) withTx(ctx context.Context, fn func(*sql.Tx) error) error {
 	tx, err := d.BeginTx(ctx, nil)
 	if err != nil {
