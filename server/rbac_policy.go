@@ -116,6 +116,9 @@ var rbacPolicy = []policyRule{
 	{http.MethodGet, "/api/traffic/blob", false, permOperate},
 	{http.MethodGet, "/api/traffic/export", true, permOperate},
 	{http.MethodGet, "/api/traffic/stream", false, permOperate},
+	// A row selection's raw exchanges, deleted or exported as HAR (audited).
+	{http.MethodPost, "/api/traffic/bulk-delete", false, permOperate},
+	{http.MethodPost, "/api/traffic/bulk-export", false, permOperate},
 	{http.MethodGet, "/api/conversations/{id}/messages", true, permOperate},
 
 	// --- read: the audit chain, for reviewers ---

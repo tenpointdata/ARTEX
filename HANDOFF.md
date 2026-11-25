@@ -203,6 +203,14 @@ switches between them and reads each one's findings and report; all 51 `/api` re
 
 **2026-11-24 (c-c0bb07, E4)** — OWASP WSTG 4.2 and API Top 10 2023 checklists drive coverage (`methodology/`). Detail moved to `docs/handoff/2026-11-24-e4-methodology-coverage.md`.
 
+**2026-11-24 (c-4b7989, E9 follow-up)** — Traffic bulk bar acts on exactly the selected exchanges:
+`POST /api/traffic/bulk-delete` and `POST /api/traffic/bulk-export` (`{"ids": [...]}`, max 5,000; RBAC
+`operate`; audited as `traffic.bulk_delete` / `traffic.bulk_export`). Store: `traffic.DeleteIDs` and
+`PageQuery.IDs` (`traffic/bulk_ids.go`). UI: "Export selected as HAR" and "Delete selected" (confirm) beside
+"Delete targets of selection". Documented in `docs/traffic-har.md`. Tested in `traffic/bulk_ids_test.go` and
+`server/traffic_bulk_test.go` (PG). On macOS, `TestManagerSOCKS5UDPOptInAndAssetBlockRuleDropsDatagram`
+fails because it binds 127.0.0.2; that is environmental, not this change.
+
 Older Current state blocks (bench subject image, E5 governance, client binding, the 2026-11-23 audit fixes,
 the full Docker image, the E8 suite) are in `docs/handoff/2026-11-24-current-state-archive.md`.
 
@@ -213,8 +221,8 @@ the full Docker image, the E8 suite) are in `docs/handoff/2026-11-24-current-sta
 1. *(unclaimed)* — **E7: worker nodes miss other runtime control-node state** (M), card `c-6bcdd3`: LLM profiles,
    MCP servers, custom tools and similar are rebuilt only at start. Done = each one is followed or listed in
    DISTRIBUTED.md Limits.
-2. *(unclaimed)* — **E9 follow-ups** (S–M): `c-4b7989` (per-exchange traffic bulk delete/export).
-   (`c-f729e8`, approvals triage + grouped advance + biome errors, in review on `ej/20261124-175807-17ca91`.) (`c-45c921`, the dashboard push, is in
+2. *(in review)* — **E9 follow-ups**: `c-4b7989` (per-exchange traffic bulk delete/export) is built on
+   `ej/20261124-191203-08f678`. (`c-f729e8`, approvals triage + grouped advance + biome errors, in review on `ej/20261124-175807-17ca91`.) (`c-45c921`, the dashboard push, is in
    review on `ej/20261124-170157-3aeba5`.)
    "Done when" is on each card.
 3. *(unclaimed)* — **SEC: per-task uid follow-ups** (S each): `c-12df03` (single-uid start-up fails on a
