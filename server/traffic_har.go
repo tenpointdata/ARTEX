@@ -78,6 +78,12 @@ func (s *Server) exportTrafficHAR(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	writeHARDownload(w, doc, meta)
+}
+
+// writeHARDownload writes doc as a HAR attachment with the X-ARTEX-HAR-*
+// truncation headers, shared by the filter export and the selection export.
+func writeHARDownload(w http.ResponseWriter, doc traffic.HAR, meta traffic.HARExportMeta) {
 	payload, err := json.Marshal(doc)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())

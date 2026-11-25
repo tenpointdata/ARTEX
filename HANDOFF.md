@@ -1,6 +1,6 @@
 # HANDOFF.md — ARTEX
 
-**Last updated:** 2026-11-24 19:39 MST, by claude-code: c-bd9b7a (in review on ej/20261124-191154-865292): RouteGuard in the (main) layout (route-access.ts resolver from the sidebar's need, tested) sends a role to its landing page without mounting a page it can't see; c-92bb… Earlier hand-offs are under Deltas and in `ej handoff log`.
+**Last updated:** 2026-11-24 20:51 MST, by claude-code: c-0aaa24 (in review): propose.Drafter hook (Input.Drafter, nil = fixed guidance). Earlier hand-offs are under Deltas and in `ej handoff log`.
 
 > Single entry point for whoever picks this up next (any agent or human), with no access to the
 > originating conversation. Read this first, then the sections of the code it points at.
@@ -76,6 +76,43 @@ request needing a missing permission). The probe itself (`c-80fe4e`) is on this 
 - `integrations.sh` now runs the backend from its work dir (it used to write `jwt.key`/`secret.key` into the
   caller's cwd) and takes `ARTEX_E2E_PROXY_PORT`.
 
+**2026-11-24 — SOCKS5 auth regression after #79 fixed (`c-831dfa`).** `checkCredential` looked up a
+scope-token password in the local registry only, so worker-minted tokens that the remote resolver holds got
+RFC 1929 0x01. It now uses `Traffic.resolveScope` (local, then remote). `TestSOCKS5RemoteScope` now expects
+#79's refusal stage: unknown or ended tokens get 0x01 at auth, and the bare pace marker passes open-mode auth
+and then gets 0x02 at CONNECT. `TestManagerSOCKS5UDP…` was failing only because 127.0.0.2 can't be bound on
+macOS. It now skips there and passes on Linux with real PG (golang:1.26.11-bookworm, private Docker network).
+`scripts/verify.sh` Go steps pass. Its web i18n step fails on #80's strings (`c-be8a4f`).
+
+**2026-11-24 — E2 push updates via signed webhooks (`c-c2bdc8`; in review on `ej/20261124-191156-37e38c`).**
+This branch also carries the c-da9198 commit (per-tracker advisory lock, capped sync cursor, background
+sync; cherry-picked from `ej/20261124-135159-6d9961`, which main did not have yet), because the webhook
+runs under that lock. `POST /api/hooks/trackers/{id}` (`server/ticket_webhook.go`) is exempt from
+`requireAuth` and authenticated by an HMAC-SHA256 of the body under the tracker's optional
+`webhook_secret` (sealed in the tracker config, masked, scrubbed; ≥16 chars). GitHub: `X-Hub-Signature-256`,
+`issues` events, repo must match. Jira Cloud: `X-Hub-Signature` (admin webhook with secret), project must
+match. The payload only names the ticket; `ticketSyncer.sync` reads the state from the tracker API under the
+lock (busy → 202 `deferred`). Uniform 401, 1 MiB, 4 in flight, 10-min delivery-id window, `ticket.webhook`
+audit entries. A destination change re-asks only the outbound credentials (`ticketing.OutboundSecretKeys`).
+The tracker sheet has a Webhook secret field and shows the URL. Docs: `docs/integrations.md`. No migration.
+Verified against a throwaway Postgres 18: `TestGitHubWebhookClosesFinding`, `TestGitHubWebhookRejectsBadSignature`,
+`TestWebhookNeedsConfiguredSecret`, `TestWebhookDeferredWhileTrackerLocked` (held lock → 202 `deferred`, finding
+unchanged, redelivery of the same id then processed), the ticketing webhook unit tests, all existing E2 ticket tests, web
+`test:integrations`. An independent security review found no bypass or leak; its slowloris, timing, dedup-order
+and id-length findings are fixed (10 s read deadline, every refusal hashes the body). `scripts/verify.sh`:
+only the two known environment failures (`TestConnectWithoutPasswordRealPG` on a trust-auth Postgres,
+`TestManagerSOCKS5UDPOptInAndAssetBlockRuleDropsDatagram` without 127.0.0.2), plus `TestSOCKS5RemoteScope`, which
+also fails on main (`traffic/` is identical to main; card `c-1a74a4`). Not verified: a live
+GitHub/Jira delivery (needs a publicly reachable instance), the sheet in a browser.
+
+**2026-11-24 — RSI proposer (`c-c89f5b`, on main via #77) + model drafter (`c-0aaa24`, in review on
+`ej/20261124-203755-708a1e`).** `cmd/artex-rsi-propose`
+(core `rsi/propose`) drafts goals/planner/worker body edits from closed tasks when a rule's signal holds
+on ≥2 tasks across ≥2 scopes, inside the round budget; `--draft-model` (off by default) lets a model
+rewrite the body through the same checks; the drafter must not be the judge. `verify.sh` there fails only
+on `TestSOCKS5RemoteScope` (fix in review, `c-1a74a4`) and the web i18n check (`c-430ba2`). Detail:
+`docs/handoff/2026-11-24-e3-rsi-loops.md`. Not checked: a real instance (`c-4bbf29`).
+
 **2026-11-24 — LLM sampling pin (`c-d73308`, E8; on main via #69).** Migration 0028 adds nullable
 `llm_profiles.sampling_seed`/`sampling_temperature`; `agent/sampling.go` splices them into the wire body
 (seed on openai/ollama only; temperature only where the caller set none). Suite stamps `llm_sampling`.
@@ -146,49 +183,9 @@ worker-node finding binds the control capture through a signed node RPC (`POST /
 `server/node_rpc.go`, HMAC under `db.NodeRPCKey`); design in `docs/DISTRIBUTED.md` "Evidence on worker
 nodes", verification in Deltas. Gap `c-7ad4da` (capture switch read at start-up) is closed by c-8cfbfe.
 
-**2026-11-24 — E10 code-security lane + its UI and exports (`c-72dd9d`, `c-d059ae`; in review)** on
-`ej/20261124-170322-736db7`, which merges the unlanded E10 branch `ej/20261124-150533-1ba29e` and main
-(E2 backend + UI are on main as migration 0015). **Land this branch, not the E10 branch alone.**
-- E10: SARIF imports get a lane (`runtime`/`sast`/`sca`); a task import with `asset_ids` writes an
-  exploration fact yielding a finding node per new finding; `GET /api/report` shows a Source line and
-  per-lane counts. Migration `0024_code_security_lane.sql` (E10's renumber of E2 to 0023 is dropped).
-- c-d059ae: `?lane=runtime|sast|sca` in the shared findings filter (list, groups, tree, export;
-  runtime = worker findings + runtime-scanner imports); finding DTOs carry `source` (lane, tool, rule,
-  path:line, import id; no raw record); findings Markdown exports get the Source line and CSV gets
-  Lane/Source Tool/Source Rule/Source Location/Import ID; import rows carry `lane_counts`.
-- Web: lane badge + `path:line` on the findings table and detail, a lane dropdown (URL `?lane=`), an
-  anchor-asset picker on Scanner imports (enabled once a task is chosen; lists `GET /assets?task_id=`),
-  and Lanes + Fact node columns on Past imports.
-- Verified on Postgres 16: `TestFindingFilterByLane`, `TestCodeScanJoinsTaskGraphAndReport` (now also
-  lane filter, DTO source, CSV/MD exports, unknown anchor leaves no import row), `report` tests;
-  `scripts/verify.sh` (only the known macOS SOCKS5 test fails) and `--web-only` pass. Not checked in a
-  browser. Gaps: `c-7651e5` (stat cards ignore lane/import filters; fact node has no deep link).
-- Detail of E2 and E10 (formats, decisions, verification): `docs/handoff/2026-11-24-e2-e10-integrations.md`.
-
 **2026-11-24 — SSE 401 after console login (`c-13e86c`, fixed; pre-E5).** Streams are same-origin only
 (`web/src/lib/sse.ts`), dev gzip off, `openSSE` writes `: open`. Test `server/activity_stream_auth_pg_test.go`;
 browser-checked on the E5 stack.
-
-**2026-11-24 (c-73af97, E9 frontend/UX pass)**: findings triage, the live dashboard and file sizes.
-
-- **File sizes and types.** Every `web/src` TS/TSX file is now ≤600 lines; the largest was 4290. No `any` remains: tools-page casts and `Record<string, any>` became typed narrowing and `unknown`. Split files keep their old paths as barrels, so imports are unchanged:
-  - `lib/types.ts` → `lib/types/*`
-  - `lib/api.ts` → `lib/api/*`
-  - `lib/mock/*` → `lib/mock/data/*` and `lib/mock/handler/*`
-- **Findings triage.** The pure core is `web/src/lib/triage.ts` (tests: `npm run test:triage`, added to `verify.sh`). An open finding has a verdict bar: Confirm, False positive, Duplicate, Accept risk, Ignore, In progress, with keys c/f/d/a/i/p, j/k to move, Esc to close. After a verdict the next finding opens on its own. Stat tiles are one-click filters, and Pending starts the queue.
-- **Findings URL.** The list now reads URL params (`?status=pending&severity=…&task=…&view=…&triage=1`), so the dashboard deep-links straight into the triage queue.
-- **Measured** in Chromium against the mock backend (`NEXT_PUBLIC_MOCK=1`), same build, triaging 3 pending findings:
-  - old path (status filter dropdown, expand, status dropdown): 11 interactions
-  - new path (Pending tile, then one key each): 4 interactions
-  - both took pending from 15 to 12
-- **Dashboard.** Now `dashboard/_components/*`: KPI tiles link to their lists; running tasks, newest findings and activity are tables. It is still polling (no global push channel exists): a Live/Paused indicator, pause when hidden, refresh on focus.
-- **Assets.** Clear-selection was added to the existing bulk delete. The per-type lists were already tables and are now driven from data.
-- **Traffic.** Select-all is now indeterminate when partly selected, and the selection survives paging. New bulk actions: copy URLs, and delete targets (whole hosts, behind a confirm). The hook-versions list is now a table.
-- **Verified:** `tsc` clean, `test:i18n` and all web node tests pass, findings and dashboard checked in a browser on the mock backend.
-- **Not checked:** the other split pages in a browser (they were split verbatim), and a real backend.
-- **Merged with main (c-45c921 base):** main's api/types changes live in the split modules: `sseUrl` is gone from `lib/api` (use `lib/sse`), `import_id` in `findingFilterParams` (`lib/api/core.ts`), E2 types in `lib/types/integrations.ts`, the import filter and tracker push in the findings `_components/`.
-- **c-92bb52's gating** was re-applied onto these split files by `c-bd9b7a`.
-- **Follow-ups:** `c-45c921` (dashboard push channel), `c-4b7989` (per-exchange traffic bulk delete/export), `c-f729e8` (approvals triage, grouped-view page advance, biome errors; in review).
 
 **2026-11-24 (c-ca2bd0, E4 follow-up)** — An operator can choose a task's methodologies. Migration
 **0022** adds `tasks.methodologies TEXT[]` (empty `{}` = automatic, as before). The create request
@@ -220,6 +217,14 @@ switches between them and reads each one's findings and report; all 51 `/api` re
 
 **2026-11-24 (c-c0bb07, E4)** — OWASP WSTG 4.2 and API Top 10 2023 checklists drive coverage (`methodology/`). Detail moved to `docs/handoff/2026-11-24-e4-methodology-coverage.md`.
 
+**2026-11-24 (c-4b7989, E9 follow-up)** — Traffic bulk bar acts on exactly the selected exchanges:
+`POST /api/traffic/bulk-delete` and `POST /api/traffic/bulk-export` (`{"ids": [...]}`, max 5,000; RBAC
+`operate`; audited as `traffic.bulk_delete` / `traffic.bulk_export`). Store: `traffic.DeleteIDs` and
+`PageQuery.IDs` (`traffic/bulk_ids.go`). UI: "Export selected as HAR" and "Delete selected" (confirm) beside
+"Delete targets of selection". Documented in `docs/traffic-har.md`. Tested in `traffic/bulk_ids_test.go` and
+`server/traffic_bulk_test.go` (PG). On macOS, `TestManagerSOCKS5UDPOptInAndAssetBlockRuleDropsDatagram`
+fails because it binds 127.0.0.2; that is environmental, not this change.
+
 Older Current state blocks (bench subject image, E5 governance, client binding, the 2026-11-23 audit fixes,
 the full Docker image, the E8 suite) are in `docs/handoff/2026-11-24-current-state-archive.md`.
 
@@ -227,11 +232,14 @@ the full Docker image, the E8 suite) are in `docs/handoff/2026-11-24-current-sta
 ## Triage (next handful)
 
 **Agents' lane**
+0. *(unclaimed)* — **`go test ./traffic` fails on main** (S), card `c-81b834`: `TestSOCKS5RemoteScope`
+   gets auth reply 0x01 since #79's SOCKS5 auth; it stops `scripts/verify.sh` before the web steps. Done = cause found
+   (without loosening auth), verify.sh green.
 1. *(unclaimed)* — **E7: worker nodes miss other runtime control-node state** (M), card `c-6bcdd3`: LLM profiles,
    MCP servers, custom tools and similar are rebuilt only at start. Done = each one is followed or listed in
    DISTRIBUTED.md Limits.
-2. *(unclaimed)* — **E9 follow-ups** (S–M): `c-4b7989` (per-exchange traffic bulk delete/export).
-   (`c-f729e8`, approvals triage + grouped advance + biome errors, in review on `ej/20261124-175807-17ca91`.) (`c-45c921`, the dashboard push, is in
+2. *(in review)* — **E9 follow-ups**: `c-4b7989` (per-exchange traffic bulk delete/export) is built on
+   `ej/20261124-191203-08f678`. (`c-f729e8`, approvals triage + grouped advance + biome errors, in review on `ej/20261124-175807-17ca91`.) (`c-45c921`, the dashboard push, is in
    review on `ej/20261124-170157-3aeba5`.)
    "Done when" is on each card.
 3. *(unclaimed)* — **SEC: per-task uid follow-ups** (S each): `c-12df03` (single-uid start-up fails on a
@@ -329,9 +337,10 @@ Card ids in brackets:
 - **E1** [`c-8f9cca`] Client-grade reporting & deliverables (scoring, remediation, framework mappings, branded export).
 - **E2** [`c-6def05`] Backend, UI (`c-597eb6`) and UI follow-ups (`c-2d91eb`) are done, in review on `ej/20261124-150516-d78c96` (see Current state). Follow-ups:
   [`c-119206`] role-gate the E2 UI controls; [`c-1198a2`] run `scripts/e2e/integrations.sh` in CI (after c-cc25b6);
-  [`c-da9198`] scheduled sync plus a per-tracker lock; [`c-ea60a0`] move agent `scan_ingest` onto
+  [`c-da9198`] scheduled sync plus a per-tracker lock (on `ej/20261124-135159-6d9961`, also carried by the
+  c-c2bdc8 branch); [`c-c2bdc8`] signed webhooks (in review on `ej/20261124-191156-37e38c`); [`c-ea60a0`] move agent `scan_ingest` onto
   `scanimport`, normalize default ports, and settle two dedup edge cases.
-- **E3** [`c-d25ff9`] — gate built (in review). Follow-ups: hardening `c-0d277f`, UI `c-936308`, first live run `c-772190`, proposer/critic `c-c89f5b`.
+- **E3** [`c-d25ff9`] — gate built (in review). Follow-ups: hardening `c-0d277f`, UI `c-936308`, first live run `c-772190`, proposer/critic `c-c89f5b` (on main; follow-ups `c-4bbf29` live run, `c-0aaa24` model drafter in review).
 - **E4** [`c-c0bb07`] Methodology-driven coverage: landed 2026-11-24 (see Current state). Follow-ups:
   [`c-ca2bd0`] an operator-chosen methodology per task (landed, in review; gaps `c-aed5fd`); [`c-ed937d`] checklist completion in the report export (after E1).
 - **E5** [`c-669406`] Engagement governance. The backend is done on `ej/20261124-055929-bd2253`. Follow-ups:
@@ -442,6 +451,21 @@ Card ids in brackets:
   `ARTEX_SECRET_KEY`) loses stored secrets.
 
 ## Decisions
+
+- **2026-11-24 c-cce755 (RSI action roles):** `POST /api/rsi/proposals/{id}/rollback` needs `admin`
+  (one exact rule in `server/rbac_policy.go`): it re-points an agent's live prompt version, the same effect as
+  `PUT /api/agents/...`. No password, so the owner (admin) keeps one-step rollback. Reject, propose and evidence stay
+  `operate` (the default): reject applies only before adoption and changes no live prompt, and the proposer and bench
+  harness post with operator tokens; adopt stays `operate` + owner password. Not a blanket `/api/rsi` mutate rule,
+  which would lock the proposer out. Reverses the earlier "reject and rollback need only a session" line in `RSI.md`.
+  The RSI page (c-936308, unmerged branch `ej/20261124-192153-48c72c`) must gate the Rollback button on
+  `useCan("admin")` and keep reject on `useCan("operate")` (follow-up c-a842a0).
+- **2026-11-24 c-c2bdc8 (tracker webhooks):** a delivery is a hint, never state: it names a ticket and the
+  normal sync reads the tracker API, so forged or replayed payloads cannot set a finding status. Jira is
+  supported only through Jira Cloud's HMAC-signed admin webhooks (`X-Hub-Signature`); a secret in the URL was
+  rejected (it lands in proxy/access logs) and Connect JWT is out of scope. The webhook secret is not an
+  outbound credential, so a destination change keeps it. Every refusal is the same 401 so tracker ids are not
+  probeable.
 
 - **2026-11-24 c-f729e8 (approvals triage):** approval keys are A/D (separate verdict set from findings' C/F/D/A/I/P;
   the meaning of a key depends on the queue). They act only on an open pending request, never on a selection or with
@@ -593,11 +617,12 @@ Card ids in brackets:
 ## Deltas
 
 <!-- composite:deltas · newest first; Composite rewrites this block on every merge (ej handoff merge / merge_handoff) -->
+- **2026-11-24 20:51 MST** · claude-code · `ej/20261124-203755-708a1e` `30a1782`→`dac6220` (1 commit) · `h-8ecb71` — c-0aaa24 (in review): propose.Drafter hook (Input.Drafter, nil = fixed guidance). Build drafts in rank order after the transfer filter and the fixed-body ValidateEdit, so only in-space roles reach the model and a refused body frees its slot. DraftRequest carries code-owned text, counts and the active body only. Output is refused (never repaired) on template-action changes, stray delimiters, empty, unchanged or prior bodies, or a ValidateEdit failure. WriteArm re-checks. CheckDrafter refuses a drafter equal to the judge, or any drafter when no judge is named. CLI: --draft-model/--draft-provider/--draft-url/--judge-model, $ARTEX_DRAFT_API_KEY. New agent.Complete (tool-less one-shot) and agent.FrameData (exported data envelope). Arms carry drafted_by. Hostile-output tests in rsi/propose/drafter_test.go and cmd/artex-rsi-propose/drafter_test.go, mutation-checked. Older Current state blocks moved to docs/handoff/. **Next:** Land ej/20261124-203755-708a1e. Then c-4bbf29: run a real-model --draft-model dry run on a bench instance and send one drafted arm through eval_suite with a different judge. Optional: cap the share of a body a rewrite may delete, if real drafts strip useful content. **Decided:** A refused drafted body skips the rule instead of falling back to the fixed text, so the plan says why and the operator can rerun without the flag. Drafting happens after budget ranking to keep model calls within the round's slots. Drafted proposals are tagged "[drafted rule <id>]" in the rationale, because a rewrite need not contain the guidance text the old pruner matches. An unknown judge counts as a refusal, since independence cannot be checked. Template actions must stay exactly the same set as in the active body.
 - **2026-11-24 19:39 MST** · claude-code · `ej/20261124-191154-865292` `e9fbefe`→`af602b8` (12 commits) · `h-be59c2` — c-bd9b7a (in review on ej/20261124-191154-865292): RouteGuard in the (main) layout (route-access.ts resolver from the sidebar's need, tested) sends a role to its landing page without mounting a page it can't see; c-92bb52's useCan gating re-applied onto main's E9 file layout (system/*, tasks, traffic, chat, findings, assets, records, sync, workspace, agent editor, approvals); task Overview by-model card needs operate; integrations page and findings tracker reads gated. scripts/e2e/role-probe.sh passes for reviewer, operator and client_read; scripts/verify.sh passes. The branch also carries the role probe (c-80fe4e). **Next:** Land ej/20261124-191154-865292 (carries c-80fe4e and c-bd9b7a). Do NOT land ej/20261124-144553-d5978e (c-92bb52): superseded. Then c-601ec6. Optional: port c-92bb52's errorText(e) swaps; hide the Overview "click Re-run all" footnote without operate. **Decided:** c-92bb52's single commit (gating + file splits) conflicted with main's E9 split in ~40 files, so its gating intent was ported onto main's files instead of merging; the traffic row selection stays for read roles (Copy URLs) while the sheet opens only with operate. Route permission comes from the sidebar's need so nav and guard share one source.
 - **2026-11-24 19:35 MST** · claude-code · `ej/20261124-192153-48c72c` `5e3f5b4`→`96e3134` (1 commit) · `h-8712ef` — c-936308 (in review): /system/rsi page — proposals table with newest verdict, expandable per-gate rates (with n), paired gained/lost, regressions with targets, adoption log, prompt-history link; inline Adopt (password + newest evidence_id), Reject, Roll back (reason); ARTEX_RSI_LOOP state from /api/rsi/status. GET /api/rsi/proposals now returns latest_evidence (db.LatestRSIEvidence). Verified with tsc, biome, verify.sh, TestRSIGateEndToEndPG on Postgres 17, and headless Chromium: adopt then rollback in 2 clicks each. Issues: opened c-cce755. **Next:** Land ej/20261124-192153-48c72c. Then c-cce755 (decide whether RSI reject/rollback need admin). The live end-to-end run stays c-772190. **Decided:** Newest evidence is attached to the list response (one DISTINCT ON query) rather than a per-row detail call; the field is additive, so existing API users are unaffected. The loop flag is shown, not toggled: turning it on stays an owner decision in the environment (RSI.md rule 5). Actions are shown to operate sessions to match the current server RBAC; c-cce755 tracks whether that should be admin.
 - **2026-11-24 19:31 MST** · claude-code · `ej/20261124-192202-fbe9e3` `5e3f5b4`→`077451f` (1 commit) · `h-8d9748` — c-c89f5b (in review): RSI Loop C proposer. cmd/artex-rsi-propose + rsi/propose read closed tasks' outcome/lessons and /api/skill-gaps, keep only rules whose signal holds on >=2 tasks across >=2 scopes, append fixed guidance to one goals/planner/worker body, validate with rsi.ValidateEdit (draft and write time), write arm files (proposed_from task:<id>, rationale) + plan.json within the round's remaining status budget; --post registers them. Refuses while ARTEX_RSI_LOOP is off; client can only GET and POST /api/rsi/proposals. Tail markers moved to agent.CodeOwnedTailMarkers; status reports max_open. **Next:** Land ej/20261124-192202-fbe9e3. Then c-4bbf29: real-instance dry run and one proposal through eval_suite + evidence (fold with c-f1518c). Later c-0aaa24 (model-drafted critic). **Decided:** Go, not Python, so the proposer calls rsi.ValidateEdit directly. Guidance is a fixed code-written table and no live task text enters a body (live output is untrusted). The proposer stays in the newest round and opens the next only when --round names it, since advancing closes the current round. Dry run is the default. Loop flag is required even for a dry run (checked at start and before posting). **Issues:** opened #c-0aaa24, #c-4bbf29.
-- **2026-11-24 19:12 MST** · claude-code · `ej/20261124-184126-e60926` `124c0dd`→`0406b7e` (2 commits) · `h-43b8d4` — c-80fe4e (in review): scripts/e2e/role-probe.sh, a role probe on the integrations.sh harness. It seeds a WebSocket recorded through the real proxy plus a paused task, a finding and an agent, then clicks every enabled control on every (main) page as reviewer, operator and client_read, with writes faked in the browser. It fails on any /api 4xx and on any request whose permission (parsed from server/rbac_policy.go) the role lacks. On the c-92bb52 branch operator passes (the stream view shows the messages). Reviewer has 2 reads left, and client_read gets 403s on sign-in and on non-client pages opened by URL. integrations.sh now runs the backend from its work dir and takes ARTEX_E2E_PROXY_PORT. **Next:** Land c-92bb52 (ej/20261124-144553-d5978e; main still lacks it, so the probe fails widely on main). Then do c-bd9b7a: a route guard in the (main) layout plus a guard on the task Overview by-model read, until role-probe.sh passes for all three roles. After that, consider running role-probe.sh in CI. **Decided:** Writes are faked in the browser (200 {}), never sent to the backend. Deciding from the parsed policy whether the role may make each request catches enabled controls without changing state, which a "click and wait for a 403" probe cannot. The policy table is parsed from the Go source so the probe can't drift from it (cross-checked against Go requiredPermission on 21 routes). The task is created through the API before any LLM profile exists and then paused, so the Manager knows it and no agent can run. The UI fixes were left to c-92bb52 and c-bd9b7a rather than this probe card. **Issues:** opened #c-bd9b7a.
 - _Older hand-offs, a line each; `ej handoff log` has them whole:_
+- **2026-11-24 19:12 MST** · claude-code · `h-43b8d4` — c-80fe4e (in review): scripts/e2e/role-probe.sh, a role probe on the integrations.sh harness. **Next:** Land c-92bb52 (ej/20261124-144553-d5978e; main still lacks it, so the probe fails widely on main). **Issues:** opened #c-bd9b7a.
 - **2026-11-24 19:11 MST** · claude-code · `h-e9f875` — c-1e3b53 (E7, in review): before worker.Execute a distributed node pulls the stored files of the intent's run dir, the task's spills and the session's sidechains (pullRunFilesFrom), makes the dirs as the run does, then hands what it pulled to the executor (sh… **Next:** Land ej/20261124-185425-cbc1cf instead of ej/20261124-180332-433a2b (it carries it).
 - **2026-11-24 19:02 MST** · claude-code · `h-b23a91` — c-ccc7a8 (in review): this branch merges c-6bcdd3 (ej/20261124-172031-c2bb7b, carrying c-20c400/c-d4946f/c-8cfbfe and the E7 stack) and c-677166 (ej/20261124-163818-870578, proxy-hop TLS), so landing it lands both. **Next:** Land ej/20261124-185428-8c1cc4; do not land ej/20261124-163818-870578 or ej/20261124-172031-c2bb7b separately afterwards.
 - **2026-11-24 18:49 MST** · claude-code · `h-7cf4df` — c-1bbeb6 (E7, in review): worker nodes sweep their local tasks/<T>, spill/tasks/<T> and transcripts/exp<E>-… of deleted, archived or vanished tasks on start-up and every 10 min (server/worker_node_sweep.go, db.RetiredTasks in db/task_retirement.go); stageTask… **Next:** Land ej/20261124-184127-104862 (card c-1bbeb6 in review).
@@ -608,7 +633,6 @@ Card ids in brackets:
 - **2026-11-24 18:13 MST** · claude-code · `h-6293db` — c-f729e8 (in review), on a branch that merges the c-45c921 branch (ej/20261124-170157-3aeba5, which carries E9), so landing it lands both. **Next:** Land ej/20261124-175807-17ca91 (carries c-45c921 and E9).
 - **2026-11-24 18:12 MST** · claude-code · `h-bb3c3b` — c-4ee114 done (closed; c-80fe4e opened). **Next:** c-80fe4e: probe the stream-messages view, the detail pages and client_read.
 - **2026-11-24 18:09 MST** · claude-code · `h-8a0153` — c-888292 (E6 follow-up, now in review): archives made before cost_cells are backfilled on start. **Next:** Land ej/20261124-175804-41533a in place of ej/c-990198-wall-time (it carries E6, c-f4a69d and c-990198).
-- **2026-11-24 17:47 MST** · claude-code · `h-a90a9e` — c-6bcdd3 (E7, now in review), on a branch that merges ej/20261124-165722-c858f3 (c-1d3e0a and the E7 stack under it) and main. **Next:** Land the E7 stack (c-8cfbfe, c-18f7a8, c-1d3e0a), then this branch.
 <!-- /composite:deltas -->
 
 _(written by `merge_handoff`)_

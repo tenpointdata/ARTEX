@@ -112,45 +112,63 @@ export const trafficApi = {
     if (opts.respMin) qs.set("resp_min", opts.respMin);
     if (opts.respMax) qs.set("resp_max", opts.respMax);
     const suffix = qs.toString();
-    const token = getToken();
-    const r = await fetch(`/api/traffic/export/har${suffix ? `?${suffix}` : ""}`, {
-      headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) },
-    });
-    if (r.status === 401) {
-      if (typeof window !== "undefined") {
-        window.location.href = "/login";
-      }
-      throw new Error(t("Unauthorized"));
-    }
-    if (!r.ok) {
-      let msg = String(r.status);
-      try {
-        const payload = (await r.json()) as { error?: unknown };
-        if (typeof payload.error === "string" && payload.error.trim()) msg = payload.error.trim();
-      } catch {
-        // Keep status fallback.
-      }
-      throw new ApiError(t("HAR export failed: {error}", { error: msg }), r.status);
-    }
-    const blob = await r.blob();
-    const exported = Number(r.headers.get("X-ARTEX-HAR-Exported") ?? "0") || 0;
-    const matched = Number(r.headers.get("X-ARTEX-HAR-Matched") ?? "0") || 0;
-    const truncated = r.headers.get("X-ARTEX-HAR-Truncated") === "true";
-    const truncatedReason = r.headers.get("X-ARTEX-HAR-Truncated-Reason") ?? undefined;
-    const objectUrl = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = objectUrl;
-    a.download = "artex-traffic.har";
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    URL.revokeObjectURL(objectUrl);
-    return { exported, matched, truncated, truncatedReason };
+    return downloadHAR(`/api/traffic/export/har${suffix ? `?${suffix}` : ""}`);
+  },
+  // Exports exactly the selected exchanges as a HAR 1.2 download (audited server-side).
+  trafficExportHARByIds: async (ids: string[]): Promise<TrafficHARExportMeta> => {
+    if (MOCK) throw new Error(t("HAR export is not available in mock mode"));
+    return downloadHAR(`/api/traffic/bulk-export`, { ids });
   },
   trafficHosts: () => get<{ hosts: TrafficHost[] }>(`/traffic/hosts`),
   trafficDeleteHost: (host: string) => del<{ deleted: number }>(`/traffic?host=${encodeURIComponent(host)}`),
   trafficDeleteHosts: (hosts: string[]) => del<{ deleted: number }>(`/traffic/hosts`, { hosts }),
+  // Deletes exactly the selected exchanges, not their hosts (audited server-side).
+  trafficDeleteIds: (ids: string[]) => post<{ deleted: number }>(`/traffic/bulk-delete`, { ids }),
   // Purges every exchange and compacts the index; `reclaimed` is the bytes of
   // index handed back to the filesystem. Evidence bound to findings is kept.
   trafficDeleteAll: () => del<{ deleted: number; reclaimed: number }>(`/traffic/all`),
 };
+
+// Fetches a HAR export (the JSON helpers cannot carry a file download), saves it
+// as artex-traffic.har, and returns the X-ARTEX-HAR-* truncation metadata. A
+// JSON body makes it a POST (the selection export); none, a GET (the filter export).
+async function downloadHAR(url: string, body?: object): Promise<TrafficHARExportMeta> {
+  const token = getToken();
+  const headers: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {};
+  const r = await fetch(
+    url,
+    body
+      ? { method: "POST", headers: { ...headers, "Content-Type": "application/json" }, body: JSON.stringify(body) }
+      : { headers },
+  );
+  if (r.status === 401) {
+    if (typeof window !== "undefined") {
+      window.location.href = "/login";
+    }
+    throw new Error(t("Unauthorized"));
+  }
+  if (!r.ok) {
+    let msg = String(r.status);
+    try {
+      const payload = (await r.json()) as { error?: unknown };
+      if (typeof payload.error === "string" && payload.error.trim()) msg = payload.error.trim();
+    } catch {
+      // Keep status fallback.
+    }
+    throw new ApiError(t("HAR export failed: {error}", { error: msg }), r.status);
+  }
+  const blob = await r.blob();
+  const exported = Number(r.headers.get("X-ARTEX-HAR-Exported") ?? "0") || 0;
+  const matched = Number(r.headers.get("X-ARTEX-HAR-Matched") ?? "0") || 0;
+  const truncated = r.headers.get("X-ARTEX-HAR-Truncated") === "true";
+  const truncatedReason = r.headers.get("X-ARTEX-HAR-Truncated-Reason") ?? undefined;
+  const objectUrl = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = objectUrl;
+  a.download = "artex-traffic.har";
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(objectUrl);
+  return { exported, matched, truncated, truncatedReason };
+}

@@ -479,6 +479,9 @@ func newManager(dir, proxyAddr string, node NodeConfig) (*Manager, error) {
 		pg.Close()
 		return nil, fmt.Errorf("secrets at rest: %w", err)
 	}
+	// Legacy plaintext log lines and LLM record bodies: sealed in the background
+	// (reads accept both); it ends with the table, or when pg is closed.
+	pg.StartBulkSecretsBackfill(context.Background())
 	if err := pg.RecoverFindingRetests(); err != nil {
 		pg.Close()
 		return nil, fmt.Errorf("recover finding retests: %w", err)

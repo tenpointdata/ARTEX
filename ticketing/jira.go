@@ -35,7 +35,7 @@ const (
 type jiraTracker struct{}
 
 func (jiraTracker) Kind() string              { return KindJira }
-func (jiraTracker) SecretKeys() []string      { return []string{"token"} }
+func (jiraTracker) SecretKeys() []string      { return []string{"token", WebhookSecretKey} }
 func (jiraTracker) DestinationKeys() []string { return []string{"base_url"} }
 
 func (jiraTracker) Validate(cfg map[string]any) error {
@@ -48,7 +48,7 @@ func (jiraTracker) Validate(cfg map[string]any) error {
 	if cfgString(cfg, "token") == "" {
 		return fmt.Errorf("token is required")
 	}
-	return nil
+	return validateWebhookSecret(cfg)
 }
 
 type jiraTarget struct {

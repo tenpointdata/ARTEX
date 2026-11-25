@@ -119,6 +119,7 @@ export default function TrafficPage() {
   const requestDelete = (mode: DeleteMode): Promise<{ deleted: number; reclaimed?: number }> => {
     if (mode === "all") return api.trafficDeleteAll();
     if (mode === "selected") return api.trafficDeleteHosts(selectedHosts);
+    if (mode === "exchanges") return api.trafficDeleteIds([...checked.keys()]);
     return api.trafficDeleteHost(query.host);
   };
 
@@ -131,10 +132,11 @@ export default function TrafficPage() {
         setDeleteMode(null);
         setSelected(null);
         setChecked(new Map());
-        if (mode !== "filter") {
+        if (mode === "selected" || mode === "all") {
           setSelectedHosts([]);
           setPickerOpen(false);
         }
+        if (mode === "exchanges") toast.success(t("Deleted {count} exchanges", { count: r.deleted }));
         if (mode === "all") {
           // Reclaimed space is the whole point of compacting an emptied index, so say so.
           const reclaimed = r.reclaimed ?? 0;
@@ -151,7 +153,9 @@ export default function TrafficPage() {
       })
       .catch((e) => {
         // Keep the confirmation open so the user can retry a failed deletion.
-        if (mode === "all") toast.error(t("Purge failed: {error}", { error: (e as Error).message }));
+        const error = (e as Error).message;
+        if (mode === "all") toast.error(t("Purge failed: {error}", { error }));
+        else toast.error(t("Delete failed: {error}", { error }));
       })
       .finally(() => setDeleting(false));
   };
@@ -252,6 +256,7 @@ export default function TrafficPage() {
             selection={checked}
             onClear={() => setChecked(new Map())}
             onLink={() => setLinking(true)}
+            onDeleteSelected={() => setDeleteMode("exchanges")}
             onDeleteTargets={(targets) => {
               setSelectedHosts(targets);
               setDeleteMode("selected");
@@ -282,6 +287,7 @@ export default function TrafficPage() {
             mode={deleteMode}
             deleting={deleting}
             selectedHosts={selectedHosts}
+            exchangeCount={checked.size}
             hostFilter={query.host}
             recordCount={traffic?.count ?? 0}
             onCancel={() => setDeleteMode(null)}

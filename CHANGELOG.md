@@ -6,6 +6,7 @@ All notable changes to this project are documented in this file. The format is b
 
 ### Added
 
+- **RSI proposer (`artex-rsi-propose`, Loop C critic)**: drafts goals/planner/worker prompt-body edits from closed live tasks' outcomes, lessons and skill gaps, keeping only signals that hold across several tasks and scopes; writes candidate arm files (`proposed_from` = the tasks, with a rationale) within the round's remaining budget, and with `--post` registers them. Runs only while `ARTEX_RSI_LOOP` is on, validates every draft with `rsi.ValidateEdit`, and has no adopt path. `GET /api/rsi/status` now reports `max_open`. See RSI.md, "Proposer".
 - **One executor uid per task (`-exec-uid-range LO-HI`)**: with a range configured, each task and chat session runs its agent shells, custom tools and file tools as a uid of its own while it is live, and its run directories belong to that uid alone (`<uid>:<uid>` 2770), so one hijacked task gets `EACCES` writing another live task's run directory or its `.artex-home`. The uid is released (its processes killed, its files given back to root) when the task ends or is deleted, or the conversation is deleted. `egress.sh` filters the whole range. Off by default; see SECURITY.md, "One executor uid per task".
 - **Engagement governance** (`docs/GOVERNANCE.md`):
   - **Console users and roles.** The roles are `admin`, `operator`, `reviewer` and `client_read`. A declarative route policy is enforced in `requireAuth`. Admins manage users through `/api/users`, and the `ARTEX` login stays the break-glass admin.

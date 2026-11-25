@@ -38,7 +38,7 @@ var githubRepoRE = regexp.MustCompile(`^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$`)
 type githubTracker struct{}
 
 func (githubTracker) Kind() string              { return KindGitHub }
-func (githubTracker) SecretKeys() []string      { return []string{"token"} }
+func (githubTracker) SecretKeys() []string      { return []string{"token", WebhookSecretKey} }
 func (githubTracker) DestinationKeys() []string { return []string{"base_url", "repo"} }
 
 func (githubTracker) Validate(cfg map[string]any) error {
@@ -55,7 +55,7 @@ func (githubTracker) Validate(cfg map[string]any) error {
 	if cfgString(cfg, "token") == "" {
 		return fmt.Errorf("token is required")
 	}
-	return nil
+	return validateWebhookSecret(cfg)
 }
 
 type githubIssue struct {
