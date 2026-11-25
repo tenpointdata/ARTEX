@@ -16,6 +16,13 @@ import type { LLMProfile, LLMRetryOverride } from "@/lib/types";
 import { fromStore, NONE, OLLAMA_DEFAULT_BASE_URL, type ProfileFormat, rich, toStore } from "./llm-shared";
 import { LimitsSections, ModelField } from "./profile-form-sections";
 import { ProfileRetryFields, ZERO_OVERRIDE } from "./retry";
+import {
+  draftFromSampling,
+  EMPTY_SAMPLING_DRAFT,
+  ProfileSamplingFields,
+  type SamplingDraft,
+  samplingFromDraft,
+} from "./sampling";
 
 export function ProfileSheet({
   profile,
@@ -51,6 +58,7 @@ export function ProfileSheet({
   const [customHeaders, setCustomHeaders] = React.useState("");
   const [clearCustomHeaders, setClearCustomHeaders] = React.useState(false);
   const [retry, setRetry] = React.useState<LLMRetryOverride>(ZERO_OVERRIDE); // retry override for this profile; all 0 = follow the global
+  const [sampling, setSampling] = React.useState<SamplingDraft>(EMPTY_SAMPLING_DRAFT); // optional A/B seed/temperature pin
   const [testing, setTesting] = React.useState(false);
   const [saving, setSaving] = React.useState(false);
   const [models, setModels] = React.useState<string[]>([]);
@@ -89,6 +97,7 @@ export function ProfileSheet({
     setCustomHeaders("");
     setClearCustomHeaders(false);
     setRetry(profile?.retry ?? ZERO_OVERRIDE);
+    setSampling(draftFromSampling(profile?.sampling));
     setApiKey("");
     setKeyHint(profile?.api_key_hint ?? "");
     setModels([]);
@@ -169,6 +178,11 @@ export function ProfileSheet({
       return;
     }
     if (saving) return;
+    const pin = samplingFromDraft(format, sampling);
+    if ("error" in pin) {
+      toast.error(pin.error);
+      return;
+    }
     setSaving(true);
     try {
       const { id } = await api.saveLLMProfile({
@@ -196,6 +210,7 @@ export function ProfileSheet({
         custom_headers: format === "bedrock-gateway" ? customHeaders : "",
         clear_custom_headers: clearCustomHeaders,
         retry,
+        sampling: pin.value,
       });
       if (isNew)
         toast.success(t('Created: {name} (use "Set as active" on its card to enable it)', { name: name.trim() }));
@@ -431,6 +446,8 @@ export function ProfileSheet({
             effort={effort}
             setEffort={setEffort}
           />
+
+          <ProfileSamplingFields format={format} value={sampling} onChange={setSampling} />
 
           <ProfileRetryFields value={retry} onChange={setRetry} />
         </div>

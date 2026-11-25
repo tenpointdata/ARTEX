@@ -25,10 +25,14 @@ class FakeArtex:
     def __init__(self, start=None):
         self.prompts = dict(start or {"goals": "G0", "planner": "P0", "worker": "W0"})
         self.saves: list[tuple[str, str, str]] = []
+        self.profiles = [{"id": "1", "is_default": True, "sampling": {"seed": 9, "temperature": 0.2}},
+                         {"id": "2", "is_default": False, "sampling": {}}]
 
     def get(self, path):
         if path == "/api/tasks":
             return {"tasks": []}
+        if path == "/api/llm/profiles":
+            return {"profiles": self.profiles}
         return {"prompt": self.prompts[path.split("/")[3]]}
 
     def post(self, path, body):
@@ -344,6 +348,37 @@ class RunTests(unittest.TestCase):
             stamp = json.loads((tmp / f"out/suite-t/R/{role}.json").read_text())["stamp"]
             self.assertEqual((stamp["lesson_ids"], stamp["lessons_block_sha"]), ([], None))
         self.assertEqual(api.lesson_calls, [])
+
+    def test_sampling_pin_is_stamped_as_an_invariant(self):
+        self.assertIn("llm_sampling", suite_stats.INVARIANT_STAMPS)
+        tmp, suite = self.suite_files()
+        self.run_suite(tmp, suite, write_arm(tmp, "base", {}), write_arm(tmp, "cand", {}), FakeArtex())
+        for role in ("baseline", "candidate"):
+            stamp = json.loads((tmp / f"out/suite-t/R/{role}.json").read_text())["stamp"]
+            self.assertEqual(stamp["llm_sampling"], [{"id": "1", "seed": 9, "temperature": 0.2}])
+        self.assertIn("llm sampling pin #1 seed=9 temp=0.2", (tmp / "out/suite-t/R/report.md").read_text())
+
+    def test_sampling_pin_follows_the_task_chain_order(self):
+        api = FakeArtex()
+        self.assertEqual(eval_suite.llm_sampling(api, "2,1"),
+                         [{"id": "2", "seed": None, "temperature": None}, {"id": "1", "seed": 9, "temperature": 0.2}])
+        self.assertEqual(suite_stats.sampling_label(eval_suite.llm_sampling(api, "2")), "none")
+
+    def test_sampling_pin_changed_mid_suite_is_refused(self):
+        tmp, suite = self.suite_files()
+        api = FakeArtex()
+
+        def drift(args, token):
+            api.profiles[0]["sampling"] = {"seed": 10}
+            return payload({"GT-001": True})
+
+        argv = ["run", "--suite", suite, "--baseline", write_arm(tmp, "base", {}), "--candidate",
+                write_arm(tmp, "cand", {}), "--subject-model", "m", "--out-root", str(tmp / "out"), "--run-id", "R"]
+        with mock.patch.object(run_bench, "prepare", return_value="tok"), \
+                mock.patch.object(run_bench, "Api", return_value=api), \
+                mock.patch.object(run_bench, "run", side_effect=drift):
+            with self.assertRaisesRegex(SystemExit, "sampling pin changed"):
+                eval_suite.main(argv)
 
     def test_stamp_applied_rejects_a_changed_lesson_set(self):
         stamp = {"prompt_sha": {}}

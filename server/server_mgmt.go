@@ -2187,6 +2187,10 @@ func (s *Server) pgSaveProfile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	p.UserAgent = ua
+	if err := agent.ValidateSampling(p.Format, p.Sampling); err != nil {
+		writeErr(w, 400, err.Error())
+		return
+	}
 	if p.Format == "bedrock-gateway" {
 		validate := agent.ConfigFrom(p.Format, p.Model, p.BaseURL, p.APIKey, p.Proxy)
 		validate.CustomHeaders = p.CustomHeaders

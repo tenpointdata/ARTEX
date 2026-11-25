@@ -73,8 +73,8 @@ Settled decisions from 2026-11-23 and early 2026-11-24, moved out to keep HANDOF
   nothing. This branch merges PR #13's branch (`ej/20261124-075745-5a4987`), which this work needs.
 - **2026-11-24** — E8: the A/B suite runs one task at a time on a dedicated instance and refuses a busy one,
   because the server reads the active prompt live and a swap would reach a concurrent task. `--seed` fixes the
-  schedule, not the LLM, because ARTEX has no sampling-seed control; replicates control variance instead
-  (`c-d73308`). Gate rates are counted over ground-truth entries, not over detected findings, so arms with
+  schedule; an LLM profile may pin a seed (openai/ollama) and a default temperature (`c-d73308`), stamped
+  as `llm_sampling`; replicates still control variance. Gate rates are counted over ground-truth entries, not over detected findings, so arms with
   different detection counts stay comparable. A failed run is counted but left out of the denominators. A judge
   failure aborts the suite. Arms may vary only the editable goals/planner/worker body; the `RSI.md` immutable
   surfaces stay outside the prompt API by construction.

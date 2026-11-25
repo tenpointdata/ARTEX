@@ -1,4 +1,4 @@
-import type { LLMPoolStatus, LLMProfile, LLMRetryOverride, LLMRetryPolicy } from "@/lib/types";
+import type { LLMPoolStatus, LLMProfile, LLMRetryOverride, LLMRetryPolicy, LLMSampling } from "@/lib/types";
 
 import { arr, del, get, post } from "./core";
 
@@ -81,6 +81,7 @@ export const llmApi = {
     custom_headers?: string; // static Bedrock gateway headers; values are write-only
     clear_custom_headers?: boolean;
     retry?: LLMRetryOverride; // this profile's retry override; all zeros = follow the global retry policy
+    sampling?: LLMSampling; // optional seed/temperature pin; absent fields are not pinned
   }) => post<{ id: number }>("/llm/profiles", p),
   deleteLLMProfile: (id: string) => del<{ deleted: number }>(`/llm/profiles/${id}`),
   activateLLMProfile: (id: string) => post<{ ok: boolean }>("/llm/profiles/active", { id: Number(id) }),

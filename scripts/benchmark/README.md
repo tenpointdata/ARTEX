@@ -205,8 +205,13 @@ What it holds fixed and checks:
   the report NOT COMPARABLE).
 - **The seed fixes the schedule**: target order per replicate and arm order per
   pair, so neither arm always runs first against a freshly started target. It
-  does not seed the LLM: ARTEX has no sampling-seed control, so replicates are
-  the variance control.
+  does not seed the LLM. For that, pin sampling on the LLM profile (Settings →
+  LLM, or `sampling: {seed, temperature}` on `POST /api/llm/profiles`): the
+  seed is sent as the request `seed` on the openai and ollama formats only,
+  and the temperature fills any request whose code sets none. The suite stamps
+  each chain profile's pin as `llm_sampling` (an invariant) and refuses to
+  finish if a pin changed mid-suite. Providers treat a seed as best effort, so
+  replicates remain the variance control.
 - **Sequential, dedicated instance.** The server reads the active prompt live,
   so the suite refuses to start while any task is running or queued
   (`--allow-busy` overrides knowingly) and never runs two tasks at once. Run it

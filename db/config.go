@@ -80,7 +80,25 @@ type LLMProfile struct {
 	// inherit the global policy (LLMRetryPolicy), so an untouched profile behaves
 	// exactly as before. See RetryOverride.
 	Retry RetryOverride `json:"retry"`
+	// Sampling is the optional seed/temperature pin for reproducible A/B runs.
+	// Zero value = not pinned (nothing sent). See Sampling.
+	Sampling Sampling `json:"sampling"`
 }
+
+// Sampling pins a profile's sampling parameters. A nil field is not pinned.
+// Seed is sent only on wire formats that accept it (SamplingSeedFormats);
+// Temperature fills a request that sets none (a code-owned temperature wins).
+type Sampling struct {
+	Seed        *int64   `json:"seed,omitempty"`
+	Temperature *float64 `json:"temperature,omitempty"`
+}
+
+// SamplingSeedFormats are the profile formats whose wire API takes a "seed"
+// request field (OpenAI Chat Completions and Ollama's compatible endpoint).
+var SamplingSeedFormats = []string{"openai", "ollama"}
+
+// MaxSamplingTemperature is the upper bound providers accept (OpenAI: 0..2).
+const MaxSamplingTemperature = 2.0
 
 // RetryOverride is one profile's optional override of the three retry layers
 // that are per-endpoint: connect (connection setup) / empty (empty response) /
@@ -95,8 +113,8 @@ type RetryOverride struct {
 // profileCols is the read column list (hint variant, no api key) shared by the
 // list query; profileColsKey is the same with api_key for the single-row loads.
 const profileRetryCols = `COALESCE(retry_connect_attempts,0),COALESCE(retry_connect_interval_ms,0),COALESCE(retry_empty_attempts,0),COALESCE(retry_empty_interval_ms,0),COALESCE(retry_stream_attempts,0),COALESCE(retry_stream_interval_ms,0)`
-const profileCols = `id,name,format,COALESCE(base_url,''),COALESCE(proxy,''),model,COALESCE(api_key_hint,''),rate_per_second,rate_per_minute,context_window_k,COALESCE(reasoning_effort,''),is_default,priority,pool_exclude,COALESCE(thinking_type,''),COALESCE(streaming,true),COALESCE(max_tokens,0),COALESCE(max_tokens_field,''),COALESCE(session_header_key,''),` + profileRetryCols + `,COALESCE(price_input_per_m,0),COALESCE(price_output_per_m,0),COALESCE(price_cache_read_per_m,0),COALESCE(price_cache_write_per_m,0),COALESCE(user_agent,''),COALESCE(custom_headers,'')`
-const profileColsKey = `id,name,format,COALESCE(base_url,''),COALESCE(proxy,''),model,COALESCE(api_key,''),rate_per_second,rate_per_minute,context_window_k,COALESCE(reasoning_effort,''),is_default,priority,pool_exclude,COALESCE(thinking_type,''),COALESCE(streaming,true),COALESCE(max_tokens,0),COALESCE(max_tokens_field,''),COALESCE(session_header_key,''),` + profileRetryCols + `,COALESCE(price_input_per_m,0),COALESCE(price_output_per_m,0),COALESCE(price_cache_read_per_m,0),COALESCE(price_cache_write_per_m,0),COALESCE(user_agent,''),COALESCE(custom_headers,'')`
+const profileCols = `id,name,format,COALESCE(base_url,''),COALESCE(proxy,''),model,COALESCE(api_key_hint,''),rate_per_second,rate_per_minute,context_window_k,COALESCE(reasoning_effort,''),is_default,priority,pool_exclude,COALESCE(thinking_type,''),COALESCE(streaming,true),COALESCE(max_tokens,0),COALESCE(max_tokens_field,''),COALESCE(session_header_key,''),` + profileRetryCols + `,COALESCE(price_input_per_m,0),COALESCE(price_output_per_m,0),COALESCE(price_cache_read_per_m,0),COALESCE(price_cache_write_per_m,0),COALESCE(user_agent,''),COALESCE(custom_headers,''),sampling_seed,sampling_temperature`
+const profileColsKey = `id,name,format,COALESCE(base_url,''),COALESCE(proxy,''),model,COALESCE(api_key,''),rate_per_second,rate_per_minute,context_window_k,COALESCE(reasoning_effort,''),is_default,priority,pool_exclude,COALESCE(thinking_type,''),COALESCE(streaming,true),COALESCE(max_tokens,0),COALESCE(max_tokens_field,''),COALESCE(session_header_key,''),` + profileRetryCols + `,COALESCE(price_input_per_m,0),COALESCE(price_output_per_m,0),COALESCE(price_cache_read_per_m,0),COALESCE(price_cache_write_per_m,0),COALESCE(user_agent,''),COALESCE(custom_headers,''),sampling_seed,sampling_temperature`
 
 // scanProfile reads one row in the profileCols / profileColsKey column order. The
 // 7th column lands in APIKeyHint or APIKey depending on which list the caller used.
@@ -108,7 +126,7 @@ func scanProfile(sc interface{ Scan(...any) error }, into *string, p *LLMProfile
 		&p.Retry.Empty.Attempts, &p.Retry.Empty.IntervalMS,
 		&p.Retry.Stream.Attempts, &p.Retry.Stream.IntervalMS,
 		&p.PriceInputPerM, &p.PriceOutputPerM, &p.PriceCacheReadPerM, &p.PriceCacheWritePerM,
-		&p.UserAgent, &p.CustomHeaders)
+		&p.UserAgent, &p.CustomHeaders, &p.Sampling.Seed, &p.Sampling.Temperature)
 	if err != nil {
 		return err
 	}
@@ -225,7 +243,7 @@ VALUES ($1,$2,NULLIF($3,''),NULLIF($4,''),$5,NULLIF($6,''),NULLIF($7,''),$8,$9,$
 			p.Name, p.Format, p.BaseURL, proxy, p.Model, key, hint, p.RatePerSecond, p.RatePerMinute, p.ContextWindowK, p.ReasoningEffort, p.Priority, p.PoolExclude, p.ThinkingType, p.Streaming, p.MaxTokens, p.MaxTokensField, p.SessionHeaderKey,
 			r.Connect.Attempts, r.Connect.IntervalMS, r.Empty.Attempts, r.Empty.IntervalMS, r.Stream.Attempts, r.Stream.IntervalMS, p.UserAgent, headerValue).Scan(&id)
 		if err == nil {
-			_, err = d.saveProfilePrices(id, p)
+			_, err = d.saveProfileExtras(id, p)
 		}
 		return id, err
 	}
@@ -234,7 +252,7 @@ VALUES ($1,$2,NULLIF($3,''),NULLIF($4,''),$5,NULLIF($6,''),NULLIF($7,''),$8,$9,$
 			p.Name, p.Format, p.BaseURL, proxy, p.Model, p.RatePerSecond, p.RatePerMinute, p.ContextWindowK, p.ReasoningEffort, p.Priority, p.PoolExclude, p.ThinkingType, p.Streaming, p.MaxTokens, p.MaxTokensField, p.SessionHeaderKey,
 			r.Connect.Attempts, r.Connect.IntervalMS, r.Empty.Attempts, r.Empty.IntervalMS, r.Stream.Attempts, r.Stream.IntervalMS, p.UserAgent, p.ID, replaceHeaders, headerValue)
 		if err == nil {
-			_, err = d.saveProfilePrices(p.ID, p)
+			_, err = d.saveProfileExtras(p.ID, p)
 		}
 		return p.ID, err
 	}
@@ -242,9 +260,18 @@ VALUES ($1,$2,NULLIF($3,''),NULLIF($4,''),$5,NULLIF($6,''),NULLIF($7,''),$8,$9,$
 		p.Name, p.Format, p.BaseURL, proxy, p.Model, key, hint, p.RatePerSecond, p.RatePerMinute, p.ContextWindowK, p.ReasoningEffort, p.Priority, p.PoolExclude, p.ThinkingType, p.Streaming, p.MaxTokens, p.MaxTokensField, p.SessionHeaderKey,
 		r.Connect.Attempts, r.Connect.IntervalMS, r.Empty.Attempts, r.Empty.IntervalMS, r.Stream.Attempts, r.Stream.IntervalMS, p.UserAgent, p.ID, replaceHeaders, headerValue)
 	if err == nil {
-		_, err = d.saveProfilePrices(p.ID, p)
+		_, err = d.saveProfileExtras(p.ID, p)
 	}
 	return p.ID, err
+}
+
+// saveProfileExtras writes the cost-ledger and sampling-pin columns.
+func (d *DB) saveProfileExtras(id int64, p *LLMProfile) (sql.Result, error) {
+	if _, err := d.saveProfilePrices(id, p); err != nil {
+		return nil, err
+	}
+	return d.Exec(`UPDATE llm_profiles SET sampling_seed=$1,sampling_temperature=$2 WHERE id=$3`,
+		p.Sampling.Seed, p.Sampling.Temperature, id)
 }
 
 // saveProfilePrices writes the cost-ledger columns (kept out of the three main
