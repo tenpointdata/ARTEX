@@ -59,6 +59,17 @@ See `docs/ARCHITECTURE.md` for the code-level map. Summary:
 
 ## Current state
 
+**2026-11-24 — E9 follow-up `c-f729e8` (in review) on `ej/20261124-175807-17ca91`, which merges the
+c-45c921 branch (`ej/20261124-170157-3aeba5`, carrying E9), so landing it lands both.** `lib/triage.ts` takes
+a verdict set (`TriageVerdict<S>`, `APPROVAL_VERDICTS`); the key binding is the shared
+`web/src/hooks/use-triage-keys.ts`. The interception approval queue (`components/approval-records/table.tsx`)
+answers to A (allow) / D (deny) on the open request, then opens the next; J/K/Esc navigate. Keys send the same
+single `interceptDecide` the buttons send, through the same lock; the gate is unchanged. The findings "By task"
+view advances past the end of a group's page (`triageNextPage`/`firstNewKey`, `advanceGroup` in the findings
+page). `npx biome check src` reports 0 errors (149 warnings and 692 infos remain). Verified: triage unit tests,
+`scripts/verify.sh`, and a browser e2e on a throwaway stack,
+`ARTEX_E2E_SCENARIO=triage-e2e.js scripts/e2e/integrations.sh` (16/16 PASS).
+
 **2026-11-24 — Real-cluster install kit (`c-620510`, E7; blocked on a human).** On `ej/20261124-173856-b39c78`. `deploy/lab/values-multihost.yaml` (renders/lints), runbook
 `deploy/lab/README.md` "Real cluster", and `scripts/k8s-install-checks.sh NS [RELEASE]`, which prints the check
 table. Not run on any cluster.
@@ -153,7 +164,7 @@ browser-checked on the E5 stack.
 - **Not checked:** the other split pages in a browser (they were split verbatim), and a real backend.
 - **Merged with main (c-45c921 base):** main's api/types changes live in the split modules: `sseUrl` is gone from `lib/api` (use `lib/sse`), `import_id` in `findingFilterParams` (`lib/api/core.ts`), E2 types in `lib/types/integrations.ts`, the import filter and tracker push in the findings `_components/`.
 - **Merge risk:** fork `h-683872` (`c-92bb52`, role-gating controls on existing pages) edits pages this pass split (system/*, tasks, traffic, assets). Expect conflicts; re-apply its gating inside the extracted `_components/`.
-- **Follow-ups:** `c-45c921` (dashboard push channel), `c-4b7989` (per-exchange traffic bulk delete/export), `c-f729e8` (approvals triage with `lib/triage`, grouped-view page advance, biome lint debt in moved code).
+- **Follow-ups:** `c-45c921` (dashboard push channel), `c-4b7989` (per-exchange traffic bulk delete/export), `c-f729e8` (approvals triage, grouped-view page advance, biome errors; in review).
 
 **2026-11-24 (c-ca2bd0, E4 follow-up)** — An operator can choose a task's methodologies. Migration
 **0022** adds `tasks.methodologies TEXT[]` (empty `{}` = automatic, as before). The create request
@@ -196,7 +207,7 @@ the full Docker image, the E8 suite) are in `docs/handoff/2026-11-24-current-sta
    MCP servers, custom tools and similar are rebuilt only at start. Done = each one is followed or listed in
    DISTRIBUTED.md Limits.
 1. *(unclaimed)* — **E9 follow-ups** (S–M): `c-4b7989` (per-exchange traffic bulk delete/export).
-   (`c-f729e8`, approvals triage + biome debt, claimed on `ej/20261124-175807-17ca91`.) (`c-45c921`, the dashboard push, is in
+   (`c-f729e8`, approvals triage + grouped advance + biome errors, in review on `ej/20261124-175807-17ca91`.) (`c-45c921`, the dashboard push, is in
    review on `ej/20261124-170157-3aeba5`.)
    "Done when" is on each card.
 2. *(unclaimed)* — **SEC: per-task uid follow-ups** (S each): `c-12df03` (single-uid start-up fails on a
@@ -394,6 +405,12 @@ Card ids in brackets:
   `ARTEX_SECRET_KEY`) loses stored secrets.
 
 ## Decisions
+
+- **2026-11-24 c-f729e8 (approvals triage):** approval keys are A/D (separate verdict set from findings' C/F/D/A/I/P;
+  the meaning of a key depends on the queue). They act only on an open pending request, never on a selection or with
+  nothing open; batch decide keeps its confirmation dialog. The grouped view advances within the same group across
+  pages, not into the next group. biome `useNullishCoalescing` hits were silenced with reasoned ignores, not `??`,
+  where `||` deliberately treats "" as missing (display fallbacks).
 
 - **2026-11-24** — c-8cfbfe / c-d4946f (cluster egress deny in `egress.sh`, re-resolved, atomic rebuild) and the socket-LB CNI gotcha: `docs/handoff/2026-11-24-e7-kind-install-egress.md`.
 - **2026-11-24 c-45c921 (dashboard push):**
