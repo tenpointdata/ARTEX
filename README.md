@@ -601,7 +601,9 @@ from the defaults until a worker finishes in this process.
 
 **Common flags**: `./start.sh -addr 127.0.0.1:8787 -proxy 127.0.0.1:8788` (`-addr` frontend/API, `-proxy` traffic
 recording proxy). The proxy is unauthenticated, so it only binds loopback: a host-less `:8788` becomes
-`127.0.0.1:8788` and other hosts are refused unless `ARTEX_PROXY_ALLOW_NONLOOPBACK=1`. Upstream TLS
+`127.0.0.1:8788` and other hosts are refused unless `ARTEX_PROXY_ALLOW_NONLOOPBACK=1`. Even then a
+non-loopback client must present a run's scope token (`ARTEX_PROXY_ALLOW_UNSCOPED_REMOTE=1` opts out on
+a node that is not a distributed control node). Upstream TLS
 certificates are verified against system roots; set `ARTEX_CAPTURE_INSECURE_UPSTREAM=1` to capture
 targets with self-signed certificates. That switch applies to every host the proxy reaches, package
 downloads included, so set it only for the run that needs it. The traffic index directory is owner-only (0700/0600).

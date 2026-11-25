@@ -24,7 +24,7 @@ func TestInterceptRulesRevisionBumps(t *testing.T) {
 	if err != nil {
 		SkipPGUnavailable(t, err)
 	}
-	defer d.Close()
+	t.Cleanup(func() { d.Close() }) // after restoreRevision's cleanup (LIFO)
 	restoreRevision(t, d)
 
 	if _, err := d.Exec(`DELETE FROM settings WHERE key=$1`, InterceptRulesRevisionKey); err != nil {
@@ -74,7 +74,7 @@ func TestInterceptRulesRevisionMalformedIsError(t *testing.T) {
 	if err != nil {
 		SkipPGUnavailable(t, err)
 	}
-	defer d.Close()
+	t.Cleanup(func() { d.Close() }) // after restoreRevision's cleanup (LIFO)
 	restoreRevision(t, d)
 
 	if err := d.SetSetting(InterceptRulesRevisionKey, "not-a-number"); err != nil {

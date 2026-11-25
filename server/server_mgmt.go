@@ -288,11 +288,12 @@ func writeCommittedTaskDelete(w http.ResponseWriter, result DeleteTaskResult, er
 func (s *Server) waitTaskQuiescent(ctx context.Context, taskID string) error {
 	ticker := time.NewTicker(10 * time.Millisecond)
 	defer ticker.Stop()
+	remote := s.beginRemoteDrain(taskID)
 	for {
 		s.chatMu.Lock()
 		chatBusy := s.chatBusy[taskID]
 		s.chatMu.Unlock()
-		if s.engine.inflightCount(taskID) == 0 && !chatBusy {
+		if s.engine.inflightCount(taskID) == 0 && !chatBusy && remote.quiet(time.Now()) {
 			return nil
 		}
 		select {
@@ -535,6 +536,7 @@ func (s *Server) pgSaveAgentConfig(w http.ResponseWriter, r *http.Request) {
 	// Task bundles capture operational Agent settings (turn/time budgets, tools,
 	// web search). Rebuild them even when no global profile is configured.
 	s.invalidateTaskAgents()
+	s.bumpAgentConfigRevision() // worker nodes drop their task agents too
 	// rebuild the live agents so the new max_turns/run_seconds/binding apply without a restart.
 	s.cfgMu.Lock()
 	cfg, on := s.llmCfg, s.llmOn

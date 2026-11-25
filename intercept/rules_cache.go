@@ -13,8 +13,12 @@ import (
 // a rule added or tightened there is not enforced here (fail-open). The
 // mechanism is a counter in the settings table (db.InterceptRulesRevisionKey):
 //
-//   - Invalidate, which every rule or tool-config write calls after it commits,
-//     clears this process's cache and bumps the counter.
+//   - Every rule or tool-config write in package db (CreateInterceptRule,
+//     UpdateInterceptRule, DeleteInterceptRule, ToggleInterceptRule,
+//     SetInterceptEnabledTools) bumps the counter in the write's own
+//     transaction, so a committed change always carries its bump; the writer
+//     then calls DropCache. Invalidate (drop and bump) is for a write made
+//     outside those, such as a direct SQL change.
 //   - Every read of the cache (Match, MatchBuiltin, MatchPersistence,
 //     IsToolEnabled) first compares the revision the cache was loaded at with
 //     the stored one, and reloads when they differ. The revision is read
@@ -38,15 +42,22 @@ var rulesRevisionTTL = time.Second
 // read reloads it.
 var rulesMaxAge = 30 * time.Second
 
+// DropCache clears this process's rule cache and enabled-tools cache, so its
+// next call reloads. Use it after a db write that bumped the shared revision
+// in its own transaction (see the package comment above).
+func (i *Interceptor) DropCache() {
+	i.mu.Lock()
+	i.dropLocked()
+	i.mu.Unlock()
+}
+
 // Invalidate clears the in-memory rule cache and the enabled-tools cache and
 // bumps the shared rules revision, so the next call of every process that
 // shares the database reloads from it. Call it after any committed write to
 // the rules or the tool config. An error means the bump failed: this process
 // reloads, but the others see the change only after rulesMaxAge.
 func (i *Interceptor) Invalidate() error {
-	i.mu.Lock()
-	i.dropLocked()
-	i.mu.Unlock()
+	i.DropCache()
 	if i.db == nil {
 		return nil
 	}

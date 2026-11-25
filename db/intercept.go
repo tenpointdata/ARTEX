@@ -74,39 +74,57 @@ func (d *DB) ListInterceptRules() ([]InterceptRule, error) {
 	return out, rows.Err()
 }
 
-// CreateInterceptRule inserts a new rule.
+// CreateInterceptRule inserts a new rule. The write and the rules revision
+// bump commit together (writeInterceptRules).
 func (d *DB) CreateInterceptRule(name, matchTarget, matchType, pattern, action, message string, priority int, enabled bool, timeoutEnabled bool, timeoutSeconds int, timeoutAction string) (InterceptRule, error) {
-	row := d.QueryRow(`
+	var r InterceptRule
+	err := d.writeInterceptRules(func(tx *sql.Tx) error {
+		var err error
+		r, err = scanInterceptRule(tx.QueryRow(`
 INSERT INTO intercept_rules(name, enabled, priority, match_target, match_type, pattern, action, message, timeout_enabled, timeout_seconds, timeout_action)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
 RETURNING `+interceptRuleCols,
-		name, enabled, priority, matchTarget, matchType, pattern, action, message, timeoutEnabled, timeoutSeconds, timeoutAction)
-	return scanInterceptRule(row)
+			name, enabled, priority, matchTarget, matchType, pattern, action, message, timeoutEnabled, timeoutSeconds, timeoutAction))
+		return err
+	})
+	return r, err
 }
 
-// UpdateInterceptRule replaces all editable fields of an existing rule.
+// UpdateInterceptRule replaces all editable fields of an existing rule, with
+// the rules revision bump in the same transaction.
 func (d *DB) UpdateInterceptRule(id int64, name, matchTarget, matchType, pattern, action, message string, priority int, enabled bool, timeoutEnabled bool, timeoutSeconds int, timeoutAction string) (InterceptRule, error) {
-	row := d.QueryRow(`
+	var r InterceptRule
+	err := d.writeInterceptRules(func(tx *sql.Tx) error {
+		var err error
+		r, err = scanInterceptRule(tx.QueryRow(`
 UPDATE intercept_rules
    SET name=$2, enabled=$3, priority=$4, match_target=$5,
        match_type=$6, pattern=$7, action=$8, message=$9,
        timeout_enabled=$10, timeout_seconds=$11, timeout_action=$12
 WHERE id=$1
 RETURNING `+interceptRuleCols,
-		id, name, enabled, priority, matchTarget, matchType, pattern, action, message, timeoutEnabled, timeoutSeconds, timeoutAction)
-	return scanInterceptRule(row)
+			id, name, enabled, priority, matchTarget, matchType, pattern, action, message, timeoutEnabled, timeoutSeconds, timeoutAction))
+		return err
+	})
+	return r, err
 }
 
-// DeleteInterceptRule removes a rule.
+// DeleteInterceptRule removes a rule, with the rules revision bump in the
+// same transaction.
 func (d *DB) DeleteInterceptRule(id int64) error {
-	_, err := d.Exec(`DELETE FROM intercept_rules WHERE id=$1`, id)
-	return err
+	return d.writeInterceptRules(func(tx *sql.Tx) error {
+		_, err := tx.Exec(`DELETE FROM intercept_rules WHERE id=$1`, id)
+		return err
+	})
 }
 
-// ToggleInterceptRule flips the enabled state of a rule.
+// ToggleInterceptRule flips the enabled state of a rule, with the rules
+// revision bump in the same transaction.
 func (d *DB) ToggleInterceptRule(id int64, enabled bool) error {
-	_, err := d.Exec(`UPDATE intercept_rules SET enabled=$2 WHERE id=$1`, id, enabled)
-	return err
+	return d.writeInterceptRules(func(tx *sql.Tx) error {
+		_, err := tx.Exec(`UPDATE intercept_rules SET enabled=$2 WHERE id=$1`, id, enabled)
+		return err
+	})
 }
 
 // CreateInterceptPending inserts a pending approval record and returns its ID.

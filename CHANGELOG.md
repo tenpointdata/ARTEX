@@ -23,7 +23,8 @@ All notable changes to this project are documented in this file. The format is b
 
 - **Kubernetes install (E7 follow-up)**, verified on a 3-node kind cluster (`docs/DISTRIBUTED.md`, "Recorded install"):
   - The server makes world-writable data and key volume roots root-owned (0755 / 0700) before the isolation self-test. Kubernetes emptyDir and many PersistentVolumes are 0777, and the self-test refused to start on them.
-  - Worker nodes follow traffic capture, the global egress proxy and web search through `settings.agent_settings_revision`. Before, a worker read them only at start, so its agents bypassed the recording proxy after capture was turned on.
+  - Worker nodes follow traffic capture, the global egress proxy and web search: they compare the stored values on every poll. Before, a worker read them only at start, so its agents bypassed the recording proxy after capture was turned on.
+  - Worker nodes also follow the LLM recording switch and an agent's saved max turns, run seconds and web search flag (`settings.agent_config_revision`). `docs/DISTRIBUTED.md` lists what workers read per run and what they cannot follow (skills are files on each node).
   - The control node now wakes the planner for intents settled by worker nodes even when a fresh task's first poll found none. Before, that first batch was dropped.
   - `jwt.key` is created atomically. A pod killed mid-write left a 0-byte key that blocked every later start.
   - Chart: agent processes are denied PostgreSQL and the control API by default (`egress.denyClusterServices`; the new `egress.sh` variables are `ARTEX_EGRESS_DENY_HOSTS` and `ARTEX_EGRESS_ALLOW_HOSTS`), and `egress.clusterCIDRs` gives a strict mode. `egress.sh` keeps DNS to the resolvers open. Worker rollouts use `maxSurge: 0`, so hard anti-affinity no longer deadlocks them. `scripts/k8s-egress-probe.sh` and `deploy/lab/` reproduce the checks.

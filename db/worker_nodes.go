@@ -119,13 +119,14 @@ type TaskControl struct {
 	TargetGate     bool
 	DispatchClosed string
 	DeadlineAt     int64 // unix seconds, 0 = none
+	DeadlinePassed bool  // deadline_at is in the past on the database clock
 	FirstRunAt     int64
 	TimeoutSeconds int
 }
 
 // Claimable reports whether a new intent of the task may be claimed.
 func (c TaskControl) Claimable() bool {
-	return c.Exists && !c.Paused && !c.Queued && !IsTerminal(c.Status) && c.DispatchClosed == ""
+	return c.Exists && !c.Paused && !c.Queued && !IsTerminal(c.Status) && c.DispatchClosed == "" && !c.DeadlinePassed
 }
 
 // GetTaskControl reads a task's control state. A missing task returns
@@ -133,8 +134,9 @@ func (c TaskControl) Claimable() bool {
 func (d *DB) GetTaskControl(taskID int64) (TaskControl, error) {
 	var c TaskControl
 	var deadline, firstRun sql.NullTime
-	err := d.QueryRow(`SELECT COALESCE(status,''), paused, queued, target_gate, dispatch_closed, deadline_at, first_run_at, timeout_seconds
-FROM tasks WHERE id=$1 AND deleted_at IS NULL`, taskID).Scan(&c.Status, &c.Paused, &c.Queued, &c.TargetGate, &c.DispatchClosed, &deadline, &firstRun, &c.TimeoutSeconds)
+	err := d.QueryRow(`SELECT COALESCE(status,''), paused, queued, target_gate, dispatch_closed, deadline_at, first_run_at, timeout_seconds,
+  COALESCE(deadline_at < now(), false)
+FROM tasks WHERE id=$1 AND deleted_at IS NULL`, taskID).Scan(&c.Status, &c.Paused, &c.Queued, &c.TargetGate, &c.DispatchClosed, &deadline, &firstRun, &c.TimeoutSeconds, &c.DeadlinePassed)
 	if err == sql.ErrNoRows {
 		return TaskControl{}, nil
 	}
@@ -157,8 +159,19 @@ func (d *DB) SetTaskDispatchClosed(taskID int64, reason string) error {
 	if reason != "" && reason != DispatchSettling && reason != DispatchDeleting {
 		return fmt.Errorf("unknown dispatch fence %q", reason)
 	}
-	_, err := d.Exec(`UPDATE tasks SET dispatch_closed=$2 WHERE id=$1`, taskID, reason)
-	return err
+	// The acks answer one fence: any change clears them (task_drain_acks).
+	tx, err := d.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback() // a no-op after Commit
+	if _, err := tx.Exec(`UPDATE tasks SET dispatch_closed=$2 WHERE id=$1`, taskID, reason); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`DELETE FROM task_drain_acks WHERE task_id=$1`, taskID); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 // DispatchableTaskIDs lists the tasks a worker node should serve: not
@@ -279,4 +292,55 @@ WHERE n.id=$1 AND n.kind='intent' AND n.state='running'`, intentID).Scan(&taskID
 		return 0, "", false, err
 	}
 	return taskID, o.String, true, nil
+}
+
+// FindingNode is a finding written into an exploration: its node, the worker
+// that wrote it (the node's origin), the intent it was found on and its summary.
+type FindingNode struct {
+	ID       int64
+	Worker   string
+	IntentID int64 // 0 when neither an edge nor the writer's claim names one
+	Summary  string
+}
+
+// maxFindingNodesPerPoll bounds one FindingNodesSince page.
+const maxFindingNodesPerPoll = 200
+
+// FindingNodesSince returns the exploration's finding nodes with an id above
+// after, oldest first, and the newest id seen (after when there are none). The
+// intent is the one the finding yields from (exploration_edges), or else the
+// intent the writer holds the claim on, as a local worker's wake-up falls back
+// to its own intent.
+func (s *ExplorationStore) FindingNodesSince(after int64) ([]FindingNode, int64, error) {
+	rows, err := s.db.Query(`SELECT n.id, COALESCE(n.origin,''),
+  COALESCE((SELECT e.src_id FROM exploration_edges e WHERE e.exploration_id=n.exploration_id AND e.dst_id=n.id AND e.rel=$3 ORDER BY e.src_id LIMIT 1),
+           (SELECT i.id FROM exploration_nodes i WHERE i.exploration_id=n.exploration_id AND i.kind='intent' AND i.owner=n.origin ORDER BY i.updated_at DESC LIMIT 1), 0),
+  COALESCE(n.payload->>'summary','')
+FROM exploration_nodes n WHERE n.exploration_id=$1 AND n.kind='finding' AND n.id > $2 ORDER BY n.id LIMIT $4`,
+		s.expID, after, RelYields, maxFindingNodesPerPoll)
+	if err != nil {
+		return nil, after, err
+	}
+	defer rows.Close()
+	var out []FindingNode
+	last := after
+	for rows.Next() {
+		var f FindingNode
+		if err := rows.Scan(&f.ID, &f.Worker, &f.IntentID, &f.Summary); err != nil {
+			return nil, after, err
+		}
+		out = append(out, f)
+		last = f.ID
+	}
+	if err := rows.Err(); err != nil {
+		return nil, after, err
+	}
+	return out, last, nil
+}
+
+// LatestFindingNodeID is the newest finding node id of the exploration (0 = none).
+func (s *ExplorationStore) LatestFindingNodeID() (int64, error) {
+	var id int64
+	err := s.db.QueryRow(`SELECT COALESCE(max(id),0) FROM exploration_nodes WHERE exploration_id=$1 AND kind='finding'`, s.expID).Scan(&id)
+	return id, err
 }

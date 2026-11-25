@@ -277,3 +277,15 @@ func TestUserAgentAndEnv(t *testing.T) {
 		}
 	}
 }
+
+// Share divides a profile between n nodes so together they stay within it.
+func TestShareDividesLimits(t *testing.T) {
+	p := Profiles["balanced"]
+	got := Share(p, 4)
+	if got.RPS != p.RPS/4 || got.Burst != p.Burst/4 || got.MaxGlobal != p.MaxGlobal/4 || got.MaxPerHost != 1 || got.Name != p.Name {
+		t.Fatalf("Share(balanced, 4) = %+v", got)
+	}
+	if Share(p, 1) != p || Share(Profile{Name: "off"}, 3) != (Profile{Name: "off"}) {
+		t.Fatal("Share must leave one node and the off profile unchanged")
+	}
+}

@@ -98,14 +98,19 @@ func (e *Engine) syncBudget(taskID string, l *agent.BudgetLedger) {
 }
 
 // budgetConfig is the run budget this process meters: the environment, or on
-// a worker node the configuration the control node published.
-func (e *Engine) budgetConfig() (task, intent agent.Budget) {
-	if e.node.Role == RoleWorker && e.m != nil && e.m.pg != nil {
-		if task, intent, ok := readPublishedBudgets(e.m.pg); ok {
-			return task, intent
+// a worker node the configuration the control node published, as last read by
+// the dispatcher. ok is false on a worker node that has not read it yet; it
+// then claims nothing (workerDispatchOnce blocks the node) and never falls back
+// to its own environment, which usually sets no budget.
+func (e *Engine) budgetConfig() (task, intent agent.Budget, ok bool) {
+	if e.node.Role == RoleWorker {
+		if e.wnode == nil {
+			return task, intent, false
 		}
+		return e.wnode.publishedBudgets()
 	}
-	return agent.BudgetsFromEnv()
+	task, intent = agent.BudgetsFromEnv()
+	return task, intent, true
 }
 
 // remoteWorkSignal delivers a work control request to the node holding the
@@ -144,13 +149,19 @@ func (e *Engine) awaitRemoteSettle(ctx context.Context, intentID int64) error {
 }
 
 // remoteSettleLoop runs on the control node per task: it wakes the planner for
-// intents a worker node settled (NotifyDone, as a local worker does) and
-// republishes the worker nodes' activity on this node's live stream.
+// intents a worker node settled (NotifyDone, as a local worker does) and for
+// findings a worker node reported (NotifyFinding, as a local worker's
+// report_finding does), and republishes the worker nodes' activity on this
+// node's live stream.
 func (e *Engine) remoteSettleLoop(ctx context.Context, t *Task) {
 	var cur settleCursor
 	lastAct, err := t.Store.LatestActivityID()
 	if err != nil {
 		log.Printf("[engine] task %s remote activity cursor: %v", t.ID, err)
+	}
+	lastFinding, err := t.Store.LatestFindingNodeID()
+	if err != nil {
+		log.Printf("[engine] task %s remote finding cursor: %v", t.ID, err)
 	}
 	tick := time.NewTicker(distributedPoll)
 	defer tick.Stop()
@@ -160,6 +171,7 @@ func (e *Engine) remoteSettleLoop(ctx context.Context, t *Task) {
 			return
 		case <-tick.C:
 		}
+		e.budgetWatch(t)
 		settled, next, err := t.Store.SettledIntentsSince(cur.since)
 		if err == nil {
 			for _, si := range cur.advance(settled, next) {
@@ -167,6 +179,10 @@ func (e *Engine) remoteSettleLoop(ctx context.Context, t *Task) {
 					t.NotifyDone(si.ID)
 				}
 			}
+		}
+		if found, next, err := t.Store.FindingNodesSince(lastFinding); err == nil {
+			lastFinding = next
+			relayRemoteFindings(t, found)
 		}
 		acts, cursor, err := t.Store.ActivityList(nil, lastAct, 500)
 		if err != nil {
@@ -178,6 +194,17 @@ func (e *Engine) remoteSettleLoop(ctx context.Context, t *Task) {
 				e.bc.Publish(t.ID, a)
 				e.touch(t.ID)
 			}
+		}
+	}
+}
+
+// relayRemoteFindings wakes t's planner for each finding a worker node wrote.
+// A finding written on this node already woke it (agent ToolSet notifyFinding),
+// so only remote writers are relayed: each finding wakes the planner once.
+func relayRemoteFindings(t *Task, found []db.FindingNode) {
+	for _, f := range found {
+		if remoteOwner(f.Worker) {
+			t.NotifyFinding(f.IntentID, f.Summary)
 		}
 	}
 }
@@ -212,5 +239,64 @@ func liveTargetGate(pg *db.DB, taskID int64) func() bool {
 			return true
 		}
 		return c.TargetGate
+	}
+}
+
+// leaseSilence is how long a distributed node's run may go without renewing
+// its claim before it stops on its own: two thirds of the lease, so it stops
+// before another node may take the intent over. 0 (RoleAll) keeps the old
+// behaviour of retrying until the claim is rejected.
+func (e *Engine) leaseSilence() time.Duration {
+	if !e.distributed() {
+		return 0
+	}
+	return db.IntentClaimTTL * 2 / 3
+}
+
+// confirmRemoteClaim closes the gap between a worker node's pre-claim check and
+// its claim: the claim UPDATE does not look at the task row, so the control
+// state is read again after it, and a task that stopped being claimable in
+// between gets the intent back (open). It also discards work signals left
+// from an earlier run of the intent. Always true outside RoleWorker.
+func (e *Engine) confirmRemoteClaim(t *Task, name string, intentID int64, token string) bool {
+	if e.node.Role != RoleWorker {
+		return true
+	}
+	if err := e.m.pg.DropWorkSignals(intentID); err != nil {
+		log.Printf("[worker %s] intent #%d: drop stale work signals: %v", name, intentID, err)
+	}
+	if e.workerClaimAllowed(t) {
+		return true
+	}
+	if err := t.Store.SettleIntentClaim(intentID, token, "open"); err != nil {
+		log.Printf("[worker %s] task %s intent #%d: return claim after a control change: %v", name, t.ID, intentID, err)
+	}
+	return false
+}
+
+// syncServedBudgets raises every live ledger of this process to the spend all
+// nodes recorded, so a running intent's meter sees the others' spend within
+// one poll instead of only at its next claim.
+func (e *Engine) syncServedBudgets() {
+	e.budgets.Range(func(k, v any) bool {
+		if l, ok := v.(*agent.BudgetLedger); ok && l != nil {
+			e.syncBudget(k.(string), l)
+		}
+		return true
+	})
+}
+
+// budgetWatch runs on the control node per task (from remoteSettleLoop): with
+// remote spend synced, a budget that can no longer pay for a worker wakes the
+// planner, whose round starts the forced wrap-up (budgetStop) at once instead
+// of at the next settlement or heartbeat.
+func (e *Engine) budgetWatch(t *Task) {
+	l := e.budgetFor(t.ID)
+	if l == nil || e.isSettling(t.ID) {
+		return
+	}
+	e.syncBudget(t.ID, l)
+	if !l.State().Dispatch {
+		t.Notify()
 	}
 }

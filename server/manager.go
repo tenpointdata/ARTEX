@@ -561,8 +561,9 @@ func newManager(dir, proxyAddr string, node NodeConfig) (*Manager, error) {
 	// Asset auto-completion engine (§5): HTTP probes routed through the recording
 	// proxy (via m.ProxyAddr, which honors the traffic-capture toggle).
 	// LLM recording switch (off by default). The recorder reads this flag on every call.
-	m.llmRecOn = pg.GetBool(settingLLMRecord, false)
-	m.loadAgentSettings()
+	if _, err := m.loadAgentSettings(); err != nil {
+		log.Printf("[settings] agent settings unreadable at start-up; capture, web search and the global proxy stay off: %v", err)
+	}
 	if m.traffic != nil {
 		if err := m.traffic.SetUpstreamProxy(m.globalProxy); err != nil {
 			// Neither the stored value nor err (which quotes it) is logged: both
@@ -583,26 +584,32 @@ func newManager(dir, proxyAddr string, node NodeConfig) (*Manager, error) {
 }
 
 // loadAgentSettings reads the settings that are baked into agents when they are
-// built: the traffic-capture switch, web search and the global egress proxy
-// (default: direct; with capture on it is the MITM's upstream, with capture off
-// ProxyAddr hands it to agents directly). It reports whether any of them
-// changed. A worker node calls it again when the agent settings revision moves
-// (followAgentSettings), so it builds its agents from what the control node
-// saved.
-func (m *Manager) loadAgentSettings() bool {
-	pg := m.pg
-	trafficOn := pg.GetBool(settingTrafficCapture, false)
-	webOn := pg.GetBool(settingWebSearchOn, false)
-	backend := defaultWebSearchBackend
-	if v, ok, _ := pg.GetSetting(settingWebSearchBackend); ok && v != "" {
-		backend = v
+// built: the traffic-capture switch, web search (backend, keys, proxy) and the
+// global egress proxy (default: direct; with capture on it is the MITM's
+// upstream, with capture off ProxyAddr hands it to agents directly). It reports
+// whether any of them changed. It also reloads the LLM recording switch, which
+// needs no rebuild (c-6bcdd3). A read error leaves every value as it was. A
+// worker node calls it on every dispatch poll (followAgentSettings), so it
+// builds its agents from what the control node saved.
+func (m *Manager) loadAgentSettings() (bool, error) {
+	keys := []string{settingLLMRecord, settingTrafficCapture, settingWebSearchOn, settingWebSearchBackend, settingBraveKey,
+		settingTavilyKey, settingKeenableKey, settingWebSearchProxy, settingGlobalProxy}
+	v := make(map[string]string, len(keys))
+	for _, k := range keys {
+		val, _, err := m.pg.GetSetting(k)
+		if err != nil {
+			return false, fmt.Errorf("read setting %s: %w", k, err)
+		}
+		v[k] = val
 	}
-	str := func(key string) string {
-		v, _, _ := pg.GetSetting(key)
-		return v
+	isTrue := func(s string) bool { s = strings.TrimSpace(s); return s == "true" || s == "1" }
+	trafficOn, webOn := isTrue(v[settingTrafficCapture]), isTrue(v[settingWebSearchOn])
+	backend := v[settingWebSearchBackend]
+	if backend == "" {
+		backend = defaultWebSearchBackend
 	}
-	brave, tavily, keenable, webProxy := str(settingBraveKey), str(settingTavilyKey), str(settingKeenableKey), str(settingWebSearchProxy)
-	globalProxy := strings.TrimSpace(str(settingGlobalProxy))
+	brave, tavily, keenable, webProxy := v[settingBraveKey], v[settingTavilyKey], v[settingKeenableKey], v[settingWebSearchProxy]
+	globalProxy := strings.TrimSpace(v[settingGlobalProxy])
 
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -612,7 +619,10 @@ func (m *Manager) loadAgentSettings() bool {
 	m.trafficOn, m.webSearchOn, m.webSearchBackend = trafficOn, webOn, backend
 	m.braveKey, m.tavilyKey, m.keenableKey, m.webSearchProxy = brave, tavily, keenable, webProxy
 	m.globalProxy = globalProxy
-	return changed
+	// The LLM recording switch is read by the recorder on every call, so it is
+	// reloaded here but never counted as a change: it needs no rebuild.
+	m.llmRecOn = isTrue(v[settingLLMRecord])
+	return changed, nil
 }
 
 // TrafficEnabled reports whether traffic capture is on (default off). When off,

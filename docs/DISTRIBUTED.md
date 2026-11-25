@@ -51,17 +51,35 @@ when that read fails.
 
 | Decision | Single process | Worker node | Read failure |
 |---|---|---|---|
-| Intercept rules / enabled tools | in-memory cache, `Invalidate` on edit | `Invalidate` bumps `settings.intercept_rules_revision`; every node reloads when it changes (checked at most 1 s apart; full reload every 30 s regardless) | deny every matcher (`loadFailed`) |
+| Intercept rules / enabled tools | in-memory cache, `Invalidate` on edit | every rule or tool-config write bumps `settings.intercept_rules_revision` in its own transaction (a failed bump rolls the write back); every node reloads when it changes (checked at most 1 s apart; full reload every 30 s regardless) | deny every matcher (`loadFailed`) |
 | Ask approval decided by a human | in-memory channel | the waiter also polls its `intercept_pending` row every 2 s | keep waiting (a read error is not a decision) |
 | Target approvals, pins, block rules, authorization artifact | read from Postgres per call | the same | as before (deny) |
 | Target-gate switch | `atomic.Bool` updated by the API | read from `tasks.target_gate` on every gated call | gate **on** |
-| Task pause / queued / terminal | in-memory flags | `GetTaskControl` before every claim; pause cancels running intents (polled every 2 s) | no claim |
+| Task pause / queued / terminal / deadline passed | in-memory flags | `GetTaskControl` before every claim and again right after it (a claim that lost the race goes back to open); pause or queued cancels running intents (polled every 2 s) | no claim; after 15 failed polls (~30 s) the node pauses the task locally |
 | Timeout or budget settle | `settling` flag | `tasks.dispatch_closed='settling'`: no new claim; running intents finish under the deadline / zero-budget wrap-up | no claim |
-| Delete | in-memory barrier | `dispatch_closed='deleting'`, remote claims revoked; the node stops the task | no claim |
-| Run budget | env `ARTEX_*_BUDGET_*`, ledger seeded from `llm_usage` | the control node publishes its budget in `settings.distributed_run_budgets`; every node syncs spend from `llm_usage` before each dispatch decision | no claim |
-| Noise governor | one governor | each live node runs `egress.Share(profile, liveNodes)`; the profile follows `settings.noise_profile` | keep the last share |
+| Delete / archive | in-memory barrier | `dispatch_closed='deleting'`, remote claims revoked; each worker node stops the task, joins its routines and then writes a `task_drain_acks` row (only while the fence stands; any fence change clears the rows); the control drain waits for an ack from every live worker node, up to 8 s (`remoteDrainAckBound`), then goes on and logs the silent nodes | no claim; no ack |
+| Run budget | env `ARTEX_*_BUDGET_*`, ledger seeded from `llm_usage` | the control node publishes its budget in `settings.distributed_run_budgets`; a worker uses the last value it read, never its own env; every node syncs spend from `llm_usage` every 2 s (running intents' meters included) and the control node starts the wrap-up as soon as the synced budget cannot pay for a worker | no claim until a budget was read |
+| Noise governor | one governor | each live node runs `egress.Share(profile, liveNodes)`; the profile follows `settings.noise_profile` | keep the current governor |
+| Capture switch, global proxy, web search (backend, keys, proxy) | in memory, set by the API | `followAgentSettings` (`server/worker_node_settings.go`) compares the values every poll, so an unannounced change is followed too; a change blocks claims for that poll and rebuilds the task agents on the new path | no claim |
+| LLM profiles and config (profile save/activate/delete, `/api/llm`, retry policy, failover switches, agent profile bindings) | in memory, rebuilt by the API handler | every change bumps `settings.llm_config_revision`; a worker node follows it every poll in the same `followAgentSettings`, drops its provider caches and re-applies the active profile, so its next intent runs on the new config; a running intent keeps its bundle | keep the current agents |
+| LLM recording switch | in memory, set by the API | compared every poll with the capture/proxy/web search values; no rebuild needed (c-6bcdd3) | keep the current value, no claim |
+| An agent's saved settings (max turns, run seconds, web search flag: `PUT /api/agents/{key}/config`) | read when a task's agents are built | the save bumps `settings.agent_config_revision`; a worker node follows it every poll and drops its task agents, so its next claim builds them from the saved row (c-6bcdd3) | no claim |
+| Claim lease | renewed every 15 s, lost on rejection | also cancelled after 60 s without a successful renewal, before another node may take it over at 90 s | run cancelled |
+| Control node alive | n/a | a worker claims only while a live `control` node is in `worker_nodes` (planner, deadline coordinator and settle run there) | no claim |
 | kill_work / steer_work / work pause and cancel | in-memory work map | `work_signals`, consumed by the node holding the claim (polled every 2 s); work pause/cancel waits until the intent leaves `running` | signal stays queued |
 | Settle drain | local in-flight count | plus live remote claims (`LiveRemoteRunningIntents`); when the grace expires, remote claims are revoked | counted as running |
+
+Everything else an agent is built from is read from Postgres per run or per
+call, on every node alike, so nothing has to be followed: agent prompts and
+wrap-up prompts, the tools table (bindings, enabled flags, descriptions),
+custom tools, MCP servers and their per-agent visibility, agent skill
+visibility, constraint injection switches, noa compaction, the LLM pool
+switches, the worker count, the task concurrency cap, the Python interpreter
+and the finding-traffic binding switch. Rewrite rules, tamper hooks and the
+browser MCP's proxy wiring belong to the recording proxy, which runs only on
+the control node. The audit behind this list (every `applyLLM` caller and
+every setting read only in `NewManager`) is card c-6bcdd3; what a worker node
+cannot follow is under Limits.
 
 Two signals flow from worker nodes back to the control node:
 
@@ -84,9 +102,21 @@ the task's TargetScope, and paces the traffic.
   resolves the presented token to the task it has loaded, and applies that
   task's scope exactly as it does for a local token. Deleting the task drops
   the tokens and closes their connections.
-- **Clients without a token.** Once the proxy accepts remote clients, a client
-  that presents no token from a non-loopback address is refused, so the proxy
-  is never an open proxy.
+- **Clients without a token.** A client that presents no token from a
+  non-loopback address is refused, so the proxy is never an open proxy. This
+  holds in every role, also for a single node started with
+  `ARTEX_PROXY_ALLOW_NONLOOPBACK=1`. `ARTEX_PROXY_ALLOW_UNSCOPED_REMOTE=1` is
+  the explicit opt-out (remote manual capture on the global rules only); it is
+  ignored on a control node.
+- **Browser MCP on a worker node.** The shared MCP row names the control node's
+  loopback proxy. Each spawn on a worker replaces it with a loopback credential
+  relay (`traffic.StartCredentialRelay`) that forwards to `ARTEX_CONTROL_PROXY`
+  with the run's scope token as `Proxy-Authorization`, which Chromium cannot
+  send itself, and points `NODE_EXTRA_CA_CERTS` at the fetched control CA. A
+  run without a task scope gets a relay whose dials are refused.
+- **Finding wake-ups.** The control node pages the task's finding nodes every
+  poll and wakes the planner for those a worker node wrote, as a local
+  `report_finding` does.
 - **CA certificate.** The control node publishes its CA certificate (the public
   cert only) for worker nodes to install for their agent processes.
 
@@ -221,12 +251,10 @@ These are known and carded on the ARTEX board:
 - **Transcripts stay on the node that ran the intent.** If a claim is taken
   over by another host, or a reopened intent is rerun elsewhere, the run starts
   over instead of resuming its transcript.
-- **Finding wake-ups are not relayed.** The planner sees a worker node's
-  findings on its next round. That round is triggered by the intent's
-  settlement.
 - **`egress.Share` floors in-flight limits at 1 per node.** With N nodes, up to
-  N requests to one host can be in flight at once. The request rate is divided
-  exactly.
+  max(limit, N) requests to one host can be in flight at once. The request rate
+  is divided exactly. A DB-backed per-host slot was decided against (HANDOFF
+  Decisions, c-18f7a8); `egress/share_bound_test.go` pins the bound.
 - **Agent egress inside a cluster is denied by name, re-resolved.** The chart
   default (`egress.denyClusterServices`) denies agent processes the PostgreSQL
   host, the control API Service and the API port on the control pod IP. Each
@@ -236,21 +264,43 @@ These are known and carded on the ARTEX board:
   the DNS cache TTL) the new IP is reachable; `egress.clusterCIDRs` leaves no
   such window (see the chart README). Outside Kubernetes, use
   `ARTEX_EGRESS_DENY` / `ARTEX_EGRESS_DENY_HOSTS`.
-- **Settings follow by revision.** Traffic capture, the global egress proxy and
-  web search reach worker nodes through `settings.agent_settings_revision`
-  (bumped by `PUT /api/settings`, polled every 2 s). A change written straight
-  into the `settings` table without the bump is not followed until a restart.
 - **The capture-store tools need the control node.** On a worker node they
   are calls to the control node (see "Evidence on worker nodes"). While it is
   down they fail, and so does a finding that carries traffic refs.
+- **The compose overlay changes how the host reaches the capture proxy.** The
+  overlay binds the control proxy to `0.0.0.0` inside the container. A
+  host-side client (for example the browser extension through the published
+  `127.0.0.1:8788`) then arrives from the Docker gateway address and is
+  refused without a scope token.
+- **A worker node needs the control node to start first.** It exits at start
+  (and is restarted) until it can read the control node's published CA
+  certificate. It claims nothing until a control node has published its run
+  budget.
+- **Skills are files on each node's disk.** A worker node loads the skills an
+  agent may see from its own skill directory; the database holds only which
+  skills each agent may see. A skill created or edited on the control node
+  does not exist on a worker node until the same files are there (a shared
+  volume, or the same image). A skill missing on the worker is left out of
+  the agent's tool list for that run; nothing fails.
+- **Configuration from the environment and the config file stays per
+  node.** An LLM provider from the environment (used only when no profile is
+  active), `task_user_agents` from the config file and the archive store are
+  read once at start; `ARTEX_RSI_LESSONS` is read from the environment on
+  each use. Each node reads its own. Set them alike on every node, and restart
+  a node after changing the ones read at start.
+- **The lesson block is chosen when a task's bundle is built.** A changed
+  bench lesson pin (`PUT /api/rsi/bench-lessons`) reaches a task when its
+  bundle is next rebuilt, on the control node as on a worker node.
 
 ## Recorded install (2026-11-24, kind, 3 nodes)
 
 The chart was installed on a kind v0.30 cluster (Kubernetes 1.34, one
 control-plane node and two worker nodes) with the fixtures in `deploy/lab/`
-(an LLM stub instead of a model, Juice Shop as the lab target). It ran the E7
-branch as it stood before the control-API TLS work merged into `main` (#46), so
-`controlTLS` was not part of it; re-run the checks with TLS on (card `c-620510`).
+(an LLM stub instead of a model, Juice Shop as the lab target). The checks ran
+first on the E7 branch and again, all passing, on that work merged with `main`
+(#46), which includes the default `controlTLS` (generated CA). Workers reached
+`https://artex-control:8787` with `ARTEX_CONTROL_CA` pinned and logged no
+plain-HTTP warning.
 The real-cluster run (separate hosts, real CNI, storage, LLM key and Ingress
 TLS) is still to do: `deploy/lab/README.md` "Real cluster" has the values
 file and `scripts/k8s-install-checks.sh`, which prints this table.
@@ -267,8 +317,10 @@ file and `scripts/k8s-install-checks.sh`, which prints this table.
 | Rolling upgrade | deadlocked with the default surge (a surge pod has no free host); `worker.updateStrategy` now defaults to `maxSurge: 0` |
 
 Defects found and fixed on the way: the volume-root modes above; worker nodes
-reading traffic capture only at start (now the agent settings revision); the
+reading traffic capture only at start (now compared every poll); the
 planner never waking when a fresh task's first settle poll was empty
 (`settleCursor`); a 0-byte `jwt.key` left by a pod killed mid-write (the key is
 now created atomically); `clusterCIDRs` taking DNS from agents (port 53 to the
-resolvers is now allowed first).
+resolvers is now allowed first); Service-link env (`ARTEX_CONTROL_PORT`,
+`ARTEX_CONTROL_SERVICE_HOST`, …) injected into ARTEX's own env namespace
+(pods now set `enableServiceLinks: false`).
