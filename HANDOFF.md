@@ -76,9 +76,12 @@ request needing a missing permission). The probe itself (`c-80fe4e`) is on this 
 - `integrations.sh` now runs the backend from its work dir (it used to write `jwt.key`/`secret.key` into the
   caller's cwd) and takes `ARTEX_E2E_PROXY_PORT`.
 
-**2026-11-24 — LLM sampling pin (`c-d73308`, E8; in review).** Migration 0028 adds nullable
+**2026-11-24 — LLM sampling pin (`c-d73308`, E8; on main via #69).** Migration 0028 adds nullable
 `llm_profiles.sampling_seed`/`sampling_temperature`; `agent/sampling.go` splices them into the wire body
 (seed on openai/ollama only; temperature only where the caller set none). Suite stamps `llm_sampling`.
+Verified against a real PostgreSQL: `db` package all green (incl. `TestProfileSamplingRoundTrip`),
+`server/llm_sampling_api_test.go` (POST/GET, 400 on seed for anthropic/openai-responses and on temperature
+outside 0..2). Not done: a live run against a real provider (folds into `c-f1518c`).
 
 **2026-11-24 — E9 follow-up `c-f729e8` (in review) on `ej/20261124-175807-17ca91`, which merges the
 c-45c921 branch (`ej/20261124-170157-3aeba5`, carrying E9), so landing it lands both.** `lib/triage.ts` takes
@@ -364,13 +367,19 @@ Card ids in brackets:
   and a public Sigstore log entry. Dependabot `github-actions` PRs start only once the new `dependabot.yml`
   is on main (origin/main's has no `github-actions` entry).
 - **E8 follow-ups** [`c-f1518c`] first live run, [`c-75c593`] bench
-  image from a clean clone, [`c-d73308`] per-profile sampling pin (built, in review).
+  image from a clean clone, [`c-d73308`] per-profile sampling pin (landed, #69; live check rides on `c-f1518c`).
 - **E10** [`c-72dd9d`] Code-security lane: built 2026-11-24, in review (see Current state). Follow-ups:
   [`c-d059ae`] lane in UI and exports (built, in review on `ej/20261124-170322-736db7`);
   [`c-7651e5`] stat cards + fact-node link; [`c-c978e3`] SAST-guided runtime verification;
   [`c-5c4009`] tracker RBAC (E2×E5).
 
 ## Known issues and gotchas
+- **PG-backed Go tests on a Mac with a throwaway cluster:** `ARTEX_PG_DSN` must be a `postgres://` URL
+  (a key=value DSN makes every PG test skip silently), and Homebrew `postgres` aborts at start
+  ("postmaster became multithreaded") unless `LC_ALL` is set. Recipe: `export LC_ALL=en_US.UTF-8;
+  initdb -D /tmp/pg/d -U artex -A trust; pg_ctl -D /tmp/pg/d -o "-p 55439 -k /tmp/pg" start;
+  ARTEX_PG_DSN=postgres://artex@localhost:55439/artex?sslmode=disable go test ./db ./server`. Under trust auth
+  `TestConnectWithoutPasswordRealPG` fails by design, and `TestManagerSOCKS5UDP…` needs 127.0.0.2 (absent on macOS).
 
 - **`scripts/*.sh` must run on macOS's stock bash 3.2**: no `mapfile`/`readarray`, `declare -A`,
   or `${x,,}`. A bash-4 builtin fails with "command not found" and the step silently passes (the gofmt
