@@ -33,6 +33,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Textarea } from "@/components/ui/textarea";
+import { useCan } from "@/hooks/use-session";
 import { t } from "@/i18n";
 import { api } from "@/lib/api";
 import type { Agent } from "@/lib/types";
@@ -40,6 +41,7 @@ import type { Agent } from "@/lib/types";
 // AgentGridCard is one clickable tile opening the agent's editor drawer. Custom
 // (non-builtin) agents get a delete button.
 function AgentGridCard({ agent, onOpen, onDeleted }: { agent: Agent; onOpen: () => void; onDeleted: () => void }) {
+  const canAdmin = useCan("admin");
   async function del() {
     try {
       await api.deleteAgent(agent.key);
@@ -81,7 +83,7 @@ function AgentGridCard({ agent, onOpen, onDeleted }: { agent: Agent; onOpen: () 
           <span className="rounded border px-1.5 py-0.5">{t("Tools {count}", { count: agent.tool_count ?? 0 })}</span>
         </div>
       </button>
-      {!agent.builtin && (
+      {canAdmin && !agent.builtin && (
         <AlertDialog>
           <AlertDialogTrigger asChild>
             <Button
@@ -216,6 +218,7 @@ export default function AgentsPage() {
     reload();
   }, [reload]);
 
+  const canAdmin = useCan("admin");
   const editing = agents.find((a) => a.key === editKey) ?? null;
 
   return (
@@ -227,12 +230,14 @@ export default function AgentsPage() {
             {t("Prompts/configs for built-in agents, plus creating and managing custom conversational agents")}
           </p>
         </div>
-        <CreateAgentDialog
-          onCreated={(key) => {
-            reload();
-            setEditKey(key);
-          }}
-        />
+        {canAdmin && (
+          <CreateAgentDialog
+            onCreated={(key) => {
+              reload();
+              setEditKey(key);
+            }}
+          />
+        )}
       </div>
 
       <Card>

@@ -3,6 +3,7 @@
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
+import { useCan } from "@/hooks/use-session";
 import { t } from "@/i18n";
 import type { Agent, MCPServer, SkillCall, SkillItem } from "@/lib/types";
 
@@ -29,6 +30,9 @@ export function SkillDetail({
   onToggleMcp: (skillName: string, mcpName: string, on: boolean) => void;
   onToggleVisibility: (skillName: string, agentId: string, agentName: string) => void;
 }) {
+  // Skill MCP metadata is /api/skills (operate); per-agent visibility is /api/visibility (admin).
+  const canOperate = useCan("operate");
+  const canAdmin = useCan("admin");
   return (
     <div className="max-w-5xl space-y-5">
       <div>
@@ -130,6 +134,7 @@ export function SkillDetail({
                     <Checkbox
                       id={`skill-mcp-${m.id}`}
                       checked={detailMcps.includes(m.name)}
+                      disabled={!canOperate}
                       onCheckedChange={(on) => onToggleMcp(selectedSkill.name, m.name, !!on)}
                     />
                     {m.name}
@@ -151,6 +156,7 @@ export function SkillDetail({
                   <Checkbox
                     id={`skill-agent-${a.id}`}
                     checked={(visibility[selectedSkill.name] ?? []).includes(a.id)}
+                    disabled={!canAdmin}
                     onCheckedChange={() => onToggleVisibility(selectedSkill.name, a.id, a.name)}
                   />
                   {a.name}

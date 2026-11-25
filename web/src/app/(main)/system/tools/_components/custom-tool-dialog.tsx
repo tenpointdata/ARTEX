@@ -14,6 +14,7 @@ import { Separator } from "@/components/ui/separator";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
+import { useCan } from "@/hooks/use-session";
 import { t } from "@/i18n";
 import { api } from "@/lib/api";
 import type { Agent, Tool } from "@/lib/types";
@@ -46,6 +47,8 @@ export function CustomToolDialog({
   onClose: () => void;
   onSaved: () => void;
 }) {
+  // Custom tools live under /api/tools (admin to change, and to test-run); other roles view them read-only.
+  const canAdmin = useCan("admin");
   const isNew = edit === "new";
   const tool = edit && edit !== "new" ? edit : null;
   const uid = React.useId();
@@ -254,7 +257,7 @@ export function CustomToolDialog({
           </SheetDescription>
         </SheetHeader>
 
-        <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-4 pb-4">
+        <fieldset disabled={!canAdmin} className="flex min-h-0 min-w-0 flex-1 flex-col gap-4 overflow-y-auto px-4 pb-4">
           <div className="grid gap-1.5">
             <Label className="text-xs">{t("Key")}</Label>
             <Input
@@ -439,7 +442,7 @@ export function CustomToolDialog({
             )}
           </div>
 
-          {kind !== "shell" && (
+          {kind !== "shell" && canAdmin && (
             <div className="grid gap-1.5 rounded-md border p-3">
               <Label className="font-medium text-xs">{t("Test run (uses the current form, nothing is saved)")}</Label>
               <Textarea
@@ -466,19 +469,23 @@ export function CustomToolDialog({
               )}
             </div>
           )}
-        </div>
+        </fieldset>
 
-        <Separator />
-        <div className="flex items-center gap-2 p-4">
-          <Button size="sm" onClick={save} disabled={saving}>
-            <SaveIcon /> {isNew ? t("Create") : t("Save")}
-          </Button>
-          {!isNew && (
-            <Button size="sm" variant="outline" className="text-destructive" onClick={del}>
-              <Trash2Icon /> {t("Delete")}
-            </Button>
-          )}
-        </div>
+        {canAdmin && (
+          <>
+            <Separator />
+            <div className="flex items-center gap-2 p-4">
+              <Button size="sm" onClick={save} disabled={saving}>
+                <SaveIcon /> {isNew ? t("Create") : t("Save")}
+              </Button>
+              {!isNew && (
+                <Button size="sm" variant="outline" className="text-destructive" onClick={del}>
+                  <Trash2Icon /> {t("Delete")}
+                </Button>
+              )}
+            </div>
+          </>
+        )}
       </SheetContent>
     </Sheet>
   );

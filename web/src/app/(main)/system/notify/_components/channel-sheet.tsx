@@ -9,6 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
+import { useCan } from "@/hooks/use-session";
 import { t } from "@/i18n";
 import type { NotificationChannel, NotificationMeta } from "@/lib/types";
 
@@ -42,6 +43,7 @@ export function ChannelSheet({
   saveForm,
   testChannel,
 }: ChannelSheetProps) {
+  const canAdmin = useCan("admin"); // channel changes and test sends are admin (server/rbac_policy.go)
   const fields = CHANNEL_FIELDS[form.kind] ?? [];
   const secretKeys = new Set(meta?.kinds.find((k) => k.kind === form.kind)?.secret_keys ?? []);
   const defaultRate = meta?.kinds.find((k) => k.kind === form.kind)?.default_rate_per_min ?? 0;
@@ -59,7 +61,7 @@ export function ChannelSheet({
         </SheetHeader>
 
         <div className="flex min-h-0 flex-1 flex-col overflow-y-auto px-4">
-          <div className="grid gap-4 py-4">
+          <fieldset disabled={!canAdmin} className="grid min-w-0 gap-4 py-4">
             <div className="grid gap-2">
               <Label>{t("Channel type")}</Label>
               <Select
@@ -234,18 +236,20 @@ export function ChannelSheet({
               <Switch checked={form.enabled} onCheckedChange={(v) => setF({ enabled: v })} aria-label={t("Enable")} />
               {t("Enable this channel")}
             </div>
-          </div>
+          </fieldset>
 
-          <div className="flex gap-2 pt-2 pb-6">
-            <Button onClick={saveForm} disabled={saving}>
-              {editing ? t("Save") : t("Add")}
-            </Button>
-            {editing && (
-              <Button variant="outline" onClick={testChannel} disabled={testing}>
-                <SendIcon /> {t("Send test message")}
+          {canAdmin && (
+            <div className="flex gap-2 pt-2 pb-6">
+              <Button onClick={saveForm} disabled={saving}>
+                {editing ? t("Save") : t("Add")}
               </Button>
-            )}
-          </div>
+              {editing && (
+                <Button variant="outline" onClick={testChannel} disabled={testing}>
+                  <SendIcon /> {t("Send test message")}
+                </Button>
+              )}
+            </div>
+          )}
         </div>
       </SheetContent>
     </Sheet>

@@ -10,6 +10,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
+import { useCan } from "@/hooks/use-session";
 import { intlLocale, t } from "@/i18n";
 import { api } from "@/lib/api";
 import type { JudgeConfig, JudgeDayUsage, JudgeUsage, LLMProfile } from "@/lib/types";
@@ -67,6 +68,8 @@ const defaultJudge = (): JudgeConfig => ({
 });
 
 export function JudgeCard() {
+  // PUT /api/intercept/judge is admin; other roles see the configuration and usage read-only.
+  const canAdmin = useCan("admin");
   const [cfg, setCfg] = React.useState<JudgeConfig>(defaultJudge());
   const [profiles, setProfiles] = React.useState<LLMProfile[]>([]);
   const [loading, setLoading] = React.useState(true);
@@ -161,7 +164,11 @@ export function JudgeCard() {
         </div>
         <div className="flex shrink-0 items-center gap-2">
           <span className="text-xs text-muted-foreground">{cfg.enabled ? t("Enabled") : t("Disabled")}</span>
-          <Switch checked={cfg.enabled} disabled={loading} onCheckedChange={(v) => patch({ enabled: v })} />
+          <Switch
+            checked={cfg.enabled}
+            disabled={loading || !canAdmin}
+            onCheckedChange={(v) => patch({ enabled: v })}
+          />
         </div>
       </div>
 
@@ -202,7 +209,7 @@ export function JudgeCard() {
       )}
 
       {cfg.enabled && (
-        <div className="grid gap-4 lg:grid-cols-5">
+        <fieldset disabled={!canAdmin} className="grid min-w-0 gap-4 lg:grid-cols-5">
           {/* Left: prompt editor (expanded inline, main area) */}
           <Card className="lg:col-span-3">
             <CardContent className="flex h-full flex-col gap-2 p-4">
@@ -213,13 +220,16 @@ export function JudgeCard() {
                     {t("The model decides ALLOW / ASK / DENY based on this; directly editable")}
                   </p>
                 </div>
-                <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={restorePrompt} disabled={saving}>
-                  {t("Restore default template")}
-                </Button>
+                {canAdmin && (
+                  <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={restorePrompt} disabled={saving}>
+                    {t("Restore default template")}
+                  </Button>
+                )}
               </div>
               <Textarea
                 className="min-h-[22rem] flex-1 resize-none font-mono text-xs leading-relaxed"
                 value={cfg.prompt}
+                readOnly={!canAdmin}
                 onChange={(e) => patch({ prompt: e.target.value })}
                 placeholder={t("Leave empty to use the built-in template")}
                 spellCheck={false}
@@ -327,14 +337,16 @@ export function JudgeCard() {
               </div>
             </CardContent>
           </Card>
-        </div>
+        </fieldset>
       )}
 
-      <div className="flex justify-end">
-        <Button size="sm" onClick={save} disabled={saving || loading}>
-          {saving ? t("Saving…") : t("Save config")}
-        </Button>
-      </div>
+      {canAdmin && (
+        <div className="flex justify-end">
+          <Button size="sm" onClick={save} disabled={saving || loading}>
+            {saving ? t("Saving…") : t("Save config")}
+          </Button>
+        </div>
+      )}
     </div>
   );
 }

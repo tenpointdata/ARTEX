@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
+import { useCan } from "@/hooks/use-session";
 import { t } from "@/i18n";
 import type { Tool } from "@/lib/types";
 
@@ -27,6 +28,7 @@ export function ScopeDialog({
   toggleTool: (key: string, val: boolean) => void;
   onSave: () => void;
 }) {
+  const canAdmin = useCan("admin");
   const scopeOpen = open;
   const setScopeOpen = onOpenChange;
   const scopeLoading = loading;
@@ -64,6 +66,7 @@ export function ScopeDialog({
                       <Switch
                         id={`scope-${tool.key}`}
                         checked={enabledTools.has(tool.key)}
+                        disabled={!canAdmin}
                         onCheckedChange={(v) => toggleTool(tool.key, v)}
                       />
                       <label htmlFor={`scope-${tool.key}`} className="flex-1 min-w-0 cursor-pointer">
@@ -91,9 +94,11 @@ export function ScopeDialog({
           <Button variant="outline" size="sm" onClick={() => setScopeOpen(false)}>
             {t("Cancel")}
           </Button>
-          <Button size="sm" onClick={saveScope} disabled={scopeSaving || scopeLoading}>
-            {scopeSaving ? t("Saving…") : t("Save")}
-          </Button>
+          {canAdmin && (
+            <Button size="sm" onClick={saveScope} disabled={scopeSaving || scopeLoading}>
+              {scopeSaving ? t("Saving…") : t("Save")}
+            </Button>
+          )}
         </div>
       </DialogContent>
     </Dialog>

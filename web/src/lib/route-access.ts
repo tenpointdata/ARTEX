@@ -10,9 +10,10 @@ export interface RouteRule {
   need?: Permission;
 }
 
-// A nav tree shaped like the sidebar's groups: items, optionally with sub-items.
+// A nav tree shaped like the sidebar's groups: items (a parent item may have
+// no url of its own), optionally with sub-items.
 export interface RouteRuleGroup {
-  items: ReadonlyArray<RouteRule & { subItems?: readonly RouteRule[] }>;
+  items: ReadonlyArray<{ url?: string; need?: Permission; subItems?: readonly RouteRule[] }>;
 }
 
 function normalize(path: string): string {
@@ -32,7 +33,7 @@ export function flattenRoutes(groups: readonly RouteRuleGroup[]): RouteRule[] {
   const out: RouteRule[] = [];
   for (const g of groups) {
     for (const it of g.items) {
-      out.push({ url: it.url, need: it.need });
+      if (it.url !== undefined) out.push({ url: it.url, need: it.need });
       for (const sub of it.subItems ?? []) out.push({ url: sub.url, need: sub.need });
     }
   }
