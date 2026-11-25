@@ -120,6 +120,16 @@ nodes", verification in Deltas. Gap `c-7ad4da` (capture switch read at start-up)
 **2026-11-24 — SSE 401 after console login (`c-13e86c`, fixed; pre-E5).** Streams are same-origin only
 (`web/src/lib/sse.ts`), dev gzip off, `openSSE` writes `: open`. Test `server/activity_stream_auth_pg_test.go`;
 browser-checked on the E5 stack.
+**2026-11-24 (c-888292, E6 follow-up)** — Archives made before `cost_cells` are backfilled on start
+(`server/task_archive_cost_backfill.go`, `db/llm_cost_archive_backfill.go`): the server reads only
+`manifest.json` → `tables.llm_usage` from each package and writes the cells with the archive-time
+aggregate, so `archived_omitted` reaches 0. Branch `ej/20261124-175804-41533a` merges
+`ej/c-990198-wall-time`, so landing it lands E6 + c-f4a69d + c-990198. Verified on Postgres 16:
+`TestBackfillArchiveCostCellsClearsOmitted` (all dimensions × 0/1/7/30/90 days omit 0) and
+`TestArchiveCostBackfillFromPackage` (real archive job, `GET /api/llm/cost`, cells identical to
+archive-time ones); `scripts/verify.sh` passed. Not checked: an S3-stored legacy package (same
+`archiveStore.Download` path restore uses).
+
 **2026-11-24 (c-f4a69d, E6 follow-up)** — The Cost & efficiency view now includes archived tasks.
 Archives record `aggregate_stats.cost_cells` (per profile, worker, model and UTC day: calls, errors,
 tokens, latency, first/last call; `db/llm_cost_archive.go`), and `db.CostBreakdown` folds them in, so an
@@ -130,7 +140,7 @@ summing. `npm run test:cost` (cost-metrics helpers) runs in `scripts/verify.sh`;
 cost files. This branch merges the unmerged E6 branch `ej/20261124-123231-b78990`, so landing it lands
 E6. Verified: `TestCostBreakdownIncludesArchivedTasks` and the archive round-trip against Postgres 16, the
 web test, tsc, i18n, `scripts/verify.sh`. Not checked: the page in a browser (`c-4c8fd6`). Older
-archives are not backfilled (`c-888292`).
+archives are backfilled on start from their packages' cold `llm_usage` rows (`c-888292`, below).
 
 **2026-11-24 (c-ca2bd0, E4 follow-up)** — An operator can choose a task's methodologies. Migration
 **0022** adds `tasks.methodologies TEXT[]` (empty `{}` = automatic, as before). The create request
@@ -328,7 +338,7 @@ Card ids in brackets:
   (role-aware controls on existing pages), `c-7c4715` (client_read console, in review), `c-601ec6` (chain paging).
 - **TEST** [`c-3157b4`] `TestGateOffTaskIsUnchanged` fails on main with Postgres (also fails before E5).
 - **E6 follow-ups** (E6 itself landed 2026-11-24, `c-cb0093`): admin/company gate on `/api/llm/cost` once client_read lands [`c-9ca57a`];
-  live browser + collector check [`c-4c8fd6`]; archived tasks in the cost view + cost-metrics web test [`c-f4a69d`, done 2026-11-24, in review]. Backfill `cost_cells` for older archives [`c-888292`, low].
+  live browser + collector check [`c-4c8fd6`]; archived tasks in the cost view + cost-metrics web test [`c-f4a69d`, done 2026-11-24, in review]. Backfill `cost_cells` for older archives [`c-888292`, done 2026-11-24, in review].
 - **E7** [`c-d60149`] Distributed/remote workers (queue-backed intents) for larger engagements; Helm chart.
   Follow-ups: `c-3b781a` and `c-548e8b` (TLS to the control API) in review; `c-677166` (TLS on the
   proxy hop), `c-29ff19`, `c-18f7a8`; `c-8cfbfe` (kind install recorded, in review; `c-7ad4da` closed by it).
@@ -577,88 +587,7 @@ Card ids in brackets:
   notes). Added GT-012, stack traces on `/graphiql` (`format_custom_error`). The notes now say that
   difficulty is server-wide DB state, switched by `X-DVGA-MODE` or `/difficulty/<level>`, not chosen per request.
 
-- **2026-11-23** — Stood ARTEX up locally and registered it as a Composite project rather than
-  forking/renaming; it stays an AGPL-3.0 fork under `tenpointdata`. Backend verified building; web
-  install and Docker run deferred (not needed to produce the setup + plan deliverable).
-- **2026-11-23** — Expansion plan produced as a Composite Office doc (link recorded by
-  `merge_handoff` / in the Composite project). All proposed work is guardrail-preserving; no item
-  touches the `RSI.md` immutable surfaces, and Loop-C work (E3) is gated behind that contract.
-- **2026-11-23** — E1–E10 tracked on the private Composite ARTEX board instead of GitHub issues,
-  because `tenpointdata/ARTEX` is public and the roadmap should not be published yet.
-
-- **2026-11-23** — Security fixes fail closed with explicit env opt-outs (`ARTEX_ALLOW_UNSANDBOXED`,
-  `ARTEX_ALLOW_INSECURE_BIND`, `ARTEX_CAPTURE_INSECURE_UPSTREAM`, `ARTEX_PROXY_ALLOW_NONLOOPBACK`) rather
-  than silent degradation. The metadata deny is not applied to Bash command text, because SSRF payloads
-  legitimately name 169.254.169.254; it is enforced at the dial level instead. Block rules keep substring
-  matching, since matching more is the safe direction; only allow rules became strict. Security
-  follow-ups are private board cards, not GitHub issues, because the repo is public.
-- **2026-11-23** — The capture proxy keeps verifying upstream TLS by default. Engagements against
-  self-signed targets set `ARTEX_CAPTURE_INSECURE_UPSTREAM=1` for that run only, until per-target trust
-  (card `c-8d54d5`) exists. Reason: the goproxy setting is global, so turning it on also leaves package
-  downloads through the proxy open to tampering.
-
-- **2026-11-24** — Per-task uids derive a process's identity from the **owner of its working run
-  directory**, not from a channel between the server and the shim. Norma always starts bash in the
-  server-chosen `tc.WorkingDir`, and only root sets that owner. A task's gid is the same number as its
-  uid, and the exec gid stays a supplementary group (script dirs; spill dirs are grouped to the task
-  uid instead, `c-dd160a`). As a result MCP servers no
-  longer write into run dirs when the range is on. Release kills the uid's processes and gives its files
-  back to root, so a uid returned to the pool owns nothing. The mode stays opt-in until it has run in a
-  real deployment.
-
-- **2026-11-24** — Capture-proxy task scope (`c-5a6f96`): carried as a per-task token in the proxy URL
-  userinfo, because a proxy client can only identify itself through its credential and every tool
-  already reads `HTTP_PROXY`. The token only *adds* a task's rules, so it is not treated as a secret
-  and a missing token falls back to the global rules (the floor), while an unknown token fails closed.
-  Proxy dials never wait for approval (an unpinned host opens a request and is refused). The
-  global-egress-proxy path is **accepted**, not routed through the gate: the operator's proxy resolves
-  and reaches the target, so the gate could only make a name-only check. OPS.md tells operators not to
-  run that proxy where it can reach metadata. Keep-alive host pinning is fixed locally with
-  go-mitmproxy's separate client rather than closing the client connection, so clients see no resets.
-
-- **2026-11-24** — Remaining proxy clients (`c-eb32cc`): shared clients (the per-profile chat agent,
-  the http custom tool) resolve the scoped URL per call from the run's `intercept.TargetScope` on the
-  context, rather than being rebuilt per run. A task scope whose task is not loaded gets a URL with
-  an unregistered token (refused), never the global-only URL, and `TaskProxyAddr` no longer mints
-  tokens for unloaded tasks. The transparent TCP listener stays global-only: it has no credential,
-  and per-run uid/cgroup mapping is operator netfilter setup; documented in `docs/OPS.md` §6.
-
-- **2026-11-24** — Browser MCP scope (`c-15b39d`): the card assumed one shared browser process; in
-  fact `wireAgentAugment` spawns every stdio MCP per run (worker run, planner round, main-agent and
-  chat turn) on a context that already carries the run's `TargetScope`. So the fix rewrites the spawn,
-  not the process model: any stdio MCP's `--proxy-server` or `HTTP(S)_PROXY`/`ALL_PROXY` naming the
-  recording proxy is replaced by a per-run loopback relay. A relay, not the userinfo, because
-  Chromium drops it from `--proxy-server` and only answers a 407 the proxy never sends. A relay
-  that cannot start skips the server for the run (fail closed) rather than spawning on the plain
-  URL. UI tool discovery (no run) keeps the stored URL, global rules: it lists tools and browses
-  nothing. This branch merges PR #13's branch (`ej/20261124-075745-5a4987`), which this work needs.
-- **2026-11-24** — E8: the A/B suite runs one task at a time on a dedicated instance and refuses a busy one,
-  because the server reads the active prompt live and a swap would reach a concurrent task. `--seed` fixes the
-  schedule, not the LLM, because ARTEX has no sampling-seed control; replicates control variance instead
-  (`c-d73308`). Gate rates are counted over ground-truth entries, not over detected findings, so arms with
-  different detection counts stay comparable. A failed run is counted but left out of the denominators. A judge
-  failure aborts the suite. Arms may vary only the editable goals/planner/worker body; the `RSI.md` immutable
-  surfaces stay outside the prompt API by construction.
-
-- **2026-11-24** — E5: the engagement is the task. The artifact is enforced only by the existing target
-  gate, so there is one enforcement path, and refusals are decided intercept rows. Names are never
-  resolved for the scope match, so a name must be listed by name; this fails closed. The technique
-  classifier is a declared check driven by a data table, not a sandbox; unclassified calls are not
-  limited. The audit chain is fed by DB row triggers (atomic with every writer, present and future),
-  and the hashed payload is stored as text so the bytes are hashed exactly. Users' roles are read from
-  the DB on every request, not from the token, so revocation is immediate.
-
-- **2026-11-24** — Audit head-lock contention (`c-ba9f64`): fixed with deferred constraint triggers
-  (migration 0018) rather than reordering the archive's deletes (which fixes one caller only) or an
-  unchained staging table plus a sequencer (which leaves a window where committed writes are not yet
-  chained, and adds a worker). Entries stay atomic with their writes; the head becomes the last lock a
-  transaction takes. Accepted costs: chain order is commit order, and the actor is `artex.actor` at commit.
-
-- **2026-11-24** — Client binding (`c-5b5421`): enforced in one middleware step with a declarative
-  per-route binder table that fails closed, rather than in scattered handler checks, so a new client
-  route cannot leak by omission. Findings reuse the #425 company filter. Task ownership counts only
-  operator-made company scope rows, because agent output is untrusted. A multi-company task is fully
-  visible to each bound client (accepted). Bindings apply to `client_read` only.
+- Earlier decisions (setup, plan, board, security fail-closed, proxy TLS, per-task uids, proxy and browser scope, E8 suite, E5 engagement, audit head-lock, client binding): `docs/handoff/decisions-2026-11-23-24-earlier.md`.
 
 ## Deltas
 
