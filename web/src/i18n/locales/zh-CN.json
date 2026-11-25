@@ -2978,5 +2978,10 @@
   "Seed: openai / ollama only": "种子：仅 openai / ollama",
   "Temperature": "温度",
   "Temperature 0–2 (empty = not pinned)": "温度 0–2（留空 = 不固定）",
-  "Pins sampling so replicates of an evaluation suite vary less; the suite stamps both values. The seed is sent only on the openai and ollama formats. The temperature applies when the calling code sets none of its own.": "固定采样参数，使评测套件的各次重复波动更小；套件会记录这两个值。种子仅在 openai 和 ollama 格式下发送。仅当调用代码自身未设置温度时才使用该温度。"
+  "Pins sampling so replicates of an evaluation suite vary less; the suite stamps both values. The seed is sent only on the openai and ollama formats. The temperature applies when the calling code sets none of its own.": "固定采样参数，使评测套件的各次重复波动更小；套件会记录这两个值。种子仅在 openai 和 ollama 格式下发送。仅当调用代码自身未设置温度时才使用该温度。",
+  "Export selected as HAR": "将所选项导出为 HAR",
+  "Delete selected": "删除所选项",
+  "Deleted {count} exchanges": "已删除 {count} 条流量交互",
+  "Delete the {count} selected exchanges?": "删除所选的 {count} 条流量交互？",
+  "This will permanently delete exactly the {count} selected exchanges (including raw requests/responses). Other traffic for the same hosts is kept. This action cannot be undone.": "这将永久删除所选的 {count} 条流量交互（包括原始请求/响应），同一主机的其他流量将保留。此操作无法撤销。"
 }

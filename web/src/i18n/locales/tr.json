@@ -2978,5 +2978,10 @@
   "Seed: openai / ollama only": "Tohum: yalnızca openai / ollama",
   "Temperature": "Sıcaklık",
   "Temperature 0–2 (empty = not pinned)": "Sıcaklık 0–2 (boş = sabitlenmez)",
-  "Pins sampling so replicates of an evaluation suite vary less; the suite stamps both values. The seed is sent only on the openai and ollama formats. The temperature applies when the calling code sets none of its own.": "Değerlendirme paketinin tekrarları daha az değişsin diye örneklemeyi sabitler; paket iki değeri de damgalar. Tohum yalnızca openai ve ollama biçimlerinde gönderilir. Sıcaklık, çağıran kod kendi sıcaklığını belirlemediğinde uygulanır."
+  "Pins sampling so replicates of an evaluation suite vary less; the suite stamps both values. The seed is sent only on the openai and ollama formats. The temperature applies when the calling code sets none of its own.": "Değerlendirme paketinin tekrarları daha az değişsin diye örneklemeyi sabitler; paket iki değeri de damgalar. Tohum yalnızca openai ve ollama biçimlerinde gönderilir. Sıcaklık, çağıran kod kendi sıcaklığını belirlemediğinde uygulanır.",
+  "Export selected as HAR": "Seçilenleri HAR olarak dışa aktar",
+  "Delete selected": "Seçilenleri sil",
+  "Deleted {count} exchanges": "{count} değişim silindi",
+  "Delete the {count} selected exchanges?": "Seçilen {count} değişim silinsin mi?",
+  "This will permanently delete exactly the {count} selected exchanges (including raw requests/responses). Other traffic for the same hosts is kept. This action cannot be undone.": "Bu işlem tam olarak seçilen {count} değişimi (ham istekler/yanıtlar dahil) kalıcı olarak siler. Aynı hostların diğer trafiği korunur. Bu işlem geri alınamaz."
 }
