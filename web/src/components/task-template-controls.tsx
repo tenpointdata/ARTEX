@@ -32,9 +32,9 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Sheet, SheetContent, SheetDescription, SheetFooter, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Spinner } from "@/components/ui/spinner";
 import { Textarea } from "@/components/ui/textarea";
+import { t } from "@/i18n";
 import { api } from "@/lib/api";
 import type { AssetInterceptRuleInput, TaskCategory, TaskTemplate } from "@/lib/types";
-import { t } from "@/i18n";
 import { cn } from "@/lib/utils";
 
 interface TemplateDraft {
@@ -291,7 +291,9 @@ function TaskTemplateManager({
                       </NativeSelectOption>
                     ))}
                   </NativeSelect>
-                  <FieldDescription>{t("This category is prefilled when the template is applied (still editable).")}</FieldDescription>
+                  <FieldDescription>
+                    {t("This category is prefilled when the template is applied (still editable).")}
+                  </FieldDescription>
                 </Field>
                 <Field>
                   <FieldLabel>{t("Task-level intercept / allow rules")}</FieldLabel>
@@ -300,7 +302,9 @@ function TaskTemplateManager({
                     onChange={(rules) => patchDraft({ interceptRules: rules })}
                   />
                   <FieldDescription>
-                    {t("These task-level rules are prefilled when the template is applied (intercept/allow, effective only for new tasks, never global).")}
+                    {t(
+                      "These task-level rules are prefilled when the template is applied (intercept/allow, effective only for new tasks, never global).",
+                    )}
                   </FieldDescription>
                 </Field>
               </FieldGroup>
@@ -326,8 +330,12 @@ function TaskTemplateManager({
       <AlertDialog open={deleteOpen} onOpenChange={setDeleteOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>{t('Delete template "{name}"?', { name: draft.name || t("Untitled template") })}</AlertDialogTitle>
-            <AlertDialogDescription>{t("Tasks already created from this template are not affected.")}</AlertDialogDescription>
+            <AlertDialogTitle>
+              {t('Delete template "{name}"?', { name: draft.name || t("Untitled template") })}
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {t("Tasks already created from this template are not affected.")}
+            </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel disabled={deleting}>{t("Cancel")}</AlertDialogCancel>

@@ -1,6 +1,6 @@
+import { liveEventsPath, parseLiveEvent, touches } from "./live-events.ts";
 import assert from "node:assert/strict";
 import test from "node:test";
-import { liveEventsPath, parseLiveEvent, touches } from "./live-events.ts";
 
 test("parseLiveEvent reads the server's frames", () => {
   assert.deepEqual(parseLiveEvent('{"kind":"finding","op":"insert","id":7,"task":"3"}'), {

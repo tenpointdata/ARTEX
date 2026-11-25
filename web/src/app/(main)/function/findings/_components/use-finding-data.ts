@@ -81,6 +81,11 @@ export function findingGroupKey(group: FindingGroup) {
   return group.task_id === null ? UNASSIGNED_TASK : String(group.task_id);
 }
 
+/** The key of the task group a finding is listed under in the grouped view. */
+export function findingGroupKeyOf(finding: Finding) {
+  return finding.task_id == null ? UNASSIGNED_TASK : String(finding.task_id);
+}
+
 interface FindingDataOptions {
   filters: FindingFilters;
   company: string | undefined;
@@ -238,11 +243,13 @@ export function useFindingData({
     }
   }, [company, importId, lane, filterFingerprint, filters, page, pageSize]);
 
+  // loadGroup loads one page of a task group. It resolves to that page's findings, or null when the
+  // request failed or a newer request or filter superseded it.
   const loadGroup = React.useCallback(
-    async (key: string, groupPage: number, groupPageSize: number) => {
+    async (key: string, groupPage: number, groupPageSize: number): Promise<Finding[] | null> => {
       const request = (groupRequests.current[key] ?? 0) + 1;
       const requestFilter = filterFingerprint;
-      if (activeFilterFingerprint.current !== requestFilter) return;
+      if (activeFilterFingerprint.current !== requestFilter) return null;
       groupRequests.current[key] = request;
       setGroupFindings((current) => ({
         ...current,
@@ -265,7 +272,7 @@ export function useFindingData({
           importId,
           lane,
         });
-        if (groupRequests.current[key] !== request || activeFilterFingerprint.current !== requestFilter) return;
+        if (groupRequests.current[key] !== request || activeFilterFingerprint.current !== requestFilter) return null;
         setGroupFindings((current) => ({
           ...current,
           [key]: {
@@ -277,8 +284,9 @@ export function useFindingData({
             loading: false,
           },
         }));
+        return result.items;
       } catch {
-        if (groupRequests.current[key] !== request || activeFilterFingerprint.current !== requestFilter) return;
+        if (groupRequests.current[key] !== request || activeFilterFingerprint.current !== requestFilter) return null;
         setGroupFindings((current) => ({
           ...current,
           [key]: {
@@ -286,6 +294,7 @@ export function useFindingData({
             loading: false,
           },
         }));
+        return null;
       }
     },
     [company, importId, lane, filterFingerprint, filters],
@@ -339,7 +348,7 @@ export function useFindingData({
         return;
       }
       void refreshGroups();
-      const key = finding.task_id ?? UNASSIGNED_TASK;
+      const key = findingGroupKeyOf(finding);
       const state = groupFindingsRef.current[key];
       if (state?.loaded) {
         const nextTotal = Math.max(0, state.total - (removed ? 1 : 0));

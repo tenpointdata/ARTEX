@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+
 import { ListTodo } from "lucide-react";
 
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
@@ -74,7 +75,10 @@ export function TodoPopover({
           {(todos ?? []).map((todo, i) => (
             <li
               key={`${i}:${todo.content}`}
-              className={cn("flex gap-1.5 px-1 text-xs", todo.status === "completed" && "text-muted-foreground line-through")}
+              className={cn(
+                "flex gap-1.5 px-1 text-xs",
+                todo.status === "completed" && "text-muted-foreground line-through",
+              )}
             >
               <span className="shrink-0">{MARK[todo.status] ?? "☐"}</span>
               <span className="break-words">{todo.content}</span>

@@ -15,9 +15,9 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Spinner } from "@/components/ui/spinner";
+import { intlLocale, t } from "@/i18n";
 import { api } from "@/lib/api";
 import type { FindingRetest } from "@/lib/types";
-import { intlLocale, t } from "@/i18n";
 
 const statusLabels = {
   pending: t("Waiting to start"),
@@ -86,7 +86,9 @@ export function FindingRetestPanel({
       <CardHeader className="flex flex-row flex-wrap items-start justify-between gap-3">
         <div className="flex flex-col gap-1.5">
           <CardTitle>{t("Vulnerability retest")}</CardTitle>
-          <CardDescription>{t("Verifies the current state in a separate session, keeping each retest's verdict and evidence.")}</CardDescription>
+          <CardDescription>
+            {t("Verifies the current state in a separate session, keeping each retest's verdict and evidence.")}
+          </CardDescription>
         </div>
         {running?.conversation_id != null ? (
           <Button asChild variant="outline" size="sm">
@@ -119,7 +121,9 @@ export function FindingRetestPanel({
           <Empty>
             <EmptyHeader>
               <EmptyTitle>{t("No retest records")}</EmptyTitle>
-              <EmptyDescription>{t("Once the fix is deployed, start a retest to compare new and old evidence.")}</EmptyDescription>
+              <EmptyDescription>
+                {t("Once the fix is deployed, start a retest to compare new and old evidence.")}
+              </EmptyDescription>
             </EmptyHeader>
           </Empty>
         ) : null}

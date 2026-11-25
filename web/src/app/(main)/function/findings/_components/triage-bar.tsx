@@ -1,13 +1,11 @@
 "use client";
 
-import * as React from "react";
-
 import { ChevronDownIcon, ChevronUpIcon } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Kbd } from "@/components/ui/kbd";
 import { t } from "@/i18n";
-import { isTypingTarget, TRIAGE_VERDICTS, type TriageNav, triageCommandForKey } from "@/lib/triage";
+import { TRIAGE_VERDICTS, type TriageNav } from "@/lib/triage";
 import type { Finding, FindingStatus } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
@@ -77,30 +75,4 @@ export function TriageBar({ finding, busy, onVerdict, onNav, hasPrev, hasNext }:
       </div>
     </div>
   );
-}
-
-// useTriageKeys binds the triage keys while `active`: verdict keys and j/k/Esc, ignored while typing,
-// with a modifier held, or while a dialog is open over the list.
-export function useTriageKeys(
-  active: boolean,
-  onVerdict: (status: FindingStatus) => void,
-  onNav: (nav: TriageNav) => void,
-) {
-  const handlers = React.useRef({ onVerdict, onNav });
-  handlers.current = { onVerdict, onNav };
-  React.useEffect(() => {
-    if (!active) return;
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.defaultPrevented || event.metaKey || event.ctrlKey || event.altKey) return;
-      if (event.target instanceof HTMLElement && isTypingTarget(event.target)) return;
-      if (document.querySelector('[role="dialog"], [role="alertdialog"], [role="listbox"]')) return;
-      const command = triageCommandForKey(event.key);
-      if (!command) return;
-      event.preventDefault();
-      if (command.kind === "verdict") handlers.current.onVerdict(command.status);
-      else handlers.current.onNav(command.nav);
-    };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [active]);
 }

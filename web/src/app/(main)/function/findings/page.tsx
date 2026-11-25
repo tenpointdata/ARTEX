@@ -12,6 +12,7 @@ import { useCan } from "@/hooks/use-session";
 import { t } from "@/i18n";
 import { api } from "@/lib/api";
 import { getLocalStorageValue, setLocalStorageValue } from "@/lib/local-storage.client";
+import { firstNewKey, triageNextPage } from "@/lib/triage";
 import type { Finding, FindingStatus } from "@/lib/types";
 import { useActiveCompany } from "@/stores/company/company-store";
 
@@ -33,7 +34,12 @@ import { type FindingRowProps, FindingsTable } from "./_components/findings-tabl
 import { useImportFilter } from "./_components/import-filter";
 import { useLaneFilter } from "./_components/lane-filter";
 import { useActiveRetests } from "./_components/use-active-retests";
-import { findingFingerprint, useFindingData } from "./_components/use-finding-data";
+import {
+  findingFingerprint,
+  findingGroupKeyOf,
+  type GroupFindingsState,
+  useFindingData,
+} from "./_components/use-finding-data";
 import { useFindingMutations } from "./_components/use-finding-mutations";
 
 const FINDING_LIST_PREFERENCE_KEY = "artex_finding_list_preferences";
@@ -175,23 +181,41 @@ function FindingsPageInner() {
     if (first) openRow(first);
   }, [flat, openFirst, openRow, view]);
 
-  // triage applies a verdict and moves the queue on: to the next row, or, when the verdict emptied the
-  // last row of the page out of the filter, to the first row of the reloaded page.
+  // advanceGroup moves grouped-view triage past the end of a group's page: it loads the page that now
+  // holds the group's next finding (the same page when the verdict dropped the row, else the next one)
+  // and opens its first finding not already seen. `before` is the group's state before the verdict.
+  const { loadGroup } = data;
+  const advanceGroup = React.useCallback(
+    async (key: string, before: GroupFindingsState, dropped: boolean) => {
+      const page = triageNextPage(before.page, before.pageSize, before.total, dropped);
+      const items = page === null ? null : await loadGroup(key, page, before.pageSize);
+      const target = items && firstNewKey(before.items.map(findingRowKey), items.map(findingRowKey));
+      openRow(items?.find((item) => findingRowKey(item) === target) ?? null);
+    },
+    [loadGroup, openRow],
+  );
+
+  // triage applies a verdict and moves the queue on: to the next row, or past the end of the page. The flat
+  // and asset views reopen the first row of the reloaded page when the verdict emptied the last row out of
+  // the filter; the grouped view advances within the group, across its pages.
   const [triageBusy, setTriageBusy] = React.useState(false);
   const triage = React.useCallback(
     async (f: Finding, next: FindingStatus, then: Finding | null) => {
       setTriageBusy(true);
+      const groupKey = findingGroupKeyOf(f);
+      const groupBefore = data.groupFindings[groupKey];
       try {
         const result = await mutations.updateStatus(f, next);
         if (!result.ok) return;
         if (then) openRow(then);
+        else if (view === "grouped" && groupBefore?.loaded) await advanceGroup(groupKey, groupBefore, result.dropped);
         else if (result.dropped) setOpenFirst(findingFingerprint(filters, company, importId, lane));
         else resetOpenRow();
       } finally {
         setTriageBusy(false);
       }
     },
-    [company, filters, importId, lane, mutations, openRow, resetOpenRow],
+    [advanceGroup, company, data.groupFindings, filters, importId, lane, mutations, openRow, resetOpenRow, view],
   );
 
   // A tile applies exactly its slice (other filters reset, search and sort kept); Pending also opens the first finding.

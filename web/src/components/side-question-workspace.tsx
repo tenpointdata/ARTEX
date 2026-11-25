@@ -91,7 +91,12 @@ function SidePanel({
         >
           <Trash2Icon />
         </Button>
-        <Button variant="ghost" size="icon-sm" onClick={() => side.setOpen(false)} aria-label={t("Close side-question panel")}>
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          onClick={() => side.setOpen(false)}
+          aria-label={t("Close side-question panel")}
+        >
           <XIcon />
         </Button>
       </div>
@@ -99,7 +104,9 @@ function SidePanel({
         {side.snapshot ? (
           <>
             <p>{side.snapshot.model.model}</p>
-            <p>{t("Context updated {time}", { time: new Date(side.snapshot.captured_at).toLocaleString(intlLocale) })}</p>
+            <p>
+              {t("Context updated {time}", { time: new Date(side.snapshot.captured_at).toLocaleString(intlLocale) })}
+            </p>
           </>
         ) : (
           t("Ask anytime after the main agent's first run")
@@ -123,7 +130,9 @@ function SidePanel({
           <Empty>
             <EmptyHeader>
               <EmptyTitle>{t("Ask a question anytime")}</EmptyTitle>
-              <EmptyDescription>{t("Answered from the current agent's context while the main task keeps running.")}</EmptyDescription>
+              <EmptyDescription>
+                {t("Answered from the current agent's context while the main task keeps running.")}
+              </EmptyDescription>
             </EmptyHeader>
           </Empty>
         )}
@@ -184,7 +193,9 @@ function SidePanel({
             }}
           />
           <InputGroupAddon align={inlineComposer ? "inline-end" : "block-end"}>
-            {!inlineComposer && <span className="text-muted-foreground text-xs">{t("Standalone Q&A · No tool execution")}</span>}
+            {!inlineComposer && (
+              <span className="text-muted-foreground text-xs">{t("Standalone Q&A · No tool execution")}</span>
+            )}
             {side.running ? (
               <InputGroupButton
                 className="ml-auto"
@@ -211,7 +222,9 @@ function SidePanel({
         </InputGroup>
       </div>
       {inlineComposer && (
-        <div className="shrink-0 truncate px-3 pt-0.5 pb-1 text-muted-foreground text-xs">{t("Standalone Q&A · No tool execution")}</div>
+        <div className="shrink-0 truncate px-3 pt-0.5 pb-1 text-muted-foreground text-xs">
+          {t("Standalone Q&A · No tool execution")}
+        </div>
       )}
       <AlertDialog open={confirm} onOpenChange={setConfirm}>
         <AlertDialogContent>

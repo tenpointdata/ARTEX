@@ -24,9 +24,10 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Select, SelectContent, SelectItem, SelectTrigger } from "@/components/ui/select";
 import { Spinner } from "@/components/ui/spinner";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { useTriageKeys } from "@/hooks/use-triage-keys";
 import { t } from "@/i18n";
 import { statusMeta } from "@/lib/status";
-import { type TriageNav, triageTarget } from "@/lib/triage";
+import { TRIAGE_VERDICTS, type TriageNav, triageTarget } from "@/lib/triage";
 import type { ActiveFindingRetest, Finding, FindingReportState, FindingStatus } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
@@ -43,7 +44,7 @@ import {
   VerificationBadge,
 } from "./finding-meta";
 import { CodeLocation, LaneBadge } from "./lane-badge";
-import { TriageBar, useTriageKeys } from "./triage-bar";
+import { TriageBar } from "./triage-bar";
 
 // The vocabularies moved to ./finding-meta; re-exported so existing importers keep working.
 export * from "./finding-meta";
@@ -124,7 +125,7 @@ export function FindingsTable({
     if (!canTriage || triageBusy || !openFinding?.finding_id) return;
     onTriage(openFinding, next, findingAt(triageTarget(keys, expandedKey, "next")));
   };
-  useTriageKeys(openFinding !== null, verdict, nav);
+  useTriageKeys(openFinding !== null, TRIAGE_VERDICTS, verdict, nav);
 
   // Keep the open row in view and focused when the queue advances by keyboard or verdict.
   const tableRef = React.useRef<HTMLTableElement>(null);

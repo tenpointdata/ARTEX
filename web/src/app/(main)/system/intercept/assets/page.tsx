@@ -154,7 +154,12 @@ export default function AssetInterceptPage() {
   }
 
   async function handleDelete(rule: AssetInterceptRule) {
-    if (!window.confirm(t("Are you sure you want to delete asset interception rule \"{pattern}\"?", { pattern: rule.pattern }))) return;
+    if (
+      !window.confirm(
+        t('Are you sure you want to delete asset interception rule "{pattern}"?', { pattern: rule.pattern }),
+      )
+    )
+      return;
     try {
       await api.deleteAssetInterceptRule(rule.id);
       toast.success(t("Rule deleted"));
@@ -183,14 +188,18 @@ export default function AssetInterceptPage() {
         <div>
           <h1 className="text-lg font-semibold leading-tight">{t("Asset interception")}</h1>
           <p className="text-sm text-muted-foreground mt-0.5">
-            {t("Global asset blocklist: matching domains / IPs / URLs / networks are intercepted; no operations run against them")}
+            {t(
+              "Global asset blocklist: matching domains / IPs / URLs / networks are intercepted; no operations run against them",
+            )}
           </p>
         </div>
       </div>
 
       <div className="flex items-center justify-between gap-3">
         <p className="text-xs text-muted-foreground">
-          {t("Supports exact and fuzzy matching for domains / IPs / URLs, plus CIDR networks; ships with built-in fuzzy blocks for government (.gov / .gov.cn) and education (.edu / .edu.cn) sites")}
+          {t(
+            "Supports exact and fuzzy matching for domains / IPs / URLs, plus CIDR networks; ships with built-in fuzzy blocks for government (.gov / .gov.cn) and education (.edu / .edu.cn) sites",
+          )}
         </p>
         <Button onClick={openNew} size="sm" className="shrink-0">
           <PlusIcon className="h-4 w-4" />
@@ -274,7 +283,9 @@ export default function AssetInterceptPage() {
         <SheetContent side="right" className="flex flex-col gap-0 p-0 sm:max-w-md">
           <SheetHeader className="border-b px-6 py-4">
             <SheetTitle>{editing ? t("Edit asset interception rule") : t("Create asset interception rule")}</SheetTitle>
-            <SheetDescription className="text-xs">{t("Target assets matching this rule are intercepted globally")}</SheetDescription>
+            <SheetDescription className="text-xs">
+              {t("Target assets matching this rule are intercepted globally")}
+            </SheetDescription>
           </SheetHeader>
 
           <div className="flex-1 min-h-0 overflow-y-auto px-6 py-5 space-y-5">
