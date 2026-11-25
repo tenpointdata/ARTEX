@@ -16,6 +16,7 @@ import { StatusBadge } from "@/components/status-badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
+import { useCan } from "@/hooks/use-session";
 import { intlLocale, t } from "@/i18n";
 import { api } from "@/lib/api";
 import { setVisibleInterval } from "@/lib/polling";
@@ -53,6 +54,7 @@ function StatCard({
 }
 
 export function OverviewTab({ taskId }: { taskId: string }) {
+  const canOperate = useCan("operate"); // re-runs are operate-level, and so is the per-model token ledger
   const [task, setTask] = React.useState<Task | null>(null);
   const [stats, setStats] = React.useState<Stats | null>(null);
   const [intents, setIntents] = React.useState<TaskNode[]>([]);
@@ -183,7 +185,7 @@ export function OverviewTab({ taskId }: { taskId: string }) {
       <ConstraintsCard taskId={taskId} />
       <TaskInterceptRulesCard taskId={taskId} />
       <CoverageCard coverage={coverage} />
-      <TokensCard taskId={taskId} />
+      {canOperate && <TokensCard taskId={taskId} />}
       <ScopeCard taskId={taskId} />
       {/* Heartbeat */}
       <Card>
@@ -305,26 +307,30 @@ export function OverviewTab({ taskId }: { taskId: string }) {
                 {t("({count} in total, re-runnable)", { count: blocked.length })}
               </span>
             </CardTitle>
-            <Button size="sm" variant="outline" disabled={rerunning.has("__all__")} onClick={() => void rerunAll()}>
-              <RefreshCwIcon className={`size-3.5 ${rerunning.has("__all__") ? "animate-spin" : ""}`} />
-              {t("Re-run all")}
-            </Button>
+            {canOperate && (
+              <Button size="sm" variant="outline" disabled={rerunning.has("__all__")} onClick={() => void rerunAll()}>
+                <RefreshCwIcon className={`size-3.5 ${rerunning.has("__all__") ? "animate-spin" : ""}`} />
+                {t("Re-run all")}
+              </Button>
+            )}
           </CardHeader>
           <CardContent className="flex flex-col gap-2">
             {blocked.slice(0, 20).map((i) => (
               <div key={i.id} className="flex items-center gap-2 text-sm">
                 <StatusBadge domain="intent" value={i.state} />
                 <span className="min-w-0 flex-1 truncate">{i.payload}</span>
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  className="h-7 shrink-0 px-2 text-xs"
-                  disabled={rerunning.has(i.id)}
-                  onClick={() => void rerunOne(i.id)}
-                >
-                  <RefreshCwIcon className={`size-3 ${rerunning.has(i.id) ? "animate-spin" : ""}`} />
-                  {t("Re-run")}
-                </Button>
+                {canOperate && (
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="h-7 shrink-0 px-2 text-xs"
+                    disabled={rerunning.has(i.id)}
+                    onClick={() => void rerunOne(i.id)}
+                  >
+                    <RefreshCwIcon className={`size-3 ${rerunning.has(i.id) ? "animate-spin" : ""}`} />
+                    {t("Re-run")}
+                  </Button>
+                )}
               </div>
             ))}
             {blocked.length > 20 && (

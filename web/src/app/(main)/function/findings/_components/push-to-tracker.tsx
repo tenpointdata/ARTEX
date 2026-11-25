@@ -5,6 +5,7 @@ import * as React from "react";
 import { toast } from "sonner";
 
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { useCan } from "@/hooks/use-session";
 import { t } from "@/i18n";
 import { pushableFindingIds, summarizePush } from "@/lib/integrations";
 import { integrationsApi } from "@/lib/integrations-api";
@@ -13,8 +14,10 @@ import type { TicketPushResult, TicketTracker } from "@/lib/types";
 // useEnabledTrackers loads the trackers a finding can be pushed to. Failures stay
 // quiet: without trackers the push control is simply not shown.
 export function useEnabledTrackers(): TicketTracker[] {
+  const canRead = useCan("read"); // GET /api/integrations/trackers needs read (not client_read)
   const [trackers, setTrackers] = React.useState<TicketTracker[]>([]);
   React.useEffect(() => {
+    if (!canRead) return;
     let alive = true;
     integrationsApi
       .trackers()
@@ -25,7 +28,7 @@ export function useEnabledTrackers(): TicketTracker[] {
     return () => {
       alive = false;
     };
-  }, []);
+  }, [canRead]);
   return trackers;
 }
 
@@ -42,8 +45,9 @@ export function PushToTrackerSelect({
   onPushed?: (results: TicketPushResult[]) => void;
   className?: string;
 }) {
+  const canOperate = useCan("operate"); // POST /api/integrations/trackers/{id}/push
   const [busy, setBusy] = React.useState(false);
-  if (trackers.length === 0) return null;
+  if (trackers.length === 0 || !canOperate) return null;
 
   async function push(trackerId: number) {
     const ids = pushableFindingIds(findingIds);

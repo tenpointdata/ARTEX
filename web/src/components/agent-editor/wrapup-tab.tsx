@@ -6,6 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import { Textarea } from "@/components/ui/textarea";
+import { useCan } from "@/hooks/use-session";
 import { t } from "@/i18n";
 
 import { rich } from "./rich";
@@ -51,8 +52,9 @@ export function WrapupTab(p: WrapupTabProps) {
     saveTaskTimeoutWrapup,
     resetTaskTimeoutWrapup,
   } = p;
+  const canAdmin = useCan("admin"); // saving or restoring wrap-up prompts needs admin
   return (
-    <div className="grid gap-3">
+    <fieldset disabled={!canAdmin} className="grid min-w-0 gap-3">
       <p className="text-muted-foreground text-xs leading-relaxed">
         {rich(
           t(
@@ -94,14 +96,16 @@ export function WrapupTab(p: WrapupTabProps) {
           onChange={(e) => setWrapupTurns(e.target.value)}
         />
       </div>
-      <div className="flex gap-2">
-        <Button size="sm" onClick={saveWrapup}>
-          {t("Save")}
-        </Button>
-        <Button size="sm" variant="outline" onClick={resetWrapup}>
-          {t("Restore default")}
-        </Button>
-      </div>
+      {canAdmin && (
+        <div className="flex gap-2">
+          <Button size="sm" onClick={saveWrapup}>
+            {t("Save")}
+          </Button>
+          <Button size="sm" variant="outline" onClick={resetWrapup}>
+            {t("Restore default")}
+          </Button>
+        </div>
+      )}
       {wrapupDefault && (
         <>
           <Separator />
@@ -156,14 +160,16 @@ export function WrapupTab(p: WrapupTabProps) {
               onChange={(e) => setTtTurns(e.target.value)}
             />
           </div>
-          <div className="flex gap-2">
-            <Button size="sm" onClick={saveTaskTimeoutWrapup}>
-              {t("Save")}
-            </Button>
-            <Button size="sm" variant="outline" onClick={resetTaskTimeoutWrapup}>
-              {t("Restore default")}
-            </Button>
-          </div>
+          {canAdmin && (
+            <div className="flex gap-2">
+              <Button size="sm" onClick={saveTaskTimeoutWrapup}>
+                {t("Save")}
+              </Button>
+              <Button size="sm" variant="outline" onClick={resetTaskTimeoutWrapup}>
+                {t("Restore default")}
+              </Button>
+            </div>
+          )}
           {ttWrapupDefault && (
             <div className="grid gap-1.5">
               <Label className="text-muted-foreground text-xs">
@@ -176,6 +182,6 @@ export function WrapupTab(p: WrapupTabProps) {
           )}
         </>
       )}
-    </div>
+    </fieldset>
   );
 }

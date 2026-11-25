@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { useCan } from "@/hooks/use-session";
 import { t } from "@/i18n";
 
 // Upper bounds of the two message render limits. They mirror the backend, which answers 400 outside [0, max].
@@ -43,6 +44,7 @@ export function GlobalSettingsCard({
   globalSaving,
   saveGlobal,
 }: GlobalSettingsCardProps) {
+  const canAdmin = useCan("admin"); // PUT /api/settings
   return (
     <Card className="gap-3">
       <CardHeader>
@@ -55,6 +57,7 @@ export function GlobalSettingsCard({
             id="n-base"
             placeholder="https://artex.example.com"
             value={baseURL}
+            readOnly={!canAdmin}
             onChange={(e) => setBaseURL(e.target.value)}
           />
           <p className="text-muted-foreground text-xs">
@@ -70,6 +73,7 @@ export function GlobalSettingsCard({
             max={1440}
             placeholder="30"
             value={digestMin}
+            readOnly={!canAdmin}
             onChange={(e) => setDigestMin(e.target.value)}
           />
           <p className="text-muted-foreground text-xs">{t('Only applies to channels in "digest" mode.')}</p>
@@ -84,6 +88,7 @@ export function GlobalSettingsCard({
             step={1}
             placeholder="120"
             value={summaryMax}
+            readOnly={!canAdmin}
             onChange={(e) => setSummaryMax(e.target.value)}
             aria-invalid={limitInvalid(summaryMax, SUMMARY_LIMIT_MAX)}
           />
@@ -101,6 +106,7 @@ export function GlobalSettingsCard({
             step={1}
             placeholder="3"
             value={assetsMax}
+            readOnly={!canAdmin}
             onChange={(e) => setAssetsMax(e.target.value)}
             aria-invalid={limitInvalid(assetsMax, ASSETS_LIMIT_MAX)}
           />
@@ -110,11 +116,13 @@ export function GlobalSettingsCard({
             })}
           </p>
         </div>
-        <div className="sm:col-span-2">
-          <Button onClick={saveGlobal} disabled={globalSaving}>
-            {t("Save global settings")}
-          </Button>
-        </div>
+        {canAdmin && (
+          <div className="sm:col-span-2">
+            <Button onClick={saveGlobal} disabled={globalSaving}>
+              {t("Save global settings")}
+            </Button>
+          </div>
+        )}
       </CardContent>
     </Card>
   );

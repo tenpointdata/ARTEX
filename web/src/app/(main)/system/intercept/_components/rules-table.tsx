@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Switch } from "@/components/ui/switch";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { useCan } from "@/hooks/use-session";
 import { t } from "@/i18n";
 import type { InterceptRule } from "@/lib/types";
 
@@ -24,6 +25,7 @@ export function RulesTable({
   handleDelete: (id: number) => void;
   handleToggle: (rule: InterceptRule) => void;
 }) {
+  const canAdmin = useCan("admin");
   return (
     <Card>
       <CardContent className="p-0">
@@ -33,10 +35,12 @@ export function RulesTable({
           <div className="flex flex-col items-center justify-center gap-2 py-16 text-center">
             <ShieldAlertIcon className="h-8 w-8 text-muted-foreground/40" />
             <p className="text-sm text-muted-foreground">{t("No rules yet")}</p>
-            <Button size="sm" variant="outline" onClick={openNew}>
-              <PlusIcon className="h-4 w-4" />
-              {t("Create the first rule")}
-            </Button>
+            {canAdmin && (
+              <Button size="sm" variant="outline" onClick={openNew}>
+                <PlusIcon className="h-4 w-4" />
+                {t("Create the first rule")}
+              </Button>
+            )}
           </div>
         ) : (
           <Table>
@@ -82,21 +86,23 @@ export function RulesTable({
                     <ActionBadge action={rule.action} />
                   </TableCell>
                   <TableCell className="text-center">
-                    <Switch checked={rule.enabled} onCheckedChange={() => handleToggle(rule)} />
+                    <Switch checked={rule.enabled} disabled={!canAdmin} onCheckedChange={() => handleToggle(rule)} />
                   </TableCell>
                   <TableCell>
                     <div className="flex items-center justify-end gap-0.5">
                       <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => openEdit(rule)}>
                         <PencilIcon className="h-3.5 w-3.5" />
                       </Button>
-                      <Button
-                        size="icon"
-                        variant="ghost"
-                        className="h-7 w-7 text-destructive hover:text-destructive"
-                        onClick={() => handleDelete(rule.id)}
-                      >
-                        <Trash2Icon className="h-3.5 w-3.5" />
-                      </Button>
+                      {canAdmin && (
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          className="h-7 w-7 text-destructive hover:text-destructive"
+                          onClick={() => handleDelete(rule.id)}
+                        >
+                          <Trash2Icon className="h-3.5 w-3.5" />
+                        </Button>
+                      )}
                     </div>
                   </TableCell>
                 </TableRow>

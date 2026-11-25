@@ -4,6 +4,7 @@ import * as React from "react";
 
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
+import { useCan } from "@/hooks/use-session";
 import { t } from "@/i18n";
 import type { MCPServer, SkillItem, Tool } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -22,6 +23,7 @@ export function McpTab({
   onToggle: (id: number) => void;
 }) {
   const uid = React.useId();
+  const canAdmin = useCan("admin"); // visibility bindings are admin-only
   return (
     <>
       <p className="text-muted-foreground mb-3 text-xs">{t("Check the MCP servers visible to this Agent.")}</p>
@@ -32,7 +34,12 @@ export function McpTab({
             htmlFor={`${uid}-${m.id}`}
             className="flex items-center gap-2 rounded-md border p-2 text-sm"
           >
-            <Checkbox id={`${uid}-${m.id}`} checked={visible.includes(m.id)} onCheckedChange={() => onToggle(m.id)} />
+            <Checkbox
+              id={`${uid}-${m.id}`}
+              checked={visible.includes(m.id)}
+              disabled={!canAdmin}
+              onCheckedChange={() => onToggle(m.id)}
+            />
             {m.name}
             <span className="text-muted-foreground ml-auto text-xs">{m.transport}</span>
           </label>
@@ -53,6 +60,7 @@ export function SkillTab({
   onToggle: (name: string) => void;
 }) {
   const uid = React.useId();
+  const canAdmin = useCan("admin"); // visibility bindings are admin-only
   return (
     <>
       <p className="text-muted-foreground mb-3 text-xs">{t("Check the Skills visible to this Agent.")}</p>
@@ -66,6 +74,7 @@ export function SkillTab({
             <Checkbox
               id={`${uid}-${s.name}`}
               checked={visible.includes(s.name)}
+              disabled={!canAdmin}
               onCheckedChange={() => onToggle(s.name)}
             />
             <span className="font-mono text-xs">{s.name}</span>
@@ -90,6 +99,7 @@ export function ToolsTab({
   onToggle: (tool: Tool) => void;
 }) {
   const uid = React.useId();
+  const canAdmin = useCan("admin"); // tool bindings are admin-only
   return (
     <>
       <p className="text-muted-foreground mb-3 text-xs">{t("Check the built-in tools bound to this Agent.")}</p>
@@ -106,7 +116,7 @@ export function ToolsTab({
               <Checkbox
                 id={`${uid}-${tool.key}`}
                 checked={tool.agents.includes(agentKey)}
-                disabled={gated}
+                disabled={gated || !canAdmin}
                 onCheckedChange={() => onToggle(tool)}
               />
               <span className="font-mono text-xs">{tool.key}</span>

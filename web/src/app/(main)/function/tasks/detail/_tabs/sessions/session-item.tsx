@@ -157,7 +157,7 @@ export function SessionItem({
           </span>
         )}
       </button>
-      {cancellable && (
+      {cancellable && onCancel && (
         <div className="flex shrink-0 items-center gap-0.5 pr-1 opacity-100 sm:opacity-0 sm:transition-opacity sm:group-hover/session:opacity-100 sm:group-focus-within/session:opacity-100">
           <Button
             type="button"

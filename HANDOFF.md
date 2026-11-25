@@ -59,6 +59,23 @@ See `docs/ARCHITECTURE.md` for the code-level map. Summary:
 
 ## Current state
 
+**2026-11-24 — Role route guard + c-92bb52 gates (`c-bd9b7a`, in review on `ej/20261124-191154-865292`).**
+`scripts/e2e/role-probe.sh` now **passes for reviewer, operator and client_read** (no /api >= 400, no
+request needing a missing permission). The probe itself (`c-80fe4e`) is on this branch too.
+- `RouteGuard` (`web/src/app/(main)/_components/route-guard.tsx`, pure resolver `web/src/lib/route-access.ts`
+  + `route-access.test.mjs`) takes a path's permission from the sidebar's `need` (detail pages inherit their
+  parent; uncovered paths need read) and sends a role lacking it to `landingPath` without mounting the page.
+- c-92bb52's gating (`ej/20261124-144553-d5978e`) could not be git-merged: its one commit both gated and split
+  files, conflicting with main's E9 split in ~40 files. Its intent was **re-applied onto main's files** here, so
+  this branch supersedes it: **do not land `ej/20261124-144553-d5978e`.** Not ported: its `errorText(e)` swaps.
+- Beyond the branch: task Overview `TokensCard` (`/api/llm/records/by-model`) needs operate; integrations page
+  (tracker create/edit/enable/delete admin, sync operate) and tracker reads on findings pages skipped for client_read.
+- Run the probe with spare ports when another harness is up: `ARTEX_E2E_API_PORT=38787 ARTEX_E2E_UI_PORT=35173
+  ARTEX_E2E_PG_PORT=46432 ARTEX_E2E_PROXY_PORT=38788 scripts/e2e/role-probe.sh`.
+- Findings are in `docs/handoff/2026-11-24-role-probe-findings.md`.
+- `integrations.sh` now runs the backend from its work dir (it used to write `jwt.key`/`secret.key` into the
+  caller's cwd) and takes `ARTEX_E2E_PROXY_PORT`.
+
 **2026-11-24 — SOCKS5 auth regression after #79 fixed (`c-831dfa`).** `checkCredential` looked up a
 scope-token password in the local registry only, so worker-minted tokens that the remote resolver holds got
 RFC 1929 0x01. It now uses `Traffic.resolveScope` (local, then remote). `TestSOCKS5RemoteScope` now expects
@@ -227,9 +244,9 @@ the full Docker image, the E8 suite) are in `docs/handoff/2026-11-24-current-sta
    "Done when" is on each card.
 3. *(unclaimed)* — **SEC: per-task uid follow-ups** (S each): `c-12df03` (single-uid start-up fails on a
    socket; MCP uid not egress-filtered), `c-e70e5c` (release ended tasks at start-up; per-key lock). The "Done when" is on each card.
-4. *(unclaimed)* — **E5 UI: hide role-lacking actions on existing pages** (M), card `c-92bb52`. Done = as
-   reviewer and operator, no visible control answers 403. Then `c-601ec6` (chain newest-first paging, S).
-   (`c-7c4715`, the client_read console, is built and in review on `ej/20261124-144554-67afc9`.)
+4. *(unclaimed)* — **E5: chain newest-first paging** (S), card `c-601ec6`. (`c-bd9b7a` role guard + c-92bb52
+   gates are in review on `ej/20261124-191154-865292`; `c-7c4715`, the client_read console, is in review on
+   `ej/20261124-144554-67afc9`.)
 5. *(unclaimed)* — **SEC: gorilla/websocket bump, GO-2026-6278** (XS), card `c-c10f2c`; needs network.
    Done = govulncheck clean.
 6. *(unclaimed)* — **SEC: upstream-gate residuals** (M), card `c-5a6f96`: task-scoped rules on proxy
@@ -295,6 +312,10 @@ the full Docker image, the E8 suite) are in `docs/handoff/2026-11-24-current-sta
 - **Browser e2e (E2 integrations):** `scripts/e2e/integrations.sh`. It needs Go, Node, and initdb/pg_ctl,
   or `ARTEX_E2E_PG_DSN` set to an empty database. It installs Playwright unless it resolves on `NODE_PATH`.
   `ARTEX_E2E_KEEP=1` keeps the logs and screenshots. Ports are set with `ARTEX_E2E_{API,UI,PG}_PORT`.
+- **Role probe (RBAC in the UI):** `scripts/e2e/role-probe.sh` (about 5 minutes, same harness).
+  `ARTEX_E2E_ROLES=reviewer` and `ARTEX_E2E_PAGES=/system` narrow a run. With `ARTEX_E2E_KEEP=1`, per-role
+  JSON reports and screenshots land in the work dir's `shots/`. Use free ports when another dev backend
+  holds 28787/28788.
 - **Benchmark harness:** `scripts/benchmark` against the subject instance `docker-compose.bench.yml`
   (`cp bench/.env.example bench/.env`, set `ARTEX_PG_PASSWORD` + an LLM key, then
   `docker compose -f docker-compose.bench.yml up --build -d`; `ARTEX_BENCH_PORT=18787` when a production

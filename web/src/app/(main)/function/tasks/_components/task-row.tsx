@@ -38,6 +38,7 @@ import { Label } from "@/components/ui/label";
 import { Spinner } from "@/components/ui/spinner";
 import { Switch } from "@/components/ui/switch";
 import { TableCell, TableHead, TableRow } from "@/components/ui/table";
+import { useCan } from "@/hooks/use-session";
 import { t } from "@/i18n";
 import { api } from "@/lib/api";
 import type { SortDirection } from "@/lib/sort-preference";
@@ -228,14 +229,17 @@ export const TaskRow = React.memo(function TaskRow({
   selected: boolean;
   onSelectedChange: (id: string, checked: boolean) => void;
 }) {
+  const canOperate = useCan("operate"); // every row action mutates the task
   return (
     <TableRow className="group border-border/60" data-state={selected ? "selected" : undefined}>
       <TableCell>
-        <Checkbox
-          checked={selected}
-          onCheckedChange={(checked) => onSelectedChange(task.id, checked === true)}
-          aria-label={t("Select task {id}", { id: task.id })}
-        />
+        {canOperate && (
+          <Checkbox
+            checked={selected}
+            onCheckedChange={(checked) => onSelectedChange(task.id, checked === true)}
+            aria-label={t("Select task {id}", { id: task.id })}
+          />
+        )}
       </TableCell>
       <TableCell>
         <code className="bg-muted rounded px-1.5 py-0.5 font-mono text-xs">{task.id}</code>
@@ -346,10 +350,14 @@ export const TaskRow = React.memo(function TaskRow({
               <EyeIcon />
             </Link>
           </Button>
-          <TaskControlButton task={task} onControl={onControl} />
-          <TaskPinAction task={task} onTogglePinned={onTogglePinned} />
-          <TaskArchiveAction task={task} onArchive={onArchive} />
-          <DeleteTaskDialog task={task} onDelete={onDelete} />
+          {canOperate && (
+            <>
+              <TaskControlButton task={task} onControl={onControl} />
+              <TaskPinAction task={task} onTogglePinned={onTogglePinned} />
+              <TaskArchiveAction task={task} onArchive={onArchive} />
+              <DeleteTaskDialog task={task} onDelete={onDelete} />
+            </>
+          )}
         </div>
       </TableCell>
     </TableRow>
@@ -363,6 +371,7 @@ export function TaskNameEditor({
   task: Task;
   onRename: (task: Task, name: string) => Promise<void>;
 }) {
+  const canOperate = useCan("operate");
   const [editing, setEditing] = React.useState(false);
   const [name, setName] = React.useState(task.name ?? "");
   const [saving, setSaving] = React.useState(false);
@@ -438,20 +447,22 @@ export function TaskNameEditor({
       >
         {task.name?.trim() ? task.name : <span className="text-muted-foreground">{t("Unnamed")}</span>}
       </Link>
-      <Button
-        type="button"
-        variant="ghost"
-        size="icon-xs"
-        className="shrink-0 opacity-100 transition-opacity [@media(hover:hover)]:opacity-0 [@media(hover:hover)]:group-focus-within:opacity-100 [@media(hover:hover)]:group-hover:opacity-100"
-        aria-label={t("Rename task #{id}", { id: task.id })}
-        title={t("Rename")}
-        onClick={() => {
-          setName(task.name ?? "");
-          setEditing(true);
-        }}
-      >
-        <PencilIcon />
-      </Button>
+      {canOperate && (
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon-xs"
+          className="shrink-0 opacity-100 transition-opacity [@media(hover:hover)]:opacity-0 [@media(hover:hover)]:group-focus-within:opacity-100 [@media(hover:hover)]:group-hover:opacity-100"
+          aria-label={t("Rename task #{id}", { id: task.id })}
+          title={t("Rename")}
+          onClick={() => {
+            setName(task.name ?? "");
+            setEditing(true);
+          }}
+        >
+          <PencilIcon />
+        </Button>
+      )}
     </div>
   );
 }

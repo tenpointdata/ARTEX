@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { useCan } from "@/hooks/use-session";
 import { t } from "@/i18n";
 import type { Agent, Conversation } from "@/lib/types";
 
@@ -51,6 +52,7 @@ export interface ConversationSidebarProps {
 // ConversationSidebar is the left rail: new button, agent filter, bulk-select
 // header, and the pinned + per-agent grouped conversation rows.
 export function ConversationSidebar(p: ConversationSidebarProps) {
+  const canOperate = useCan("operate"); // starting, renaming, pinning and deleting conversations
   const {
     convs,
     filteredConversations,
@@ -84,9 +86,11 @@ export function ConversationSidebar(p: ConversationSidebarProps) {
   return (
     <div className="bg-card flex flex-col overflow-hidden rounded-lg border">
       <div className="flex flex-col gap-2 border-b p-2">
-        <Button size="sm" className="w-full" onClick={() => p.selectConversation(null)}>
-          <PlusIcon /> {t("New conversation")}
-        </Button>
+        {canOperate && (
+          <Button size="sm" className="w-full" onClick={() => p.selectConversation(null)}>
+            <PlusIcon /> {t("New conversation")}
+          </Button>
+        )}
         <Select
           value={agentFilter === null ? "all" : `agent:${agentFilter}`}
           onValueChange={(value) => p.changeAgentFilter(value === "all" ? null : value.slice(6))}
@@ -108,7 +112,7 @@ export function ConversationSidebar(p: ConversationSidebarProps) {
           </SelectContent>
         </Select>
         {convs.length > 0 &&
-          (selectionMode ? (
+          (selectionMode && canOperate ? (
             <div className="flex items-center gap-2 px-1">
               <Checkbox
                 checked={p.conversationHeaderChecked}
@@ -141,16 +145,18 @@ export function ConversationSidebar(p: ConversationSidebarProps) {
               <span className="text-muted-foreground min-w-0 flex-1 text-xs tabular-nums">
                 {conversationCountLabel}
               </span>
-              <Button
-                size="sm"
-                variant="ghost"
-                className="text-muted-foreground"
-                onClick={() => p.setSelectionMode(true)}
-                disabled={filteredConversations.length === 0}
-              >
-                <ListChecksIcon data-icon="inline-start" />
-                {t("Select")}
-              </Button>
+              {canOperate && (
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="text-muted-foreground"
+                  onClick={() => p.setSelectionMode(true)}
+                  disabled={filteredConversations.length === 0}
+                >
+                  <ListChecksIcon data-icon="inline-start" />
+                  {t("Select")}
+                </Button>
+              )}
             </div>
           ))}
       </div>

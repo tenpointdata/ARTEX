@@ -10,6 +10,7 @@ import { Switch } from "@/components/ui/switch";
 import { t } from "@/i18n";
 
 import { rich } from "./rich";
+import { useSettingsAccess } from "./use-system-settings";
 
 export function TrafficCaptureCard({
   trafficCapture,
@@ -22,6 +23,7 @@ export function TrafficCaptureCard({
   saving: boolean;
   onToggle: (v: boolean) => void;
 }) {
+  const { editable } = useSettingsAccess(loaded);
   return (
     <Card className="mb-4 break-inside-avoid md:mb-6">
       <CardHeader>
@@ -51,7 +53,7 @@ export function TrafficCaptureCard({
           <Switch
             id="traffic-capture"
             checked={trafficCapture}
-            disabled={!loaded || saving}
+            disabled={!editable || saving}
             onCheckedChange={onToggle}
           />
         </div>
@@ -78,6 +80,7 @@ export function AgentTrafficBindingCard({
   saving: boolean;
   onToggle: (v: boolean) => void;
 }) {
+  const { editable } = useSettingsAccess(loaded);
   return (
     <Card className="mb-4 break-inside-avoid md:mb-6">
       <CardHeader>
@@ -105,7 +108,7 @@ export function AgentTrafficBindingCard({
           id="agent-traffic-binding"
           aria-describedby="agent-traffic-binding-description"
           checked={agentTrafficBinding}
-          disabled={!loaded || saving}
+          disabled={!editable || saving}
           onCheckedChange={onToggle}
         />
       </CardContent>
@@ -126,6 +129,7 @@ export function GlobalProxyCard({
   loaded: boolean;
   saveGlobalProxy: () => void;
 }) {
+  const { canAdmin, editable } = useSettingsAccess(loaded);
   return (
     <Card className="mb-4 break-inside-avoid md:mb-6">
       <CardHeader>
@@ -163,12 +167,14 @@ export function GlobalProxyCard({
             autoComplete="off"
             placeholder={t("socks5://user:pass@host:1080 or http://host:port (empty = direct)")}
             value={globalProxyInput}
-            disabled={!loaded || savingGlobalProxy}
+            disabled={!editable || savingGlobalProxy}
             onChange={(e) => setGlobalProxyInput(e.target.value)}
           />
-          <Button type="button" onClick={saveGlobalProxy} disabled={!loaded || savingGlobalProxy}>
-            {t("Save")}
-          </Button>
+          {canAdmin && (
+            <Button type="button" onClick={saveGlobalProxy} disabled={!editable || savingGlobalProxy}>
+              {t("Save")}
+            </Button>
+          )}
         </div>
         <p className="text-muted-foreground text-xs">
           {globalProxyInput.trim()

@@ -32,6 +32,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Sheet, SheetContent, SheetDescription, SheetFooter, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Spinner } from "@/components/ui/spinner";
 import { Textarea } from "@/components/ui/textarea";
+import { useCan } from "@/hooks/use-session";
 import { t } from "@/i18n";
 import { api } from "@/lib/api";
 import type { AssetInterceptRuleInput, TaskCategory, TaskTemplate } from "@/lib/types";
@@ -378,6 +379,7 @@ export function TaskTemplateControls({
   onApply,
   portalContainer,
 }: TaskTemplateControlsProps) {
+  const canOperate = useCan("operate"); // template writes are operate-level
   const [templates, setTemplates] = React.useState<TaskTemplate[]>([]);
   const [loading, setLoading] = React.useState(true);
   const [templateInputValue, setTemplateInputValue] = React.useState("");
@@ -454,29 +456,31 @@ export function TaskTemplateControls({
       <Field>
         <div className="flex flex-wrap items-center justify-between gap-2">
           <FieldLabel htmlFor="task-template-picker">{t("Task template")}</FieldLabel>
-          <div className="flex flex-wrap gap-2">
-            <Button type="button" variant="ghost" size="sm" onClick={() => openManager(null)}>
-              <Settings2Icon data-icon="inline-start" />
-              {t("Manage templates")}
-            </Button>
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              disabled={!description.trim() || !goal.trim()}
-              onClick={() =>
-                openManager({
-                  description,
-                  goal,
-                  categoryID: categoryID ?? null,
-                  interceptRules: interceptRules ?? [],
-                })
-              }
-            >
-              <SaveIcon data-icon="inline-start" />
-              {t("Save as template")}
-            </Button>
-          </div>
+          {canOperate && (
+            <div className="flex flex-wrap gap-2">
+              <Button type="button" variant="ghost" size="sm" onClick={() => openManager(null)}>
+                <Settings2Icon data-icon="inline-start" />
+                {t("Manage templates")}
+              </Button>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                disabled={!description.trim() || !goal.trim()}
+                onClick={() =>
+                  openManager({
+                    description,
+                    goal,
+                    categoryID: categoryID ?? null,
+                    interceptRules: interceptRules ?? [],
+                  })
+                }
+              >
+                <SaveIcon data-icon="inline-start" />
+                {t("Save as template")}
+              </Button>
+            </div>
+          )}
         </div>
         <Combobox
           items={templates}

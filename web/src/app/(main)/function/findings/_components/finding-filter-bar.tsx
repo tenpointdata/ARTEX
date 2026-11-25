@@ -17,6 +17,7 @@ import type {
   VerificationStatus,
 } from "@/lib/types";
 
+import { BulkTriageControls } from "./bulk-triage-controls";
 import type { FindingFilters } from "./finding-filters";
 import {
   FINDING_REPORT_STATES,
@@ -210,42 +211,7 @@ export function FindingFilterBar({
             <span className="text-xs text-muted-foreground tabular-nums">
               {t("{count} selected", { count: selectedIds.size })}
             </span>
-            <Select
-              value=""
-              onValueChange={(v) => {
-                if (v) onBulkStatus(v as FindingStatus);
-              }}
-              disabled={bulkBusy}
-            >
-              <SelectTrigger size="sm" className="w-40" aria-label={t("Set the status of the selected findings")}>
-                <SelectValue placeholder={bulkBusy ? t("Updating…") : t("Set status")} />
-              </SelectTrigger>
-              <SelectContent>
-                {FINDING_STATUSES.map((st) => (
-                  <SelectItem key={st} value={st}>
-                    {statusMeta("finding", st).label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <Select
-              value=""
-              onValueChange={(v) => {
-                if (v) onBulkReportState(v as FindingReportState);
-              }}
-              disabled={bulkBusy}
-            >
-              <SelectTrigger size="sm" className="w-44" aria-label={t("Set the report stage of the selected findings")}>
-                <SelectValue placeholder={bulkBusy ? t("Updating…") : t("Set report stage")} />
-              </SelectTrigger>
-              <SelectContent>
-                {FINDING_REPORT_STATES.map((st) => (
-                  <SelectItem key={st} value={st}>
-                    {REPORT_STATE_META[st].label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <BulkTriageControls busy={bulkBusy} onStatus={onBulkStatus} onReportState={onBulkReportState} />
             <PushToTrackerSelect findingIds={selectedIds} trackers={trackers} />
           </div>
         )}

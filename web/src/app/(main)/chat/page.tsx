@@ -4,6 +4,7 @@ import * as React from "react";
 
 import { toast } from "sonner";
 
+import { useCan } from "@/hooks/use-session";
 import { intlLocale, t } from "@/i18n";
 import { api } from "@/lib/api";
 import { getLocalStorageValue, removeLocalStorageValue, setLocalStorageValue } from "@/lib/local-storage.client";
@@ -22,6 +23,7 @@ import { ConversationSidebar } from "./_components/conversation-sidebar";
 import { DraftChat } from "./_components/draft-chat";
 
 export default function ChatPage() {
+  const canOperate = useCan("operate"); // the draft (new conversation) view needs operate
   const [agents, setAgents] = React.useState<Agent[]>([]);
   const [profiles, setProfiles] = React.useState<LLMProfile[]>([]);
   const [convs, setConvs] = React.useState<Conversation[]>([]);
@@ -405,6 +407,10 @@ export default function ChatPage() {
           ) : sourceRequested ? (
             <div role="status" className="p-6 text-sm text-muted-foreground">
               {convsLoaded ? t("The conversation has been deleted") : t("Loading the conversation…")}
+            </div>
+          ) : !canOperate ? (
+            <div role="status" className="p-6 text-sm text-muted-foreground">
+              {t("Select a conversation to view it. Starting and reading conversations requires the operator role.")}
             </div>
           ) : (
             <DraftChat

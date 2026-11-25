@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Spinner } from "@/components/ui/spinner";
+import { useCan } from "@/hooks/use-session";
 import { t } from "@/i18n";
 import type { TaskStatus } from "@/lib/types";
 
@@ -19,6 +20,8 @@ import type { TaskActions } from "./use-task-actions";
 import type { TaskListState } from "./use-task-list";
 
 export function TaskToolbar({ list, actions }: { list: TaskListState; actions: TaskActions }) {
+  const canOperate = useCan("operate");
+  const isAdmin = useCan("admin"); // the concurrency limit is a /api/settings write
   const {
     tasks,
     categories,
@@ -158,19 +161,23 @@ export function TaskToolbar({ list, actions }: { list: TaskListState; actions: T
           <BulkDeleteTasksDialog ids={[...selectedIds]} onDelete={deleteTasks} />
         </>
       )}
-      <ConcurrencySettingsDialog />
-      <CategoryManagementSheet
-        categories={categories}
-        tasks={tasks}
-        onChanged={refreshCategoriesAndTasks}
-        onTaskMoved={applyTaskCategoryMove}
-      />
-      <CreateTaskSheet
-        tasks={tasks}
-        categories={categories}
-        onCreated={refreshCategoriesAndTasks}
-        onCategoriesChanged={refreshCategoriesAndTasks}
-      />
+      {isAdmin && <ConcurrencySettingsDialog />}
+      {canOperate && (
+        <CategoryManagementSheet
+          categories={categories}
+          tasks={tasks}
+          onChanged={refreshCategoriesAndTasks}
+          onTaskMoved={applyTaskCategoryMove}
+        />
+      )}
+      {canOperate && (
+        <CreateTaskSheet
+          tasks={tasks}
+          categories={categories}
+          onCreated={refreshCategoriesAndTasks}
+          onCategoriesChanged={refreshCategoriesAndTasks}
+        />
+      )}
     </div>
   );
 }

@@ -8,12 +8,14 @@ import { StatusBadge } from "@/components/status-badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { useCan } from "@/hooks/use-session";
 import { t } from "@/i18n";
 import { api } from "@/lib/api";
 import { setVisibleInterval } from "@/lib/polling";
 import type { TaskGoal } from "@/lib/types";
 
 export function GoalsCard({ taskId }: { taskId: string }) {
+  const canOperate = useCan("operate");
   // Goal management: goal list + add form + inline edit state.
   const [goals, setGoals] = React.useState<TaskGoal[]>([]);
   const [goalText, setGoalText] = React.useState("");
@@ -110,32 +112,39 @@ export function GoalsCard({ taskId }: { taskId: string }) {
         </CardHeader>
         <CardContent className="flex flex-col gap-3">
           {/* Add form */}
-          <div className="flex flex-wrap items-center gap-2">
-            <Input
-              className="h-7 min-w-56 flex-1 text-sm"
-              placeholder={t("Add a goal, e.g. 'gain unauthorized access with an admin account'")}
-              value={goalText}
-              onChange={(e) => setGoalText(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") void addGoal();
-              }}
-              disabled={goalBusy}
-            />
-            <Input
-              className="h-7 w-32 text-sm"
-              placeholder={t("Vulnerability class (optional)")}
-              value={goalVuln}
-              onChange={(e) => setGoalVuln(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") void addGoal();
-              }}
-              disabled={goalBusy}
-            />
-            <Button size="sm" variant="outline" disabled={goalBusy || !goalText.trim()} onClick={() => void addGoal()}>
-              <PlusIcon className="size-3.5" /> {t("Add")}
-            </Button>
-            {goalErr && <span className="text-xs text-red-500">{goalErr}</span>}
-          </div>
+          {canOperate && (
+            <div className="flex flex-wrap items-center gap-2">
+              <Input
+                className="h-7 min-w-56 flex-1 text-sm"
+                placeholder={t("Add a goal, e.g. 'gain unauthorized access with an admin account'")}
+                value={goalText}
+                onChange={(e) => setGoalText(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") void addGoal();
+                }}
+                disabled={goalBusy}
+              />
+              <Input
+                className="h-7 w-32 text-sm"
+                placeholder={t("Vulnerability class (optional)")}
+                value={goalVuln}
+                onChange={(e) => setGoalVuln(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") void addGoal();
+                }}
+                disabled={goalBusy}
+              />
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={goalBusy || !goalText.trim()}
+                onClick={() => void addGoal()}
+              >
+                <PlusIcon className="size-3.5" /> {t("Add")}
+              </Button>
+              {goalErr && <span className="text-xs text-red-500">{goalErr}</span>}
+            </div>
+          )}
           {/* Goal list */}
           {goals.length > 0 ? (
             <div className="flex flex-col gap-1.5">
@@ -192,24 +201,28 @@ export function GoalsCard({ taskId }: { taskId: string }) {
                         {g.vulnclass}
                       </span>
                     )}
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      className="h-6 shrink-0 px-1.5"
-                      disabled={goalBusy}
-                      onClick={() => startEditGoal(g)}
-                    >
-                      <PencilIcon className="size-3.5" />
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      className="h-6 shrink-0 px-1.5"
-                      disabled={goalBusy}
-                      onClick={() => void removeGoal(g)}
-                    >
-                      <Trash2Icon className="size-3.5 text-red-500" />
-                    </Button>
+                    {canOperate && (
+                      <>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="h-6 shrink-0 px-1.5"
+                          disabled={goalBusy}
+                          onClick={() => startEditGoal(g)}
+                        >
+                          <PencilIcon className="size-3.5" />
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="h-6 shrink-0 px-1.5"
+                          disabled={goalBusy}
+                          onClick={() => void removeGoal(g)}
+                        >
+                          <Trash2Icon className="size-3.5 text-red-500" />
+                        </Button>
+                      </>
+                    )}
                   </div>
                 ),
               )}

@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { useCan } from "@/hooks/use-session";
 import { t } from "@/i18n";
 import { api } from "@/lib/api";
 import { buildConfig as buildConfigFromFields } from "@/lib/config-form";
@@ -40,6 +41,8 @@ import { formatBacklog, StatTile } from "./_components/stat-tile";
 // _components/channel-form.tsx, and the delivery log in _components/delivery-list.tsx —
 // they are split out because each stays readable on its own, whereas crammed into one file this page neared 1100 lines.
 export default function NotifyPage() {
+  // Channels and global settings are admin to change (server/rbac_policy.go); other roles read them.
+  const canAdmin = useCan("admin");
   const [meta, setMeta] = React.useState<NotificationMeta | null>(null);
   const [channels, setChannels] = React.useState<NotificationChannel[]>([]);
   const [tab, setTab] = React.useState<"channels" | "deliveries">("channels");
@@ -262,7 +265,7 @@ export default function NotifyPage() {
             <span className="text-muted-foreground">{t("Master switch")}</span>
             <Switch
               checked={meta.enabled}
-              disabled={globalSaving}
+              disabled={globalSaving || !canAdmin}
               onCheckedChange={toggleGlobal}
               aria-label={t("Push master switch")}
             />
@@ -315,14 +318,16 @@ export default function NotifyPage() {
 
         <TabsContent value="channels">
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            <button
-              type="button"
-              onClick={openAdd}
-              className="text-foreground/70 border-foreground/70 hover:bg-muted/60 hover:shadow-sm flex min-h-[130px] flex-col items-center justify-center gap-2 rounded-xl border border-dashed transition"
-            >
-              <PlusIcon className="size-6" />
-              <span className="text-sm">{t("Add channel")}</span>
-            </button>
+            {canAdmin && (
+              <button
+                type="button"
+                onClick={openAdd}
+                className="text-foreground/70 border-foreground/70 hover:bg-muted/60 hover:shadow-sm flex min-h-[130px] flex-col items-center justify-center gap-2 rounded-xl border border-dashed transition"
+              >
+                <PlusIcon className="size-6" />
+                <span className="text-sm">{t("Add channel")}</span>
+              </button>
+            )}
 
             {channels.map((ch) => (
               <Card
@@ -341,23 +346,26 @@ export default function NotifyPage() {
                     <div className="ml-auto flex items-center gap-2">
                       <Switch
                         checked={ch.enabled}
+                        disabled={!canAdmin}
                         onCheckedChange={() => toggleEnabled(ch)}
                         onClick={(e) => e.stopPropagation()}
                         aria-label={t("Enable")}
                       />
-                      <Button
-                        size="icon"
-                        variant="outline"
-                        aria-label={t("Delete")}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          // void explicitly discards the Promise: removeChannel catches and toasts on its own,
-                          // so no await is needed here (onClick is not async).
-                          void removeChannel(ch);
-                        }}
-                      >
-                        <Trash2Icon className="text-destructive" />
-                      </Button>
+                      {canAdmin && (
+                        <Button
+                          size="icon"
+                          variant="outline"
+                          aria-label={t("Delete")}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            // void explicitly discards the Promise: removeChannel catches and toasts on its own,
+                            // so no await is needed here (onClick is not async).
+                            void removeChannel(ch);
+                          }}
+                        >
+                          <Trash2Icon className="text-destructive" />
+                        </Button>
+                      )}
                     </div>
                   </div>
                 </CardHeader>

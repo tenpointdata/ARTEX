@@ -20,6 +20,7 @@ import { cn } from "@/lib/utils";
 
 import { ClientCompanyGate } from "./_components/client-company-gate";
 import { MainContent } from "./_components/main-content";
+import { RouteGuard } from "./_components/route-guard";
 
 // Reads a layout-critical preference from the browser cookie (falls back to the
 // default during static-export prerender where document is unavailable). Kept
@@ -90,7 +91,9 @@ export default function Layout({ children }: Readonly<{ children: ReactNode }>) 
           )}
         >
           <MainContent>
-            <ClientCompanyGate>{children}</ClientCompanyGate>
+            <RouteGuard>
+              <ClientCompanyGate>{children}</ClientCompanyGate>
+            </RouteGuard>
           </MainContent>
         </SidebarInset>
       </SidebarProvider>

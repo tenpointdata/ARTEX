@@ -15,6 +15,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { useCan } from "@/hooks/use-session";
 import { t } from "@/i18n";
 import type { SkillItem } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -53,6 +54,8 @@ export function SkillTree({
   setSelected: (s: Selected) => void;
   setPendingDelete: (p: PendingDelete) => void;
 }) {
+  const canOperate = useCan("operate"); // /api/skills writes are operate (server/rbac_policy.go)
+
   // ── Inline input JSX helper (NOT a React component — avoids remount on re-render) ──
   // Defined as a plain function returning JSX so React never sees a new component type.
   function inlineInputJSX(indent: number) {
@@ -129,44 +132,46 @@ export function SkillTree({
                 {node.name}
               </span>
               {/* Absolute so a long name can never push the actions out of view */}
-              <span className="absolute inset-y-0 right-1 hidden items-center gap-0.5 rounded bg-muted pl-1 group-hover:flex">
-                <Button
-                  size="icon"
-                  variant="ghost"
-                  className="size-5"
-                  title={t("New file")}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    startCreate(skill, node.path, "file");
-                  }}
-                >
-                  <FilePlusIcon className="size-3 text-muted-foreground" />
-                </Button>
-                <Button
-                  size="icon"
-                  variant="ghost"
-                  className="size-5"
-                  title={t("New folder")}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    startCreate(skill, node.path, "dir");
-                  }}
-                >
-                  <FolderPlusIcon className="size-3 text-muted-foreground" />
-                </Button>
-                <Button
-                  size="icon"
-                  variant="ghost"
-                  className="size-5"
-                  title={t("Delete folder")}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setPendingDelete({ kind: "dir", skill, path: node.path });
-                  }}
-                >
-                  <Trash2Icon className="size-3 text-destructive" />
-                </Button>
-              </span>
+              {canOperate && (
+                <span className="absolute inset-y-0 right-1 hidden items-center gap-0.5 rounded bg-muted pl-1 group-hover:flex">
+                  <Button
+                    size="icon"
+                    variant="ghost"
+                    className="size-5"
+                    title={t("New file")}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      startCreate(skill, node.path, "file");
+                    }}
+                  >
+                    <FilePlusIcon className="size-3 text-muted-foreground" />
+                  </Button>
+                  <Button
+                    size="icon"
+                    variant="ghost"
+                    className="size-5"
+                    title={t("New folder")}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      startCreate(skill, node.path, "dir");
+                    }}
+                  >
+                    <FolderPlusIcon className="size-3 text-muted-foreground" />
+                  </Button>
+                  <Button
+                    size="icon"
+                    variant="ghost"
+                    className="size-5"
+                    title={t("Delete folder")}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setPendingDelete({ kind: "dir", skill, path: node.path });
+                    }}
+                  >
+                    <Trash2Icon className="size-3 text-destructive" />
+                  </Button>
+                </span>
+              )}
             </div>
             {open && (
               <>
@@ -198,25 +203,27 @@ export function SkillTree({
           <span className="min-w-0 flex-1 truncate font-mono text-xs" title={node.path}>
             {node.name}
           </span>
-          <span
-            className={cn(
-              "absolute inset-y-0 right-1 hidden items-center rounded pl-1 group-hover:flex",
-              isSelected ? "bg-accent" : "bg-muted",
-            )}
-          >
-            <Button
-              size="icon"
-              variant="ghost"
-              className="size-5"
-              title={t("Delete file")}
-              onClick={(e) => {
-                e.stopPropagation();
-                setPendingDelete({ kind: "file", skill, path: node.path });
-              }}
+          {canOperate && (
+            <span
+              className={cn(
+                "absolute inset-y-0 right-1 hidden items-center rounded pl-1 group-hover:flex",
+                isSelected ? "bg-accent" : "bg-muted",
+              )}
             >
-              <Trash2Icon className="size-3 text-destructive" />
-            </Button>
-          </span>
+              <Button
+                size="icon"
+                variant="ghost"
+                className="size-5"
+                title={t("Delete file")}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setPendingDelete({ kind: "file", skill, path: node.path });
+                }}
+              >
+                <Trash2Icon className="size-3 text-destructive" />
+              </Button>
+            </span>
+          )}
         </div>
       );
     });
@@ -261,49 +268,51 @@ export function SkillTree({
                     {s.calls}
                   </span>
                 )}
-                <span
-                  className={cn(
-                    "absolute inset-y-0 right-1 hidden items-center gap-0.5 rounded pl-1 group-hover:flex",
-                    isSkillSelected ? "bg-accent" : "bg-muted",
-                  )}
-                >
-                  <Button
-                    size="icon"
-                    variant="ghost"
-                    className="size-5"
-                    title={t("New file")}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      startCreate(s.name, "", "file");
-                    }}
+                {canOperate && (
+                  <span
+                    className={cn(
+                      "absolute inset-y-0 right-1 hidden items-center gap-0.5 rounded pl-1 group-hover:flex",
+                      isSkillSelected ? "bg-accent" : "bg-muted",
+                    )}
                   >
-                    <FilePlusIcon className="size-3 text-muted-foreground" />
-                  </Button>
-                  <Button
-                    size="icon"
-                    variant="ghost"
-                    className="size-5"
-                    title={t("New folder")}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      startCreate(s.name, "", "dir");
-                    }}
-                  >
-                    <FolderPlusIcon className="size-3 text-muted-foreground" />
-                  </Button>
-                  <Button
-                    size="icon"
-                    variant="ghost"
-                    className="size-5"
-                    title={t("Delete skill")}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setPendingDelete({ kind: "skill", skill: s.name });
-                    }}
-                  >
-                    <Trash2Icon className="size-3 text-destructive" />
-                  </Button>
-                </span>
+                    <Button
+                      size="icon"
+                      variant="ghost"
+                      className="size-5"
+                      title={t("New file")}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        startCreate(s.name, "", "file");
+                      }}
+                    >
+                      <FilePlusIcon className="size-3 text-muted-foreground" />
+                    </Button>
+                    <Button
+                      size="icon"
+                      variant="ghost"
+                      className="size-5"
+                      title={t("New folder")}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        startCreate(s.name, "", "dir");
+                      }}
+                    >
+                      <FolderPlusIcon className="size-3 text-muted-foreground" />
+                    </Button>
+                    <Button
+                      size="icon"
+                      variant="ghost"
+                      className="size-5"
+                      title={t("Delete skill")}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setPendingDelete({ kind: "skill", skill: s.name });
+                      }}
+                    >
+                      <Trash2Icon className="size-3 text-destructive" />
+                    </Button>
+                  </span>
+                )}
               </div>
 
               {/* expanded: recursive file tree */}

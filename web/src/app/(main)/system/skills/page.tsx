@@ -6,6 +6,7 @@ import { PlusIcon, UploadIcon } from "lucide-react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
+import { useCan } from "@/hooks/use-session";
 import { t } from "@/i18n";
 import { api } from "@/lib/api";
 import type { Agent, MCPServer, MissingSkill, SkillCall, SkillItem } from "@/lib/types";
@@ -21,6 +22,7 @@ import type { Creating, PendingDelete, Selected } from "./_components/types";
 
 // ── Page ──────────────────────────────────────────────────────────────────
 export default function SkillsPage() {
+  const canOperate = useCan("operate"); // skill create/upload/delete are /api/skills writes (operate)
   const [skills, setSkills] = React.useState<SkillItem[]>([]);
   const [agents, setAgents] = React.useState<Agent[]>([]);
   const [selected, setSelected] = React.useState<Selected | null>(null);
@@ -350,30 +352,32 @@ export default function SkillsPage() {
       <div className="flex flex-1 overflow-hidden">
         {/* ── left file tree ── */}
         <div className="flex w-64 shrink-0 flex-col border-r">
-          <div className="flex flex-col gap-2 border-b p-2">
-            <Button size="sm" variant="outline" className="w-full" onClick={() => setNewOpen(true)}>
-              <PlusIcon className="size-3.5" />
-              {t("Create skill")}
-            </Button>
-            <input
-              ref={uploadRef}
-              type="file"
-              accept=".zip,application/zip"
-              className="hidden"
-              onChange={onUploadPick}
-            />
-            <Button
-              size="sm"
-              variant="outline"
-              className="w-full"
-              disabled={uploading}
-              onClick={() => uploadRef.current?.click()}
-              title={t("Upload a .zip archive containing SKILL.md")}
-            >
-              <UploadIcon className="size-3.5" />
-              {uploading ? t("Uploading…") : t("Upload archive")}
-            </Button>
-          </div>
+          {canOperate && (
+            <div className="flex flex-col gap-2 border-b p-2">
+              <Button size="sm" variant="outline" className="w-full" onClick={() => setNewOpen(true)}>
+                <PlusIcon className="size-3.5" />
+                {t("Create skill")}
+              </Button>
+              <input
+                ref={uploadRef}
+                type="file"
+                accept=".zip,application/zip"
+                className="hidden"
+                onChange={onUploadPick}
+              />
+              <Button
+                size="sm"
+                variant="outline"
+                className="w-full"
+                disabled={uploading}
+                onClick={() => uploadRef.current?.click()}
+                title={t("Upload a .zip archive containing SKILL.md")}
+              >
+                <UploadIcon className="size-3.5" />
+                {uploading ? t("Uploading…") : t("Upload archive")}
+              </Button>
+            </div>
+          )}
           <SkillTree
             skills={skills}
             expanded={expanded}

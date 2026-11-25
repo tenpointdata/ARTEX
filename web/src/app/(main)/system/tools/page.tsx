@@ -9,6 +9,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { useCan } from "@/hooks/use-session";
 import { t } from "@/i18n";
 import { api } from "@/lib/api";
 import type { Agent, Tool } from "@/lib/types";
@@ -20,6 +21,7 @@ import { ToolEditor } from "./_components/tool-editor";
 import { ToolGridCard } from "./_components/tool-grid-card";
 
 export default function ToolsPage() {
+  const canAdmin = useCan("admin"); // tool catalog changes are /api/tools writes (admin)
   const [tools, setTools] = React.useState<Tool[]>([]);
   const [agents, setAgents] = React.useState<Agent[]>([]);
   const [captureOn, setCaptureOn] = React.useState(false);
@@ -147,9 +149,11 @@ export default function ToolsPage() {
                         )}
                   </CardDescription>
                 </div>
-                <Button size="sm" onClick={() => setCustomEdit("new")}>
-                  <PlusIcon /> {t("Create custom tool")}
-                </Button>
+                {canAdmin && (
+                  <Button size="sm" onClick={() => setCustomEdit("new")}>
+                    <PlusIcon /> {t("Create custom tool")}
+                  </Button>
+                )}
               </div>
             </CardHeader>
             <CardContent>

@@ -2985,6 +2985,8 @@
   "Temperature": "温度",
   "Temperature 0–2 (empty = not pinned)": "温度 0–2（留空 = 不固定）",
   "Pins sampling so replicates of an evaluation suite vary less; the suite stamps both values. The seed is sent only on the openai and ollama formats. The temperature applies when the calling code sets none of its own.": "固定采样参数，使评测套件的各次重复波动更小；套件会记录这两个值。种子仅在 openai 和 ollama 格式下发送。仅当调用代码自身未设置温度时才使用该温度。",
+  "Conversation messages are only available to operators.": "对话消息仅对操作员可见。",
+  "Select a conversation to view it. Starting and reading conversations requires the operator role.": "选择一个对话进行查看。发起和阅读对话需要操作员角色。",
   "Export selected as HAR": "将所选项导出为 HAR",
   "Delete selected": "删除所选项",
   "Deleted {count} exchanges": "已删除 {count} 条流量交互",

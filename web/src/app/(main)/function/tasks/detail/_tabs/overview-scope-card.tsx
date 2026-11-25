@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
+import { useCan } from "@/hooks/use-session";
 import { t } from "@/i18n";
 import { api } from "@/lib/api";
 import type { TaskScopeRow } from "@/lib/types";
@@ -38,6 +39,7 @@ const SCOPE_SOURCE_LABELS: Record<TaskScopeRow["source"], string> = {
 };
 
 export function ScopeCard({ taskId }: { taskId: string }) {
+  const canOperate = useCan("operate");
   // Test scope list + add-form state.
   const [scope, setScope] = React.useState<TaskScopeRow[]>([]);
   const [scopeKind, setScopeKind] = React.useState<TaskScopeRow["kind"]>("root_domain");
@@ -96,50 +98,52 @@ export function ScopeCard({ taskId }: { taskId: string }) {
         </CardHeader>
         <CardContent className="flex flex-col gap-3">
           {/* Add form */}
-          <div className="flex flex-wrap items-center gap-2">
-            <NativeSelect
-              size="sm"
-              value={scopeKind}
-              onChange={(e) => setScopeKind(e.target.value as TaskScopeRow["kind"])}
-            >
-              <NativeSelectOption value="root_domain">{t("Root domain")}</NativeSelectOption>
-              <NativeSelectOption value="subdomain">{t("Subdomain")}</NativeSelectOption>
-              <NativeSelectOption value="ip">IP</NativeSelectOption>
-              <NativeSelectOption value="cidr">CIDR</NativeSelectOption>
-              <NativeSelectOption value="icp">ICP</NativeSelectOption>
-              <NativeSelectOption value="keyword">{t("Keyword")}</NativeSelectOption>
-              <NativeSelectOption value="company">{t("Company")}</NativeSelectOption>
-            </NativeSelect>
-            <Input
-              className="h-7 w-56 text-sm"
-              placeholder={
-                scopeKind === "company"
-                  ? t("Company name or id")
-                  : scopeKind === "ip" || scopeKind === "cidr"
-                    ? t("e.g. 10.0.0.1 or 10.0.0.0/24")
-                    : scopeKind === "icp"
-                      ? t("e.g. Beijing ICP No.12345678-1")
-                      : scopeKind === "keyword"
-                        ? t("e.g. a company-name keyword")
-                        : t("e.g. example.com")
-              }
-              value={scopeValueInput}
-              onChange={(e) => setScopeValueInput(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") void addScope();
-              }}
-              disabled={scopeBusy}
-            />
-            <Button
-              size="sm"
-              variant="outline"
-              disabled={scopeBusy || !scopeValueInput.trim()}
-              onClick={() => void addScope()}
-            >
-              <PlusIcon className="size-3.5" /> {t("Add")}
-            </Button>
-            {scopeErr && <span className="text-xs text-red-500">{scopeErr}</span>}
-          </div>
+          {canOperate && (
+            <div className="flex flex-wrap items-center gap-2">
+              <NativeSelect
+                size="sm"
+                value={scopeKind}
+                onChange={(e) => setScopeKind(e.target.value as TaskScopeRow["kind"])}
+              >
+                <NativeSelectOption value="root_domain">{t("Root domain")}</NativeSelectOption>
+                <NativeSelectOption value="subdomain">{t("Subdomain")}</NativeSelectOption>
+                <NativeSelectOption value="ip">IP</NativeSelectOption>
+                <NativeSelectOption value="cidr">CIDR</NativeSelectOption>
+                <NativeSelectOption value="icp">ICP</NativeSelectOption>
+                <NativeSelectOption value="keyword">{t("Keyword")}</NativeSelectOption>
+                <NativeSelectOption value="company">{t("Company")}</NativeSelectOption>
+              </NativeSelect>
+              <Input
+                className="h-7 w-56 text-sm"
+                placeholder={
+                  scopeKind === "company"
+                    ? t("Company name or id")
+                    : scopeKind === "ip" || scopeKind === "cidr"
+                      ? t("e.g. 10.0.0.1 or 10.0.0.0/24")
+                      : scopeKind === "icp"
+                        ? t("e.g. Beijing ICP No.12345678-1")
+                        : scopeKind === "keyword"
+                          ? t("e.g. a company-name keyword")
+                          : t("e.g. example.com")
+                }
+                value={scopeValueInput}
+                onChange={(e) => setScopeValueInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") void addScope();
+                }}
+                disabled={scopeBusy}
+              />
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={scopeBusy || !scopeValueInput.trim()}
+                onClick={() => void addScope()}
+              >
+                <PlusIcon className="size-3.5" /> {t("Add")}
+              </Button>
+              {scopeErr && <span className="text-xs text-red-500">{scopeErr}</span>}
+            </div>
+          )}
           {/* Scope list */}
           {scope.length > 0 ? (
             <div className="flex flex-col gap-1.5">
@@ -151,14 +155,16 @@ export function ScopeCard({ taskId }: { taskId: string }) {
                   <span className="min-w-0 flex-1 truncate font-mono text-xs">{scopeValue(row)}</span>
                   <span className="text-muted-foreground shrink-0 text-xs">{SCOPE_SOURCE_LABELS[row.source]}</span>
                   {row.task_id.toString() === taskId ? (
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      className="h-6 shrink-0 px-1.5"
-                      onClick={() => void removeScope(row)}
-                    >
-                      <Trash2Icon className="size-3.5 text-red-500" />
-                    </Button>
+                    canOperate && (
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="h-6 shrink-0 px-1.5"
+                        onClick={() => void removeScope(row)}
+                      >
+                        <Trash2Icon className="size-3.5 text-red-500" />
+                      </Button>
+                    )
                   ) : (
                     <span className="text-muted-foreground shrink-0 text-xs">{t("Inherited")}</span>
                   )}
