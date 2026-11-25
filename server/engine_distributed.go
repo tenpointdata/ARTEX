@@ -154,7 +154,7 @@ func (e *Engine) awaitRemoteSettle(ctx context.Context, intentID int64) error {
 // report_finding does), and republishes the worker nodes' activity on this
 // node's live stream.
 func (e *Engine) remoteSettleLoop(ctx context.Context, t *Task) {
-	var since time.Time // zero: the first poll only sets the cursor
+	var cur settleCursor
 	lastAct, err := t.Store.LatestActivityID()
 	if err != nil {
 		log.Printf("[engine] task %s remote activity cursor: %v", t.ID, err)
@@ -172,14 +172,9 @@ func (e *Engine) remoteSettleLoop(ctx context.Context, t *Task) {
 		case <-tick.C:
 		}
 		e.budgetWatch(t)
-		settled, next, err := t.Store.SettledIntentsSince(since)
+		settled, next, err := t.Store.SettledIntentsSince(cur.since)
 		if err == nil {
-			first := since.IsZero()
-			since = next
-			if first {
-				settled = nil
-			}
-			for _, si := range settled {
+			for _, si := range cur.advance(settled, next) {
 				if remoteOwner(si.Owner) {
 					t.NotifyDone(si.ID)
 				}
@@ -212,6 +207,26 @@ func relayRemoteFindings(t *Task, found []db.FindingNode) {
 			t.NotifyFinding(f.IntentID, f.Summary)
 		}
 	}
+}
+
+// settleCursor is remoteSettleLoop's position in the settled intents. The first
+// successful poll only places it: intents settled before the loop started are
+// not new. That poll is marked by primed, not by a zero time: a fresh task's
+// first poll finds nothing, leaves the time at zero, and the intents its worker
+// nodes settle next must still wake the planner.
+type settleCursor struct {
+	since  time.Time
+	primed bool
+}
+
+// advance moves the cursor to next and returns the intents to notify.
+func (c *settleCursor) advance(settled []db.SettledIntent, next time.Time) []db.SettledIntent {
+	c.since = next
+	if !c.primed {
+		c.primed = true
+		return nil
+	}
+	return settled
 }
 
 // liveTargetGate is a worker node's target-gate switch: read from the task row

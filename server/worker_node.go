@@ -42,11 +42,12 @@ type workerNodeState struct {
 	// budgets is the run budget the control node published, as last read. Once
 	// known it is kept across a failed read (the gate still blocks while the
 	// registry or the control node cannot be read).
-	budgetMu     sync.Mutex
-	budgetKnown  bool
-	budgetTask   agent.Budget
-	budgetIntent agent.Budget
-	sharedEgress string // fingerprint of the shared egress settings last applied
+	budgetMu      sync.Mutex
+	budgetKnown   bool
+	budgetTask    agent.Budget
+	budgetIntent  agent.Budget
+	sharedEgress  string                // fingerprint of the shared egress settings last applied
+	agentSettings agentSettingsFollower // touched by the dispatch loop only
 }
 
 func (w *workerNodeState) publishedBudgets() (task, intent agent.Budget, ok bool) {
@@ -128,6 +129,7 @@ func (s *Server) workerDispatchOnce(ctx context.Context) {
 	default:
 		w.setBlocked(s.node.NodeID, "")
 	}
+	s.followAgentSettings(&w.agentSettings)
 	ids, err := pg.DispatchableTaskIDs()
 	if err != nil {
 		log.Printf("[node %s] list tasks: %v", s.node.NodeID, err)

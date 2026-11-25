@@ -12,12 +12,30 @@ import (
 // not a secret setting, so it is stored as plain decimal text.
 const InterceptRulesRevisionKey = "intercept_rules_revision"
 
+// AgentSettingsRevisionKey is the settings key of the agent settings revision:
+// bumped whenever a settings change rebuilds the agents (traffic capture, the
+// global egress proxy, web search), so worker nodes, which build their own
+// agents from the same rows, reload and rebuild too.
+const AgentSettingsRevisionKey = "agent_settings_revision"
+
 // InterceptRulesRevision returns the current intercept rules revision; 0 when
 // it has never been bumped. A stored value that is not a decimal integer is an
 // error, never a revision: the caller must then treat its rule cache as unknown.
 func (d *DB) InterceptRulesRevision() (int64, error) {
+	return d.SettingsRevision(InterceptRulesRevisionKey)
+}
+
+// BumpInterceptRulesRevision increments the intercept rules revision.
+func (d *DB) BumpInterceptRulesRevision() (int64, error) {
+	return d.BumpSettingsRevision(InterceptRulesRevisionKey)
+}
+
+// SettingsRevision returns the revision counter stored under key; 0 when it has
+// never been bumped. A stored value that is not a decimal integer is an error,
+// never a revision.
+func (d *DB) SettingsRevision(key string) (int64, error) {
 	var raw string
-	err := d.QueryRow(`SELECT value FROM settings WHERE key=$1`, InterceptRulesRevisionKey).Scan(&raw)
+	err := d.QueryRow(`SELECT value FROM settings WHERE key=$1`, key).Scan(&raw)
 	if err == sql.ErrNoRows {
 		return 0, nil
 	}
@@ -26,31 +44,31 @@ func (d *DB) InterceptRulesRevision() (int64, error) {
 	}
 	n, err := strconv.ParseInt(raw, 10, 64)
 	if err != nil {
-		return 0, fmt.Errorf("%s is not an integer: %w", InterceptRulesRevisionKey, err)
+		return 0, fmt.Errorf("%s is not an integer: %w", key, err)
 	}
 	return n, nil
 }
 
-// BumpInterceptRulesRevision increments the revision in one statement and
+// BumpSettingsRevision increments the counter under key in one statement and
 // returns the new value. Concurrent bumps serialize on the row: each one
 // returns a distinct value. A malformed stored value makes the cast fail, so
 // the bump errors instead of resetting the counter.
-func (d *DB) BumpInterceptRulesRevision() (int64, error) {
-	return bumpInterceptRulesRevision(d.DB)
+func (d *DB) BumpSettingsRevision(key string) (int64, error) {
+	return bumpSettingsRevision(d.DB, key)
 }
 
-// rowQuerier is what bumpInterceptRulesRevision needs: a *sql.DB or a *sql.Tx.
+// rowQuerier is what bumpSettingsRevision needs: a *sql.DB or a *sql.Tx.
 type rowQuerier interface {
 	QueryRow(query string, args ...any) *sql.Row
 }
 
-func bumpInterceptRulesRevision(q rowQuerier) (int64, error) {
+func bumpSettingsRevision(q rowQuerier, key string) (int64, error) {
 	var raw string
 	err := q.QueryRow(`
 INSERT INTO settings(key, value) VALUES ($1, '1')
 ON CONFLICT (key) DO UPDATE
 SET value = (settings.value::bigint + 1)::text, updated_at = now()
-RETURNING value`, InterceptRulesRevisionKey).Scan(&raw)
+RETURNING value`, key).Scan(&raw)
 	if err != nil {
 		return 0, err
 	}
@@ -70,7 +88,7 @@ func (d *DB) writeInterceptRules(write func(tx *sql.Tx) error) error {
 	if err := write(tx); err != nil {
 		return err
 	}
-	if _, err := bumpInterceptRulesRevision(tx); err != nil {
+	if _, err := bumpSettingsRevision(tx, InterceptRulesRevisionKey); err != nil {
 		return fmt.Errorf("bump the intercept rules revision: %w", err)
 	}
 	return tx.Commit()

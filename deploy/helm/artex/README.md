@@ -68,8 +68,24 @@ unprivileged executor uid. All other capabilities are dropped except the small s
 do that only if you enforce egress with a NetworkPolicy or firewall. The optional
 `networkPolicy.enabled` allows worker ingress only on the health port.
 
+### Agent egress inside the cluster
+
+`egress.sh` blocks the pod's own API port, cloud metadata and the gateway. In a cluster an agent
+process could still reach ARTEX's PostgreSQL and the control API over the pod network. By default
+(`egress.denyClusterServices: true`) every ARTEX pod also denies, for the executor uid only, the
+addresses of the PostgreSQL host and the `<release>-control` Service, resolved at pod start
+(`ARTEX_EGRESS_DENY_HOSTS`). The worker's own database connection runs as root and is unaffected;
+the `<release>-control-proxy` Service stays open, since tool traffic goes through it.
+
+A pod-wide NetworkPolicy cannot do this: the server and its agent processes share the pod, and the
+server needs PostgreSQL. Names are resolved once, so a rescheduled database pod's new IP and the
+control pod's own IP are not covered. For a strict deployment set `egress.clusterCIDRs` to the
+cluster's pod and Service CIDRs; the proxy Service is then allowed by name
+(`ARTEX_EGRESS_ALLOW_HOSTS`) and in-cluster lab targets need `egress.allow`. Check what was
+installed with `kubectl logs <pod> | grep egress:`.
+
 ## Ingress
 
 `control.ingress.*` creates a standard Ingress with TLS. Set `settings.trustedProxies` to your
-ingress controller CIDR so client addresses are read correctly. No Service exists for the capture
-proxy or workers.
+ingress controller CIDR so client addresses are read correctly. The capture proxy has a ClusterIP
+Service for worker pods only (`<release>-control-proxy`); workers have no Service.
