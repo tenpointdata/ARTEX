@@ -1965,11 +1965,19 @@ type taskFileDeleteStage struct {
 }
 
 // stageTaskFiles atomically renames the task workspace, its command-output spill
-// directory and owned transcripts to a same-filesystem staging directory. The
-// trailing dash in the transcript prefix is significant: exploration 12 must not
-// match exploration 123.
+// directory and owned transcripts to a same-filesystem staging directory.
 func stageTaskFiles(dataDir, taskID string, explorationID int64) (*taskFileDeleteStage, error) {
-	stage := &taskFileDeleteStage{}
+	targets, err := taskFileTargets(dataDir, taskID, explorationID)
+	if err != nil {
+		return nil, err
+	}
+	return stageTaskPaths(dataDir, "task-"+taskID+"-", targets)
+}
+
+// taskFileTargets lists the existing on-disk paths owned by a task: its
+// workspace, its spill directory and (explorationID > 0) its exploration's
+// transcripts.
+func taskFileTargets(dataDir, taskID string, explorationID int64) ([]string, error) {
 	var targets []string
 	for _, dir := range []string{filepath.Join(dataDir, "tasks", taskID), agent.TaskSpillDir(dataDir, taskID)} {
 		if _, err := os.Lstat(dir); err == nil {
@@ -1979,14 +1987,26 @@ func stageTaskFiles(dataDir, taskID string, explorationID int64) (*taskFileDelet
 		}
 	}
 
+	transcripts, err := transcriptTargets(dataDir, explorationID)
+	return append(targets, transcripts...), err
+}
+
+// transcriptTargets lists an exploration's transcripts (files and sidechain
+// directories). The trailing dash in the prefix is significant: exploration 12
+// must not match exploration 123.
+func transcriptTargets(dataDir string, explorationID int64) ([]string, error) {
+	if explorationID <= 0 {
+		return nil, nil
+	}
 	transcriptDir := filepath.Join(dataDir, "transcripts")
 	entries, err := os.ReadDir(transcriptDir)
 	if err != nil {
-		if !os.IsNotExist(err) {
-			return nil, err
+		if os.IsNotExist(err) {
+			return nil, nil
 		}
-		entries = nil
+		return nil, err
 	}
+	var targets []string
 	prefix := fmt.Sprintf("exp%d-", explorationID)
 	for _, entry := range entries {
 		name := entry.Name()
@@ -1995,16 +2015,24 @@ func stageTaskFiles(dataDir, taskID string, explorationID int64) (*taskFileDelet
 		}
 		targets = append(targets, filepath.Join(transcriptDir, name))
 	}
+	return targets, nil
+}
+
+// stageTaskPaths atomically renames targets into a fresh directory under
+// <dataDir>/.delete-staging named after prefix. On failure the paths already
+// moved are restored.
+func stageTaskPaths(dataDir, prefix string, targets []string) (*taskFileDeleteStage, error) {
+	stage := &taskFileDeleteStage{}
 	if len(targets) == 0 {
 		stage.done = true
 		return stage, nil
 	}
-
 	parent := filepath.Join(dataDir, ".delete-staging")
 	if err := os.MkdirAll(parent, 0o700); err != nil {
 		return nil, err
 	}
-	stage.stageDir, err = os.MkdirTemp(parent, "task-"+taskID+"-")
+	var err error
+	stage.stageDir, err = os.MkdirTemp(parent, prefix)
 	if err != nil {
 		return nil, err
 	}

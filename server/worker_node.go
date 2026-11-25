@@ -23,7 +23,8 @@ import (
 //     published and the absence of a RoleAll node;
 //   - what happens to running intents: pause and delete cancel them, a settle
 //     fence lets them finish under the deadline / budget wrap-up;
-//   - per-intent control (kill, pause, cancel, steer): work_signals.
+//   - per-intent control (kill, pause, cancel, steer): work_signals;
+//   - local files of deleted or archived tasks: swept (worker_node_sweep.go).
 //
 // Every read failure blocks new claims (fail closed). Running intents keep
 // heartbeating their lease; the control node can always fence them out by
@@ -67,8 +68,10 @@ func (s *Server) startWorkerNode() {
 func (s *Server) workerDispatchLoop(ctx context.Context) {
 	tick := time.NewTicker(distributedPoll)
 	defer tick.Stop()
+	var swept time.Time
 	for {
 		s.workerDispatchOnce(ctx)
+		s.sweepTaskFilesIfDue(&swept) // same goroutine: no loop starts mid-sweep
 		select {
 		case <-ctx.Done():
 			return

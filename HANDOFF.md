@@ -59,6 +59,14 @@ See `docs/ARCHITECTURE.md` for the code-level map. Summary:
 
 ## Current state
 
+**2026-11-24 — Worker nodes sweep local files of retired tasks (`c-1bbeb6`, E7; in review).**
+`server/worker_node_sweep.go`: on start-up and every 10 min, the worker dispatch loop lists `tasks/<T>`,
+`spill/tasks/<T>` and `transcripts/exp<E>-…`, asks `db.RetiredTasks` (`db/task_retirement.go`) which are deleted,
+archived or gone, and removes them through `.delete-staging` (the delete path's `stageTaskPaths`, split out of
+`stageTaskFiles`). It skips tasks whose loops still run on the node; a DB error removes nothing. Verified on
+Postgres 16: `TestWorkerNodeSweepsRetiredTaskFiles` (delete + real archive job, intents run on a worker node)
+and `TestRetiredTasks`; `scripts/verify.sh` passes. Documented in `docs/DISTRIBUTED.md` "Local files on worker nodes".
+
 **2026-11-24 — LLM sampling pin (`c-d73308`, E8; in review).** Migration 0028 adds nullable
 `llm_profiles.sampling_seed`/`sampling_temperature`; `agent/sampling.go` splices them into the wire body
 (seed on openai/ollama only; temperature only where the caller set none). Suite stamps `llm_sampling`.

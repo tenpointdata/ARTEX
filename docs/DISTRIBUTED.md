@@ -137,6 +137,36 @@ reach them through a **node RPC** on the control API,
 - **Transport.** See "Transport" below: the node RPC runs over TLS with the
   control API's CA pinned by default.
 
+## Local files on worker nodes
+
+A run leaves files on the node that ran it: the task's run directory
+(`tasks/<T>/`), its command-output spill directory (`spill/tasks/<T>/`) and the
+exploration's transcripts and sidechains (`transcripts/exp<E>-…`). Deleting or
+archiving a task removes these only on the node that runs the delete or
+archive (the control node), together with the shared copies in PostgreSQL.
+
+Each worker node sweeps its own copies (`server/worker_node_sweep.go`):
+
+- **When.** On the dispatch loop's first pass at start-up, then every 10
+  minutes (`taskFileSweepInterval`).
+- **What.** It lists the task ids under `tasks/` and `spill/tasks/` and the
+  exploration ids under `transcripts/`, and asks the database which are
+  retired (`db.RetiredTasks`). A task is retired when no row with its id has
+  both `deleted_at` and `archived_at` NULL (deleted, archived, or gone). An
+  exploration is retired when no live task uses it and either a retired task
+  row names it or its row is gone. An exploration no task has named is kept.
+  Names of any other form are ignored.
+- **Never a live run.** The sweep runs on the dispatch goroutine, so no worker
+  loop starts while it decides. It skips a task whose loops still run on the
+  node (a retired task is stopped by the next dispatch pass and swept on a
+  later one). If a running task's exploration is unknown, it removes no
+  transcripts in that pass.
+- **Fail closed.** A database read error removes nothing. Paths are renamed
+  into `.delete-staging/sweep-*` first and then removed, as a delete does.
+- **Restore.** The archive holds the control node's files and the shared
+  PostgreSQL copies, never a worker's local copies, so the sweep removes
+  nothing a restore needs. A restored task comes back on the control node.
+
 ## Transport
 
 Worker nodes make two kinds of connection to the control node:
