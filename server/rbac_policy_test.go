@@ -90,6 +90,9 @@ func clientReadAllowed(method, path string) bool {
 	case "/api/exploration/findings/{id}/integrations": // tracker tickets and raw scanner records
 		return false
 	}
+	if path == "/api/exploration/findings/{id}/integrations" {
+		return false // tracker tickets and scanner-import provenance are internal
+	}
 	return strings.HasPrefix(path, "/api/report/") || path == "/api/exploration/findings" ||
 		strings.HasPrefix(path, "/api/exploration/findings/")
 }

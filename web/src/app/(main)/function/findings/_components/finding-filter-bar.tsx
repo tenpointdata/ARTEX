@@ -8,7 +8,14 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { t } from "@/i18n";
 import { statusMeta } from "@/lib/status";
-import type { FindingReportState, FindingStats, FindingStatus, Severity, VerificationStatus } from "@/lib/types";
+import type {
+  FindingLane,
+  FindingReportState,
+  FindingStats,
+  FindingStatus,
+  Severity,
+  VerificationStatus,
+} from "@/lib/types";
 
 import type { FindingFilters } from "./finding-filters";
 import {
@@ -20,6 +27,7 @@ import {
   VERIFICATION_STATUSES,
 } from "./finding-meta";
 import { ImportFilterChip } from "./import-filter";
+import { LaneFilterSelect } from "./lane-filter";
 import { PushToTrackerSelect, useEnabledTrackers } from "./push-to-tracker";
 
 interface FindingFilterBarProps {
@@ -27,6 +35,9 @@ interface FindingFilterBarProps {
   /** Scanner import id from the ?import_id deep link; shown as a clearable chip. Empty = none. */
   importId: string;
   onClearImport: () => void;
+  /** Lane from the ?lane deep link; Empty = every lane. */
+  lane: FindingLane | "";
+  onLaneChange: (lane: FindingLane | "") => void;
   /** Applies a partial filter change at once (no confirm step). */
   set: (patch: Partial<FindingFilters>) => void;
   search: string;
@@ -44,6 +55,8 @@ export function FindingFilterBar({
   filters,
   importId,
   onClearImport,
+  lane,
+  onLaneChange,
   set,
   search,
   setSearch,
@@ -58,6 +71,7 @@ export function FindingFilterBar({
   return (
     <div className="flex flex-wrap items-center gap-2">
       <ImportFilterChip importId={importId} onClear={onClearImport} />
+      <LaneFilterSelect lane={lane} onChange={onLaneChange} />
       <InputGroup className="w-full sm:w-72">
         <InputGroupInput
           type="search"

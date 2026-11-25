@@ -31,6 +31,7 @@ import { FindingStatTiles } from "./_components/finding-stat-tiles";
 import { FindingsAssetView, FindingsGroupedView } from "./_components/finding-views";
 import { type FindingRowProps, FindingsTable } from "./_components/findings-table";
 import { useImportFilter } from "./_components/import-filter";
+import { useLaneFilter } from "./_components/lane-filter";
 import { useActiveRetests } from "./_components/use-active-retests";
 import { findingFingerprint, useFindingData } from "./_components/use-finding-data";
 import { useFindingMutations } from "./_components/use-finding-mutations";
@@ -53,6 +54,8 @@ function FindingsPageInner() {
   const company = useActiveCompany();
   // Scanner imports → Past imports link here with ?import_id=N: only that import's findings.
   const { importId, clear: clearImportFilter } = useImportFilter();
+  // ?lane=runtime|sast|sca narrows every view, the export and the asset tree to one lane.
+  const { lane, setLane } = useLaneFilter();
   const [view, setView] = React.useState<FindingView>("flat");
   const [filters, setFilters] = React.useState<FindingFilters>(DEFAULT_FINDING_FILTERS);
   const [search, setSearch] = React.useState("");
@@ -75,6 +78,8 @@ function FindingsPageInner() {
   const canTriage = useCan("review");
 
   // Restore saved filters, then let the URL override them (/function/findings?status=pending&triage=1).
+  // Runs once on mount; the company, import and lane at mount are the ones the first load uses.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: hydration happens once.
   React.useEffect(() => {
     const saved = parseSavedFilters(getLocalStorageValue(FINDING_LIST_PREFERENCE_KEY));
     const fromUrl = filtersFromSearch(window.location.search);
@@ -83,11 +88,9 @@ function FindingsPageInner() {
     const next = { ...DEFAULT_FINDING_FILTERS, ...restored };
     setFilters(next);
     if (new URLSearchParams(window.location.search).get("triage") === "1") {
-      setOpenFirst(findingFingerprint(next, company, importId));
+      setOpenFirst(findingFingerprint(next, company, importId, lane));
     }
     setHydrated(true);
-    // Runs once on mount; the company at mount is the one the first load uses.
-    // biome-ignore lint/correctness/useExhaustiveDependencies: hydration happens once.
   }, []);
 
   React.useEffect(() => {
@@ -108,6 +111,7 @@ function FindingsPageInner() {
     filters,
     company,
     importId,
+    lane,
     view,
     hydrated,
     retestFingerprint: retests.fingerprint,
@@ -181,13 +185,13 @@ function FindingsPageInner() {
         const result = await mutations.updateStatus(f, next);
         if (!result.ok) return;
         if (then) openRow(then);
-        else if (result.dropped) setOpenFirst(findingFingerprint(filters, company, importId));
+        else if (result.dropped) setOpenFirst(findingFingerprint(filters, company, importId, lane));
         else resetOpenRow();
       } finally {
         setTriageBusy(false);
       }
     },
-    [company, filters, importId, mutations, openRow, resetOpenRow],
+    [company, filters, importId, lane, mutations, openRow, resetOpenRow],
   );
 
   // A tile applies exactly its slice (other filters reset, search and sort kept); Pending also opens the first finding.
@@ -195,9 +199,9 @@ function FindingsPageInner() {
     (slice: Partial<FindingFilters>) => {
       const next: FindingFilters = { ...DEFAULT_FINDING_FILTERS, query: filters.query, sort: filters.sort, ...slice };
       setFilters(next);
-      if (slice.status === "pending") setOpenFirst(findingFingerprint(next, company, importId));
+      if (slice.status === "pending") setOpenFirst(findingFingerprint(next, company, importId, lane));
     },
-    [company, filters.query, filters.sort, importId],
+    [company, filters.query, filters.sort, importId, lane],
   );
 
   const toggleSelected = React.useCallback((id: string, checked: boolean) => {
@@ -300,6 +304,8 @@ function FindingsPageInner() {
           filters={filters}
           importId={importId}
           onClearImport={clearImportFilter}
+          lane={lane}
+          onLaneChange={setLane}
           set={setFilter}
           search={search}
           setSearch={setSearch}
@@ -345,6 +351,7 @@ function FindingsPageInner() {
         filters={filters}
         company={company}
         importId={importId}
+        lane={lane}
         assetScope={data.activeAssetScope}
         selectedIds={selectedIds}
         filteredTotal={filteredTotal}

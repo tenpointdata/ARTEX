@@ -20,7 +20,7 @@ import { Spinner } from "@/components/ui/spinner";
 import { Textarea } from "@/components/ui/textarea";
 import { t } from "@/i18n";
 import { api } from "@/lib/api";
-import type { Finding } from "@/lib/types";
+import type { Finding, FindingLane } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 import type { FindingFilters } from "./finding-filters";
@@ -121,6 +121,7 @@ interface ExportDialogProps {
   filters: FindingFilters;
   company: string | undefined;
   importId: string;
+  lane: FindingLane | "";
   assetScope: string | null;
   selectedIds: Set<string>;
   /** The current filter's result count, shown on the "current filter" choice. */
@@ -135,6 +136,7 @@ export function ExportDialog({
   filters,
   company,
   importId,
+  lane,
   assetScope,
   selectedIds,
   filteredTotal,
@@ -155,7 +157,7 @@ export function ExportDialog({
       await api.exportFindings({
         format: exportFormat,
         scope: exportScope,
-        filters: { ...filters, assetScope: assetScope ?? undefined, company, importId },
+        filters: { ...filters, assetScope: assetScope ?? undefined, company, importId, lane },
         ids: [...selectedIds],
       });
       setExportOpen(false);

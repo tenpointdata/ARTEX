@@ -19,7 +19,7 @@ import { Spinner } from "@/components/ui/spinner";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { t } from "@/i18n";
-import { taskAssetSourceLabel } from "@/lib/task-assets";
+import { firstText, taskAssetSourceLabel } from "@/lib/task-assets";
 import type { Asset, NewAssetType } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
@@ -43,29 +43,6 @@ export const TABS: { key: NewAssetType; label: string; icon: LucideIcon }[] = [
   { key: "service", label: t("Service"), icon: LayoutTemplateIcon },
   { key: "endpoint", label: t("Endpoint"), icon: LinkIcon },
 ];
-
-export function firstText(values: Array<string | undefined>, fallback: string): string {
-  return values.find((value) => value?.trim()) ?? fallback;
-}
-
-export function assetLabel(asset: Asset): string {
-  switch (asset.type) {
-    case "root_domain":
-    case "subdomain":
-      return firstText([asset.domain], `#${asset.id}`);
-    case "ip":
-      return firstText([asset.ip], `#${asset.id}`);
-    case "app":
-      return firstText([asset.app_name, asset.url], `#${asset.id}`);
-    case "service": {
-      const host = firstText([asset.ip, asset.domain], "");
-      const address = [host, asset.port].filter((value) => value !== undefined && value !== "").join(":");
-      return firstText([asset.url, address, asset.service_name], `#${asset.id}`);
-    }
-    case "endpoint":
-      return firstText([[asset.method, asset.url].filter(Boolean).join(" ")], `#${asset.id}`);
-  }
-}
 
 export function MethodBadge({ method }: { method: string }) {
   const normalized = method.toUpperCase();

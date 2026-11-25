@@ -23,11 +23,12 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { t } from "@/i18n";
 import { api } from "@/lib/api";
 import { setVisibleInterval } from "@/lib/polling";
+import { assetLabel } from "@/lib/task-assets";
 import type { Asset, NewAssetType } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 import { AddTaskAssetsSheet } from "./add-task-assets-sheet";
-import { AssetCard, assetLabel, Chips, fmtBytes, MethodBadge, SourceCell, statusTone, TABS } from "./assets-parts";
+import { AssetCard, Chips, fmtBytes, MethodBadge, SourceCell, statusTone, TABS } from "./assets-parts";
 
 export function AssetsTab({ taskId }: { taskId: string }) {
   const [rows, setRows] = React.useState<Asset[]>([]);

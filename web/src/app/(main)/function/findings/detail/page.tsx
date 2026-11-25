@@ -32,6 +32,7 @@ import {
   ReportStateBadge,
   VerificationBadge,
 } from "../_components/findings-table";
+import { CodeLocation, LaneBadge } from "../_components/lane-badge";
 import { FindingIntegrationsPanel } from "./integrations-panel";
 import { FindingLineageView } from "./lineage";
 
@@ -174,6 +175,8 @@ function FindingDetailInner() {
           <StatusBadge domain="finding" value={finding.status} dot />
           <ReportStateBadge state={finding.report_state} />
           <VerificationBadge finding={finding} />
+          <LaneBadge lane={finding.source?.lane} />
+          <CodeLocation source={finding.source} className="max-w-xs" />
           {finding.inherited && finding.source_task_id && (
             <Badge variant="outline">{t("Source task #{id} · read-only", { id: finding.source_task_id })}</Badge>
           )}

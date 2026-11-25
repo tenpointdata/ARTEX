@@ -42,6 +42,7 @@ import {
   ReportStateBadge,
   VerificationBadge,
 } from "./finding-meta";
+import { CodeLocation, LaneBadge } from "./lane-badge";
 import { TriageBar, useTriageKeys } from "./triage-bar";
 
 // The vocabularies moved to ./finding-meta; re-exported so existing importers keep working.
@@ -219,7 +220,9 @@ export function FindingsTable({
                       <span className="truncate font-medium">{f.name || f.vulnclass || t("Uncategorized")}</span>
                     )}
                     <span className="truncate text-xs text-muted-foreground">{f.summary}</span>
+                    <CodeLocation source={f.source} />
                     <div className="flex flex-wrap items-center gap-1">
+                      <LaneBadge lane={f.source?.lane} />
                       <Badge variant="outline">{t("Traffic evidence: {count}", { count: f.traffic_count ?? 0 })}</Badge>
                       <VerificationBadge finding={f} />
                     </div>

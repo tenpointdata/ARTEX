@@ -1,6 +1,8 @@
 // ---- E2 integrations: ticket trackers (findings out) and scanner imports (data in) ----
 // Mirrors server/ticket_api.go, server/ticket_sync.go, server/scan_import_api.go and db/scan_imports.go.
 
+import type { FindingLane } from "./findings";
+
 // ConfigValues is an adapter config as JSON: credential keys come back masked ("__masked__…tail").
 export type ConfigValues = Record<string, unknown>;
 
@@ -78,6 +80,9 @@ export interface ScanImport {
   file_name: string;
   file_sha256: string;
   task_id?: number;
+  fact_node_id?: number; // the task's exploration-graph fact node that records this import
+  anchor_asset_ids?: number[]; // assets the import's findings were anchored to
+  lane_counts?: Partial<Record<FindingLane, number>>; // findings this import created, per lane
   imported_by: string;
   records: number;
   assets: number;
@@ -100,6 +105,9 @@ export interface FindingImportSource {
   finding_id: number;
   import_id?: number;
   tool: string;
+  lane?: FindingLane;
+  location?: string;
+  line?: number;
   rule_id: string;
   dedup_key: string;
   record: string;

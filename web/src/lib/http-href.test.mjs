@@ -1,6 +1,6 @@
+import { httpHref } from "./http-href.ts";
 import assert from "node:assert/strict";
 import test from "node:test";
-import { httpHref } from "./http-href.ts";
 
 test("httpHref allows http and https", () => {
   assert.equal(httpHref("https://example.com/a"), "https://example.com/a");

@@ -29,7 +29,23 @@ export interface FindingAsset {
   label: string;
 }
 
+// FindingLane is where a finding came from: runtime (live probing, ARTEX workers and
+// runtime scanners), sast (static code analysis) or sca (dependency analysis).
+export type FindingLane = "runtime" | "sast" | "sca";
+
+// FindingSource is present only on scanner-imported findings; absent = ARTEX's own
+// workers, which count as the runtime lane.
+export interface FindingSource {
+  lane: FindingLane;
+  tool: string;
+  rule_id?: string;
+  location?: string; // code path for sast/sca findings
+  line?: number;
+  import_id?: number;
+}
+
 export interface Finding {
+  source?: FindingSource;
   traffic_count?: number;
   evidence_version?: number;
   report_evidence_version?: number;
@@ -136,6 +152,8 @@ export interface FindingQuery {
   company?: string;
   // scanner import id: only the findings that import created. Empty = no import filter.
   importId?: string;
+  // lane filter: runtime = worker findings plus runtime-scanner imports. Empty = every lane.
+  lane?: FindingLane | "";
 }
 
 // ---- Findings by asset (asset view) ----

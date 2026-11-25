@@ -7,7 +7,7 @@ import { toast } from "sonner";
 import { t } from "@/i18n";
 import { api } from "@/lib/api";
 import { setVisibleInterval } from "@/lib/polling";
-import type { Finding, FindingAssetNode, FindingGroup, FindingStats } from "@/lib/types";
+import type { Finding, FindingAssetNode, FindingGroup, FindingLane, FindingStats } from "@/lib/types";
 
 import type { FindingFilters, FindingView } from "./finding-filters";
 import { UNASSIGNED_TASK } from "./finding-meta";
@@ -54,9 +54,14 @@ export interface FlatFindingsState {
 
 const EMPTY_FLAT_STATE: FlatFindingsState = { items: [], fingerprint: "", total: 0, loaded: false, loading: false };
 
-/** Identifies one filter set under one company and scanner-import filter; a change resets every view. */
-export function findingFingerprint(filters: FindingFilters, company: string | undefined, importId: string): string {
-  return JSON.stringify([filters, company, importId]);
+/** Identifies one filter set under one company, scanner-import and lane filter; a change resets every view. */
+export function findingFingerprint(
+  filters: FindingFilters,
+  company: string | undefined,
+  importId: string,
+  lane: FindingLane | "",
+): string {
+  return JSON.stringify([filters, company, importId, lane]);
 }
 
 const EMPTY_STATS: FindingStats = {
@@ -81,6 +86,8 @@ interface FindingDataOptions {
   company: string | undefined;
   /** Scanner import id from the ?import_id deep link: only that import's findings. Empty = no import filter. */
   importId: string;
+  /** Lane from the ?lane deep link (runtime, sast, sca). Empty = every lane. */
+  lane: FindingLane | "";
   view: FindingView;
   /** No request is made until saved preferences are applied, so the defaults never fetch for nothing. */
   hydrated: boolean;
@@ -96,6 +103,7 @@ export function useFindingData({
   filters,
   company,
   importId,
+  lane,
   view,
   hydrated,
   retestFingerprint,
@@ -116,7 +124,7 @@ export function useFindingData({
   const [page, setPage] = React.useState(1);
   const [pageSize, setPageSize] = React.useState(10);
 
-  const filterFingerprint = findingFingerprint(filters, company, importId);
+  const filterFingerprint = findingFingerprint(filters, company, importId, lane);
   const activeFilterFingerprint = React.useRef(filterFingerprint);
   activeFilterFingerprint.current = filterFingerprint;
   const onResetRef = React.useRef(onReset);
@@ -179,6 +187,7 @@ export function useFindingData({
         assetScope: activeAssetScope ?? undefined,
         company,
         importId,
+        lane,
       });
       if (request !== flatRequest.current || activeFilterFingerprint.current !== requestFilter) return;
       setFlat({ items: result.items, fingerprint: requestFilter, total: result.total, loaded: true, loading: false });
@@ -187,7 +196,7 @@ export function useFindingData({
       // Polling keeps the last successful snapshot visible.
       setFlat((current) => ({ ...current, loading: false }));
     }
-  }, [activeAssetScope, company, importId, filterFingerprint, filters, flatPage, flatPageSize]);
+  }, [activeAssetScope, company, importId, lane, filterFingerprint, filters, flatPage, flatPageSize]);
 
   // loadAssetTree fetches the whole asset tree. The tree doesn't change with the selected node (otherwise
   // picking one would collapse it into a single chain), so no picked node here — only the active company.
@@ -197,7 +206,7 @@ export function useFindingData({
     const request = ++assetTreeRequest.current;
     setAssetTree((current) => ({ ...current, loading: true }));
     try {
-      const result = await api.findingAssetTree({ ...filters, company, importId });
+      const result = await api.findingAssetTree({ ...filters, company, importId, lane });
       if (request !== assetTreeRequest.current || activeFilterFingerprint.current !== requestFilter) return;
       setAssetTree({
         nodes: result.nodes ?? [],
@@ -212,14 +221,14 @@ export function useFindingData({
       setAssetTree((current) => ({ ...current, loading: false }));
       toast.error(t("Failed to load the asset tree: {error}", { error: (e as Error).message }));
     }
-  }, [company, importId, filterFingerprint, filters]);
+  }, [company, importId, lane, filterFingerprint, filters]);
 
   const refreshGroups = React.useCallback(async () => {
     const requestFilter = filterFingerprint;
     if (activeFilterFingerprint.current !== requestFilter) return;
     const request = ++groupsRequest.current;
     try {
-      const result = await api.findingGroups({ page, pageSize, ...filters, company, importId });
+      const result = await api.findingGroups({ page, pageSize, ...filters, company, importId, lane });
       if (request !== groupsRequest.current || activeFilterFingerprint.current !== requestFilter) return;
       setGroups(result.items);
       setGroupTotal(result.total);
@@ -227,7 +236,7 @@ export function useFindingData({
     } catch {
       // Polling keeps the last successful snapshot visible.
     }
-  }, [company, importId, filterFingerprint, filters, page, pageSize]);
+  }, [company, importId, lane, filterFingerprint, filters, page, pageSize]);
 
   const loadGroup = React.useCallback(
     async (key: string, groupPage: number, groupPageSize: number) => {
@@ -254,6 +263,7 @@ export function useFindingData({
           task: key,
           company,
           importId,
+          lane,
         });
         if (groupRequests.current[key] !== request || activeFilterFingerprint.current !== requestFilter) return;
         setGroupFindings((current) => ({
@@ -278,7 +288,7 @@ export function useFindingData({
         }));
       }
     },
-    [company, importId, filterFingerprint, filters],
+    [company, importId, lane, filterFingerprint, filters],
   );
 
   React.useEffect(() => {

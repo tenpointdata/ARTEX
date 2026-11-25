@@ -1,10 +1,14 @@
 import { buildConfig, isMasked, maskedTail, parseList } from "./config-form.ts";
 import {
+  anchorAssetIdsParam,
   chunk,
+  codeLocation,
   detectImportFormat,
   evidenceEnabled,
   importFindingsHref,
   importIdParam,
+  laneCountEntries,
+  laneParam,
   pushableFindingIds,
   summarizePush,
   summarizeSync,
@@ -130,4 +134,34 @@ test("importIdParam keeps only a positive integer", () => {
 
 test("importFindingsHref links to the findings list filtered by import", () => {
   assert.equal(importFindingsHref(12), "/function/findings?import_id=12");
+});
+
+test("laneParam keeps only a known lane", () => {
+  for (const lane of ["runtime", "sast", "sca"]) assert.equal(laneParam(lane), lane);
+  assert.equal(laneParam(" sast "), "sast");
+  for (const bad of [null, undefined, "", "all", "SAST", "dast"]) assert.equal(laneParam(bad), "");
+});
+
+test("codeLocation renders path:line and tolerates a missing line or path", () => {
+  assert.equal(codeLocation({ location: "src/app.go", line: 42 }), "src/app.go:42");
+  assert.equal(codeLocation({ location: "src/app.go" }), "src/app.go");
+  assert.equal(codeLocation({ location: "go.mod", line: 0 }), "go.mod");
+  assert.equal(codeLocation({ line: 7 }), "");
+  assert.equal(codeLocation(null), "");
+  assert.equal(codeLocation(undefined), "");
+});
+
+test("laneCountEntries lists non-zero lanes in a stable order", () => {
+  assert.deepEqual(laneCountEntries({ sca: 1, sast: 3 }), [
+    { lane: "sast", count: 3 },
+    { lane: "sca", count: 1 },
+  ]);
+  assert.deepEqual(laneCountEntries({ runtime: 0, sast: 0 }), []);
+  assert.deepEqual(laneCountEntries(undefined), []);
+});
+
+test("anchorAssetIdsParam joins unique positive integer ids", () => {
+  assert.equal(anchorAssetIdsParam([3, 1, 3, 2]), "3,1,2");
+  assert.equal(anchorAssetIdsParam([0, -1, 1.5, 4]), "4");
+  assert.equal(anchorAssetIdsParam([]), "");
 });
