@@ -59,6 +59,17 @@ See `docs/ARCHITECTURE.md` for the code-level map. Summary:
 
 ## Current state
 
+**2026-11-24 — E7 TLS proxy hop checked on kind with an agent-driven task (`c-67993f`, done).** 3-node kind
+cluster, chart with `controlTLS` on and `networkPolicy.enabled=true`, stub LLM (`deploy/lab/llmstub`), image from
+a throwaway merge of the c-677166 and c-6bcdd3 branches (not committed). Two tasks ran 6 intents each, split across
+both worker hosts, and 12 exchanges were recorded on the control node. `remoteTaskProxy` registered one
+`proxy_scope_tokens` row per worker node at task start and removed it at task end; nothing was inserted by hand.
+Host-netns `tcpdump` on both nodes: every worker→`artex-control-proxy:8789` connection is TLS 1.3 (SNI
+`artex-control`), with no HTTP, path, target name or `Proxy-Authorization` in the payload, and nothing on 8788
+leaves the control pod. NetworkPolicy: worker pods connect to 8789; stray pods in `artex` and `lab` time out (and
+connect once the policy is off). Merging the two branches conflicts in `traffic/scope_relay.go` (two parallel
+relay-helper extractions), card `c-ccc7a8`. Detail: `docs/handoff/2026-11-24-e7-tls-hop-kind.md`.
+
 **2026-11-24 — Real-cluster install kit (`c-620510`, E7; blocked on a human).** On `ej/20261124-173856-b39c78`. `deploy/lab/values-multihost.yaml` (renders/lints), runbook
 `deploy/lab/README.md` "Real cluster", and `scripts/k8s-install-checks.sh NS [RELEASE]`, which prints the check
 table. Not run on any cluster.
@@ -251,8 +262,11 @@ body, through the versioned prompt API, and the starting bodies are restored aft
   pre-registration, adopted-lesson retire sync. Done = Postgres tests for each.
 - *(unclaimed)* — **RSI gate web UI** (M), card `c-936308`. Done = adopt/rollback from a proposals table in ≤2 clicks + password.
 
-- *(unclaimed)* — **E7: TLS on the worker→control proxy hop** (M), card `c-677166`. Done = a plain-HTTP
-  target request from a worker crosses the network inside TLS; Helm/compose default to it.
+- *(unclaimed)* — **E7: land the TLS proxy hop** (M), card `c-677166` — built on `ej/20261124-163818-870578`
+  (fork `h-c56630`), live-checked on Docker (c-6e9c74) and on kind with an agent-driven task (c-67993f, passes).
+  Needs rebase onto main and review. Done = on main; Helm/compose default to it.
+- *(unclaimed)* — **E7: unify the two relay helpers when landing** (S), card `c-ccc7a8`. Done = one of
+  `connSet`/`relayConns` left in `traffic/`, `go test ./traffic` passes.
 
 **Human lane**
 - **First live run through the RSI gate** (card `c-772190`, after `c-f1518c`): propose → held-out
