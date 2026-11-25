@@ -1,6 +1,6 @@
 # HANDOFF.md — ARTEX
 
-**Last updated:** 2026-11-24 16:40 MST, by claude-code: c-548e8b (E7, now in review): worker nodes reach the control API (node RPC) over TLS with the CA pinned by default. Earlier hand-offs are under Deltas and in `ej handoff log`.
+**Last updated:** 2026-11-24 17:45 MST, by claude-code: c-83ae7b (in review): per-role default output caps when a profile's max_tokens is 0; settled 2026-11-23 decisions moved to `docs/decisions.md`. Earlier hand-offs are under Deltas and in `ej handoff log`.
 
 > Single entry point for whoever picks this up next (any agent or human), with no access to the
 > originating conversation. Read this first, then the sections of the code it points at.
@@ -59,13 +59,9 @@ See `docs/ARCHITECTURE.md` for the code-level map. Summary:
 
 ## Current state
 
-**2026-11-24 — Per-role default output caps (`c-83ae7b`, in review).** A profile `max_tokens` of 0 no
-longer reaches norma (which sent 32768 and resumed truncations 3×): `agent.ReplyCap` (`agent/reply_caps.go`)
-sends the profile cap when > 0, else the role default (8192 for planner, worker, mainagent, chat). Defaults
-come from `llm_usage` (largest observed reply 3,511 tokens). Compactor (1500) and the context summariser were
-already bounded; goals has its own cap on the c-7361b4 branch. Tests: `agent/reply_caps_test.go` (every role,
-unset/0/explicit). The profile UI hint says what 0 does. Not checked: a live benchmark run for truncated
-outputs (no bench instance here). verify.sh: Go tests pass except the known macOS 127.0.0.2 SOCKS5 test; web checks pass. Open question split out: `c-cea6ac` (task done during decomposition).
+**2026-11-24 — Per-role output caps (`c-83ae7b`, in review).** Profile `max_tokens`=0 now means the role
+default (`agent/reply_caps.go`: 8192 for planner/worker/mainagent/chat), not norma's 32768. Tests in
+`agent/reply_caps_test.go`. Not checked: a live benchmark run for truncation. Split out: `c-cea6ac`.
 
 **2026-11-24 — TLS between worker nodes and the control node by default (`c-548e8b`, E7; in review).**
 Worker nodes reach the control API (node RPC) over **TLS with the CA pinned**: `ARTEX_CONTROL_CA`
@@ -419,13 +415,11 @@ Card ids in brackets:
 
 ## Decisions
 
-- **2026-11-24 c-83ae7b (per-role output caps):**
-  - An explicit profile cap wins in either direction (unlike goals' min()), so an operator can raise a role's
-    cap per profile; only 0 maps to the role default.
-  - One 8192 default for all four roles: the data (max 3,511) gives no reason to split them, the table keeps
-    them separable, and the harness's truncation resume still completes a legit longer reply.
-  - Applied in the agent layer (each role's `maxTokens()`), not `taskLLMRuntime`, so the sidebar chat and any
-    future caller get it without server wiring, and it does not conflict with the c-7361b4 goals change.
+Older settled decisions: `docs/decisions.md`.
+
+- **2026-11-24 c-83ae7b:** a profile cap > 0 wins either way; only 0 maps to the role default. One 8192 default
+  for all roles (largest observed reply 3,511; truncation resume still completes longer ones). Applied in each
+  role's `maxTokens()` in `agent/`, so the chat and future callers get it with no server wiring.
 
 - **2026-11-24** — c-548e8b: the worker pins the control API's CA (`ARTEX_CONTROL_CA`) rather than
   trusting system roots, so a publicly valid certificate for the same name cannot impersonate the
@@ -526,12 +520,6 @@ Card ids in brackets:
   the old `network_mode: host` (no port clashes, works on Docker Desktop). Host-published corpora are
   reached as `host.docker.internal`; the egress filter still denies that to agents until the operator
   sets `ARTEX_EGRESS_ALLOW` in `bench/.env` — documented, not defaulted, since it opens host services.
-- **2026-11-23** — c-dadc14: the security branch's always-on metadata check resolves each name the
-  platform dials (gate on or off); `TestGateOffTaskIsUnchanged` now asserts one lookup per platform
-  connection instead of none, since this is the intended behaviour, not a regression. The isolation
-  probe binary became a test hook (`isolationProbeBinary`) rather than being changed in production.
-  Logout revocation and the Docker Desktop bind-mount problem were filed as cards, not fixed here: both
-  predate the branch and need a design choice.
 - **2026-11-24** — DVGA ground truth bumped to v2 after reading the 2.2.0 source (card `c-085c80`). Every entry
   now has a `source` field naming its resolver, helper, middleware or template (the judge prompt ignores it;
   it only changes the content hash). Changes: GT-009 is *signature not verified* (`helpers.get_identity`,
@@ -539,26 +527,6 @@ Card ids in brackets:
   because the deny-list, operation-name and introspection middlewares only run in Expert mode (moved to
   notes). Added GT-012, stack traces on `/graphiql` (`format_custom_error`). The notes now say that
   difficulty is server-wide DB state, switched by `X-DVGA-MODE` or `/difficulty/<level>`, not chosen per request.
-
-- **2026-11-23** — Stood ARTEX up locally and registered it as a Composite project rather than
-  forking/renaming; it stays an AGPL-3.0 fork under `tenpointdata`. Backend verified building; web
-  install and Docker run deferred (not needed to produce the setup + plan deliverable).
-- **2026-11-23** — Expansion plan produced as a Composite Office doc (link recorded by
-  `merge_handoff` / in the Composite project). All proposed work is guardrail-preserving; no item
-  touches the `RSI.md` immutable surfaces, and Loop-C work (E3) is gated behind that contract.
-- **2026-11-23** — E1–E10 tracked on the private Composite ARTEX board instead of GitHub issues,
-  because `tenpointdata/ARTEX` is public and the roadmap should not be published yet.
-
-- **2026-11-23** — Security fixes fail closed with explicit env opt-outs (`ARTEX_ALLOW_UNSANDBOXED`,
-  `ARTEX_ALLOW_INSECURE_BIND`, `ARTEX_CAPTURE_INSECURE_UPSTREAM`, `ARTEX_PROXY_ALLOW_NONLOOPBACK`) rather
-  than silent degradation. The metadata deny is not applied to Bash command text, because SSRF payloads
-  legitimately name 169.254.169.254; it is enforced at the dial level instead. Block rules keep substring
-  matching, since matching more is the safe direction; only allow rules became strict. Security
-  follow-ups are private board cards, not GitHub issues, because the repo is public.
-- **2026-11-23** — The capture proxy keeps verifying upstream TLS by default. Engagements against
-  self-signed targets set `ARTEX_CAPTURE_INSECURE_UPSTREAM=1` for that run only, until per-target trust
-  (card `c-8d54d5`) exists. Reason: the goproxy setting is global, so turning it on also leaves package
-  downloads through the proxy open to tampering.
 
 - **2026-11-24** — Per-task uids derive a process's identity from the **owner of its working run
   directory**, not from a channel between the server and the shim. Norma always starts bash in the
