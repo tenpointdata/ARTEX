@@ -7,6 +7,7 @@ import { toast } from "sonner";
 
 import { LinkTrafficDialog } from "@/components/link-traffic-dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { useCan } from "@/hooks/use-session";
 import { t } from "@/i18n";
 import { api } from "@/lib/api";
 import { setVisibleInterval } from "@/lib/polling";
@@ -30,6 +31,7 @@ import { useTrafficFilters } from "./_components/use-traffic-filters";
 const REFRESH_MS = 5000;
 
 export default function TrafficPage() {
+  const canOperate = useCan("operate"); // raw exchanges, replay, HAR, delete-by-target
   const [viewTab, setViewTab] = React.useState<"exchanges" | "hooks">("exchanges");
   // The sidebar's company switcher narrows the list to that company's hosts.
   const companyId = useActiveCompanyID();
@@ -89,14 +91,17 @@ export default function TrafficPage() {
         .catch(() => {
           // Keep the last successful snapshot during transient refresh failures.
         });
-      api
-        .trafficHosts()
-        .then((r) => {
-          if (alive) setHosts(r.hosts ?? []);
-        })
-        .catch(() => {
-          // Keep the last successful host list during transient refresh failures.
-        });
+      // The host list only feeds the delete-by-target picker, which is operate-only.
+      if (canOperate) {
+        api
+          .trafficHosts()
+          .then((r) => {
+            if (alive) setHosts(r.hosts ?? []);
+          })
+          .catch(() => {
+            // Keep the last successful host list during transient refresh failures.
+          });
+      }
     };
     load();
     const stopPolling = setVisibleInterval(() => {
@@ -107,7 +112,7 @@ export default function TrafficPage() {
       alive = false;
       stopPolling();
     };
-  }, [page, size, query, sort, reloadTick, companyId]);
+  }, [page, size, query, sort, reloadTick, companyId, canOperate]);
 
   // `reclaimed` only comes back from the full purge; the host-scoped deletions
   // report the row count alone.
@@ -189,7 +194,7 @@ export default function TrafficPage() {
           <span className="text-xs text-muted-foreground tabular-nums">
             {t("{count} records", { count: traffic?.count ?? 0 })}
           </span>
-          <HarButtons har={har} hasRecords={Boolean(traffic?.count)} />
+          {canOperate && <HarButtons har={har} hasRecords={Boolean(traffic?.count)} />}
         </div>
       </div>
 
@@ -213,17 +218,19 @@ export default function TrafficPage() {
           <TrafficToolbar
             f={filters}
             picker={
-              <TargetPicker
-                hosts={hosts}
-                selectedHosts={selectedHosts}
-                onSelectedHostsChange={setSelectedHosts}
-                open={pickerOpen}
-                onOpenChange={setPickerOpen}
-                onDeleteSelected={() => {
-                  setDeleteMode("selected");
-                  setPickerOpen(false);
-                }}
-              />
+              canOperate ? (
+                <TargetPicker
+                  hosts={hosts}
+                  selectedHosts={selectedHosts}
+                  onSelectedHostsChange={setSelectedHosts}
+                  open={pickerOpen}
+                  onOpenChange={setPickerOpen}
+                  onDeleteSelected={() => {
+                    setDeleteMode("selected");
+                    setPickerOpen(false);
+                  }}
+                />
+              ) : null
             }
             size={size}
             onSizeChange={setSize}

@@ -3,6 +3,7 @@
 import { TablePagination } from "@/components/table-pagination";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Table, TableBody, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { useCan } from "@/hooks/use-session";
 import { t } from "@/i18n";
 
 import { SortableTaskHead, TaskRow } from "./task-row";
@@ -10,6 +11,7 @@ import type { TaskActions } from "./use-task-actions";
 import type { TaskListState } from "./use-task-list";
 
 export function TaskTable({ list, actions }: { list: TaskListState; actions: TaskActions }) {
+  const canOperate = useCan("operate"); // selection only feeds mutating bulk actions
   const {
     tasks,
     filtered,
@@ -44,11 +46,13 @@ export function TaskTable({ list, actions }: { list: TaskListState; actions: Tas
           <TableHeader className="[&_tr]:border-t">
             <TableRow>
               <TableHead className="w-10">
-                <Checkbox
-                  checked={headerChecked}
-                  onCheckedChange={(checked) => toggleSelectedPage(checked === true)}
-                  aria-label={t("Select all tasks on this page")}
-                />
+                {canOperate && (
+                  <Checkbox
+                    checked={headerChecked}
+                    onCheckedChange={(checked) => toggleSelectedPage(checked === true)}
+                    aria-label={t("Select all tasks on this page")}
+                  />
+                )}
               </TableHead>
               <SortableTaskHead
                 field="id"

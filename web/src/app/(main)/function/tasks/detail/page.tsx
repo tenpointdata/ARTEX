@@ -36,6 +36,7 @@ import { SidebarTrigger } from "@/components/ui/sidebar";
 import { Spinner } from "@/components/ui/spinner";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { useCan } from "@/hooks/use-session";
 import { t } from "@/i18n";
 import { api } from "@/lib/api";
 import { setVisibleInterval } from "@/lib/polling";
@@ -77,6 +78,7 @@ function taskProfileIDs(task: Task): string[] {
 }
 
 function TaskLLMControl({ task, profiles, onUpdated }: { task: Task; profiles: LLMProfile[]; onUpdated: () => void }) {
+  const canOperate = useCan("operate");
   const [open, setOpen] = React.useState(false);
   const [profileIDs, setProfileIDs] = React.useState<string[]>(() => taskProfileIDs(task));
   const [llmRotate, setLLMRotate] = React.useState(task.llm_rotate ?? false);
@@ -208,7 +210,7 @@ function TaskLLMControl({ task, profiles, onUpdated }: { task: Task; profiles: L
           activeProfileId={activeProfileID}
           onActiveProfileChange={setActiveProfileID}
           inputId="task-llm-profiles"
-          disabled={saving}
+          disabled={saving || !canOperate}
           portalContainer={popoverContentRef}
         />
 
@@ -216,10 +218,12 @@ function TaskLLMControl({ task, profiles, onUpdated }: { task: Task; profiles: L
           <Button type="button" variant="outline" size="sm" onClick={() => setOpen(false)}>
             {t("Close")}
           </Button>
-          <Button type="button" size="sm" onClick={save} disabled={saving}>
-            {saving && <Spinner data-icon="inline-start" />}
-            {saveLabel}
-          </Button>
+          {canOperate && (
+            <Button type="button" size="sm" onClick={save} disabled={saving}>
+              {saving && <Spinner data-icon="inline-start" />}
+              {saveLabel}
+            </Button>
+          )}
         </div>
       </PopoverContent>
     </Popover>
@@ -237,6 +241,7 @@ function TaskDetailInner() {
   const [interceptPendingCount, setInterceptPendingCount] = React.useState(0);
   const [profiles, setProfiles] = React.useState<LLMProfile[]>([]);
   const [archiving, setArchiving] = React.useState(false);
+  const canOperate = useCan("operate");
 
   React.useEffect(() => {
     api
@@ -398,42 +403,45 @@ function TaskDetailInner() {
           <Separator orientation="vertical" className="mx-1 hidden h-4 sm:block" />
           <TaskLLMControl task={task} profiles={profiles} onUpdated={load} />
           <StatusBadge domain={terminal ? "task" : "engine"} value={terminal ? task.status : engineMode} dot />
-          {canArchive ? (
-            <AlertDialog>
-              <AlertDialogTrigger asChild>{archiveTrigger}</AlertDialogTrigger>
-              <AlertDialogContent>
-                <AlertDialogHeader>
-                  <AlertDialogTitle>{t("Archive task #{id}?", { id: task.id })}</AlertDialogTitle>
-                  <AlertDialogDescription>
-                    {t(
-                      'The task graph, related records, exclusive assets and traffic, working files, and LLM history will be compressed into cold storage. Once archiving completes, restore it from the "Archived" tab of the task list.',
-                    )}
-                  </AlertDialogDescription>
-                </AlertDialogHeader>
-                <AlertDialogFooter>
-                  <AlertDialogCancel>{t("Cancel")}</AlertDialogCancel>
-                  <AlertDialogAction onClick={() => void archiveTask()}>{t("Confirm archive")}</AlertDialogAction>
-                </AlertDialogFooter>
-              </AlertDialogContent>
-            </AlertDialog>
-          ) : (
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <span className="inline-flex">{archiveTrigger}</span>
-              </TooltipTrigger>
-              <TooltipContent>{archiveDisabledReason}</TooltipContent>
-            </Tooltip>
+          {canOperate &&
+            (canArchive ? (
+              <AlertDialog>
+                <AlertDialogTrigger asChild>{archiveTrigger}</AlertDialogTrigger>
+                <AlertDialogContent>
+                  <AlertDialogHeader>
+                    <AlertDialogTitle>{t("Archive task #{id}?", { id: task.id })}</AlertDialogTitle>
+                    <AlertDialogDescription>
+                      {t(
+                        'The task graph, related records, exclusive assets and traffic, working files, and LLM history will be compressed into cold storage. Once archiving completes, restore it from the "Archived" tab of the task list.',
+                      )}
+                    </AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <AlertDialogFooter>
+                    <AlertDialogCancel>{t("Cancel")}</AlertDialogCancel>
+                    <AlertDialogAction onClick={() => void archiveTask()}>{t("Confirm archive")}</AlertDialogAction>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
+            ) : (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span className="inline-flex">{archiveTrigger}</span>
+                </TooltipTrigger>
+                <TooltipContent>{archiveDisabledReason}</TooltipContent>
+              </Tooltip>
+            ))}
+          {canOperate && (
+            <Button size="sm" variant={controlVariant} onClick={togglePause} disabled={terminal}>
+              {controlIcon}
+              {controlLabel}
+            </Button>
           )}
-          <Button size="sm" variant={controlVariant} onClick={togglePause} disabled={terminal}>
-            {controlIcon}
-            {controlLabel}
-          </Button>
         </div>
         <p className="truncate text-xs text-muted-foreground">{task.goal}</p>
         {/* Tabs */}
         <div className="no-scrollbar min-w-0 overflow-x-auto">
           <TabsList variant="default" className="min-w-max">
-            {TABS.map((tabItem) => (
+            {TABS.filter((tabItem) => canOperate || tabItem.value !== "credentials").map((tabItem) => (
               <TabsTrigger key={tabItem.value} value={tabItem.value}>
                 {tabItem.label}
                 {tabItem.value === "intercept" && interceptPendingCount > 0 && (
@@ -470,9 +478,11 @@ function TaskDetailInner() {
         <TabsContent value="assets" className="mt-0">
           <AssetsTab taskId={id} />
         </TabsContent>
-        <TabsContent value="credentials" className="mt-0">
-          <CredentialsTab taskId={id} />
-        </TabsContent>
+        {canOperate && (
+          <TabsContent value="credentials" className="mt-0">
+            <CredentialsTab taskId={id} />
+          </TabsContent>
+        )}
         <TabsContent value="coverage" className="mt-0">
           <CoverageGraphTab taskId={id} coverageEnabled={task?.coverage_enabled !== false} />
         </TabsContent>

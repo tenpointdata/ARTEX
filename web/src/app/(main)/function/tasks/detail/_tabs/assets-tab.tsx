@@ -20,6 +20,7 @@ import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
 import { TableCell, TableRow } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { useCan } from "@/hooks/use-session";
 import { t } from "@/i18n";
 import { api } from "@/lib/api";
 import { setVisibleInterval } from "@/lib/polling";
@@ -31,6 +32,7 @@ import { AddTaskAssetsSheet } from "./add-task-assets-sheet";
 import { AssetCard, Chips, fmtBytes, MethodBadge, SourceCell, statusTone, TABS } from "./assets-parts";
 
 export function AssetsTab({ taskId }: { taskId: string }) {
+  const canOperate = useCan("operate");
   const [rows, setRows] = React.useState<Asset[]>([]);
   const [total, setTotal] = React.useState(0);
   const [counts, setCounts] = React.useState<Record<string, number>>({});
@@ -139,17 +141,18 @@ export function AssetsTab({ taskId }: { taskId: string }) {
     }
   };
 
-  const removeButton = (asset: Asset) => (
-    <Button
-      variant="ghost"
-      size="icon-sm"
-      onClick={() => setRemoveTarget(asset)}
-      aria-label={t("Remove asset {label} from the task", { label: assetLabel(asset) })}
-      title={t("Remove from task")}
-    >
-      <Trash2Icon />
-    </Button>
-  );
+  const removeButton = (asset: Asset) =>
+    canOperate && (
+      <Button
+        variant="ghost"
+        size="icon-sm"
+        onClick={() => setRemoveTarget(asset)}
+        aria-label={t("Remove asset {label} from the task", { label: assetLabel(asset) })}
+        title={t("Remove from task")}
+      >
+        <Trash2Icon />
+      </Button>
+    );
 
   const commonCardProps = { loaded, onPage: setPage, onSize: setSize, page, size, total };
   const totalAll = TABS.reduce((sum, item) => sum + (counts[item.key] ?? 0), 0);
@@ -173,10 +176,12 @@ export function AssetsTab({ taskId }: { taskId: string }) {
             {t("This task is linked to {count} assets in total", { count: totalAll })}
           </p>
         </div>
-        <Button size="sm" onClick={() => setAddOpen(true)}>
-          <PlusIcon data-icon="inline-start" />
-          {t("Add test assets")}
-        </Button>
+        {canOperate && (
+          <Button size="sm" onClick={() => setAddOpen(true)}>
+            <PlusIcon data-icon="inline-start" />
+            {t("Add test assets")}
+          </Button>
+        )}
       </div>
 
       <Tabs

@@ -33,6 +33,7 @@ import { Card } from "@/components/ui/card";
 import { Switch } from "@/components/ui/switch";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { useCan } from "@/hooks/use-session";
 import { t } from "@/i18n";
 import { api } from "@/lib/api";
 import { buildMatchers } from "@/lib/tamper-hooks";
@@ -44,6 +45,7 @@ import { type DryRunTarget, type EditorState, editorFromHook, emptyEditor, fmtDa
 import { HookVersionsSheet } from "./hook-versions-sheet";
 
 export function TamperHooksPanel({ recentExchanges = [] }: { recentExchanges?: TrafficExchange[] }) {
+  const canOperate = useCan("operate"); // every hook mutation and dry-run needs operate
   const [hooks, setHooks] = React.useState<TamperHook[]>([]);
   const [enabledByEnv, setEnabledByEnv] = React.useState<boolean>(true);
   const [loading, setLoading] = React.useState(true);
@@ -192,17 +194,19 @@ export function TamperHooksPanel({ recentExchanges = [] }: { recentExchanges?: T
             <RefreshCwIcon className={`size-3.5 ${loading ? "animate-spin" : ""}`} />
             {t("Refresh")}
           </Button>
-          <Button
-            size="sm"
-            className="h-8"
-            onClick={() => {
-              setFormError(null);
-              setEditor(emptyEditor("request"));
-            }}
-          >
-            <PlusIcon className="size-3.5" />
-            {t("New hook")}
-          </Button>
+          {canOperate && (
+            <Button
+              size="sm"
+              className="h-8"
+              onClick={() => {
+                setFormError(null);
+                setEditor(emptyEditor("request"));
+              }}
+            >
+              <PlusIcon className="size-3.5" />
+              {t("New hook")}
+            </Button>
+          )}
         </div>
       </div>
 
@@ -250,7 +254,7 @@ export function TamperHooksPanel({ recentExchanges = [] }: { recentExchanges?: T
                   <TableCell>
                     <Switch
                       checked={hook.enabled}
-                      disabled={togglingId === hook.id}
+                      disabled={togglingId === hook.id || !canOperate}
                       aria-label={t("Toggle hook {name}", { name: hook.name })}
                       onCheckedChange={(checked) => void handleToggle(hook, checked)}
                     />
@@ -287,15 +291,17 @@ export function TamperHooksPanel({ recentExchanges = [] }: { recentExchanges?: T
                   </TableCell>
                   <TableCell className="text-right">
                     <div className="flex items-center justify-end gap-1">
-                      <Button
-                        variant="ghost"
-                        size="icon-xs"
-                        title={t("Dry-run")}
-                        aria-label={t("Dry-run")}
-                        onClick={() => openDryRunForHook(hook)}
-                      >
-                        <PlayIcon className="size-3.5" />
-                      </Button>
+                      {canOperate && (
+                        <Button
+                          variant="ghost"
+                          size="icon-xs"
+                          title={t("Dry-run")}
+                          aria-label={t("Dry-run")}
+                          onClick={() => openDryRunForHook(hook)}
+                        >
+                          <PlayIcon className="size-3.5" />
+                        </Button>
+                      )}
                       <Button
                         variant="ghost"
                         size="icon-xs"
@@ -305,28 +311,32 @@ export function TamperHooksPanel({ recentExchanges = [] }: { recentExchanges?: T
                       >
                         <HistoryIcon className="size-3.5" />
                       </Button>
-                      <Button
-                        variant="ghost"
-                        size="icon-xs"
-                        title={t("Edit")}
-                        aria-label={t("Edit")}
-                        onClick={() => {
-                          setFormError(null);
-                          setEditor(editorFromHook(hook));
-                        }}
-                      >
-                        <PencilIcon className="size-3.5" />
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="icon-xs"
-                        title={t("Delete")}
-                        aria-label={t("Delete")}
-                        className="text-destructive hover:text-destructive"
-                        onClick={() => setDeleteTarget(hook)}
-                      >
-                        <Trash2Icon className="size-3.5" />
-                      </Button>
+                      {canOperate && (
+                        <Button
+                          variant="ghost"
+                          size="icon-xs"
+                          title={t("Edit")}
+                          aria-label={t("Edit")}
+                          onClick={() => {
+                            setFormError(null);
+                            setEditor(editorFromHook(hook));
+                          }}
+                        >
+                          <PencilIcon className="size-3.5" />
+                        </Button>
+                      )}
+                      {canOperate && (
+                        <Button
+                          variant="ghost"
+                          size="icon-xs"
+                          title={t("Delete")}
+                          aria-label={t("Delete")}
+                          className="text-destructive hover:text-destructive"
+                          onClick={() => setDeleteTarget(hook)}
+                        >
+                          <Trash2Icon className="size-3.5" />
+                        </Button>
+                      )}
                     </div>
                   </TableCell>
                 </TableRow>

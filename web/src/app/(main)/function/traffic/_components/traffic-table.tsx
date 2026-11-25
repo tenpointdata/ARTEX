@@ -5,6 +5,7 @@ import { Card } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import { SortableHead } from "@/components/ui/sortable-head";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { useCan } from "@/hooks/use-session";
 import { t } from "@/i18n";
 import type { TrafficExchange } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -39,6 +40,8 @@ export function TrafficTable({
   sort,
   onSort,
 }: TrafficTableProps) {
+  // Opening an exchange fetches the raw recording (GET /api/traffic/exchange), which needs operate.
+  const canOperate = useCan("operate");
   const toggle = (exchange: TrafficExchange, on: boolean) => {
     const next = new Map(checked);
     if (on) next.set(exchange.id, exchange);
@@ -106,8 +109,8 @@ export function TrafficTable({
                 <TableRow
                   key={e.id}
                   data-state={checked.has(e.id) ? "selected" : undefined}
-                  className={cn("cursor-pointer", openId === e.id && "bg-accent hover:bg-accent")}
-                  onClick={() => onOpen(e)}
+                  className={cn(canOperate && "cursor-pointer", openId === e.id && "bg-accent hover:bg-accent")}
+                  onClick={canOperate ? () => onOpen(e) : undefined}
                 >
                   <TableCell>
                     <Checkbox

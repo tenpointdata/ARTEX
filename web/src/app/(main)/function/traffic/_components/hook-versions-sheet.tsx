@@ -19,6 +19,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { useCan } from "@/hooks/use-session";
 import { t } from "@/i18n";
 import { api } from "@/lib/api";
 import type { TamperHook, TamperHookVersion } from "@/lib/types";
@@ -35,6 +36,7 @@ interface HookVersionsSheetProps {
 
 // Version history of a hook (up to 20 revisions) with source preview and rollback.
 export function HookVersionsSheet({ hook: versionsHook, onHookChange, onRolledBack }: HookVersionsSheetProps) {
+  const canOperate = useCan("operate"); // rollback is a hook mutation
   const [versions, setVersions] = React.useState<TamperHookVersion[]>([]);
   const [versionsLoading, setVersionsLoading] = React.useState(false);
   const [expandedVersion, setExpandedVersion] = React.useState<number | null>(null);
@@ -145,7 +147,7 @@ export function HookVersionsSheet({ hook: versionsHook, onHookChange, onRolledBa
                                 <Code2Icon className="size-3.5" />
                                 {isExpanded ? t("Hide source") : t("View source")}
                               </Button>
-                              {!isCurrent && (
+                              {canOperate && !isCurrent && (
                                 <Button
                                   variant="outline"
                                   size="sm"

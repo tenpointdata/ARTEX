@@ -8,6 +8,7 @@ import { ApprovalExecutionFocus, useApprovalFocus } from "@/components/approval-
 import { SideQuestionWorkspace } from "@/components/side-question-workspace";
 import { TodoPopover } from "@/components/todo-popover";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { useCan } from "@/hooks/use-session";
 import { useSideQuestions } from "@/hooks/use-side-questions";
 import { t } from "@/i18n";
 import { api } from "@/lib/api";
@@ -42,6 +43,7 @@ import { useWorkerChat } from "./sessions/use-worker-chat";
 import { useWorkerControl } from "./sessions/use-worker-control";
 
 export function SessionsTab({ taskId, taskPaused = false }: { taskId: string; taskPaused?: boolean }) {
+  const canOperate = useCan("operate"); // chat, worker control and new sessions are operate-level
   const approvalFocus = useApprovalFocus({ taskId });
   const [selectedSessionId, setActiveId] = React.useState(MAIN_ID);
   const [creatingMain, setCreatingMain] = React.useState(false);
@@ -447,9 +449,10 @@ export function SessionsTab({ taskId, taskPaused = false }: { taskId: string; ta
               focusedSeq={focusHistory.ready ? approvalFocus.state?.source?.seq : undefined}
               onRetry={() => loadSession(activeKey)}
             />
-            {isMain ? (
+            {isMain && canOperate ? (
               <MainComposer composer={composer} sending={sending} sendMode={sendMode} />
-            ) : active.role === "worker" &&
+            ) : canOperate &&
+              active.role === "worker" &&
               !active.inherited &&
               (active.status === "running" || active.status === "paused") ? (
               <WorkerComposer

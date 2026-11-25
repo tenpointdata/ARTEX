@@ -4,6 +4,7 @@ import { CopyIcon, Trash2Icon } from "lucide-react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
+import { useCan } from "@/hooks/use-session";
 import { t } from "@/i18n";
 
 import type { TrafficSelection } from "./traffic-table";
@@ -19,6 +20,7 @@ interface TrafficBulkBarProps {
 // Bulk actions over the checked exchanges. Uses only existing capabilities: the
 // finding-link dialog, clipboard, and the confirmed host-scoped delete.
 export function TrafficBulkBar({ selection, onClear, onLink, onDeleteTargets }: TrafficBulkBarProps) {
+  const canOperate = useCan("operate"); // linking and deleting mutate; copying URLs is read-only
   const count = selection.size;
   const copyUrls = () => {
     const urls = [...selection.values()].map((e) => e.url).join("\n");
@@ -30,23 +32,27 @@ export function TrafficBulkBar({ selection, onClear, onLink, onDeleteTargets }: 
   return (
     <div className="flex flex-wrap items-center gap-2">
       <span className="text-sm text-muted-foreground">{t("{count} flows selected", { count })}</span>
-      <Button variant="outline" size="sm" disabled={count === 0} onClick={onLink}>
-        {t("Link to finding")}
-      </Button>
+      {canOperate && (
+        <Button variant="outline" size="sm" disabled={count === 0} onClick={onLink}>
+          {t("Link to finding")}
+        </Button>
+      )}
       <Button variant="outline" size="sm" disabled={count === 0} onClick={copyUrls}>
         <CopyIcon className="size-3.5" />
         {t("Copy URLs")}
       </Button>
-      <Button
-        variant="outline"
-        size="sm"
-        className="text-destructive hover:bg-destructive/10 hover:text-destructive"
-        disabled={count === 0}
-        onClick={() => onDeleteTargets([...new Set([...selection.values()].map((e) => e.host))])}
-      >
-        <Trash2Icon className="size-3.5" />
-        {t("Delete targets of selection")}
-      </Button>
+      {canOperate && (
+        <Button
+          variant="outline"
+          size="sm"
+          className="text-destructive hover:bg-destructive/10 hover:text-destructive"
+          disabled={count === 0}
+          onClick={() => onDeleteTargets([...new Set([...selection.values()].map((e) => e.host))])}
+        >
+          <Trash2Icon className="size-3.5" />
+          {t("Delete targets of selection")}
+        </Button>
+      )}
       {count > 0 ? (
         <Button variant="ghost" size="sm" onClick={onClear}>
           {t("Clear selection")}
