@@ -1,5 +1,7 @@
 "use client";
 
+import * as React from "react";
+
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
 import { t } from "@/i18n";
@@ -19,13 +21,18 @@ export function McpTab({
   visible: number[];
   onToggle: (id: number) => void;
 }) {
+  const uid = React.useId();
   return (
     <>
       <p className="text-muted-foreground mb-3 text-xs">{t("Check the MCP servers visible to this Agent.")}</p>
       <div className="grid gap-2">
         {mcp.map((m) => (
-          <label key={m.id} className="flex items-center gap-2 rounded-md border p-2 text-sm">
-            <Checkbox checked={visible.includes(m.id)} onCheckedChange={() => onToggle(m.id)} />
+          <label
+            key={m.id}
+            htmlFor={`${uid}-${m.id}`}
+            className="flex items-center gap-2 rounded-md border p-2 text-sm"
+          >
+            <Checkbox id={`${uid}-${m.id}`} checked={visible.includes(m.id)} onCheckedChange={() => onToggle(m.id)} />
             {m.name}
             <span className="text-muted-foreground ml-auto text-xs">{m.transport}</span>
           </label>
@@ -45,13 +52,22 @@ export function SkillTab({
   visible: string[];
   onToggle: (name: string) => void;
 }) {
+  const uid = React.useId();
   return (
     <>
       <p className="text-muted-foreground mb-3 text-xs">{t("Check the Skills visible to this Agent.")}</p>
       <div className="grid gap-2">
         {skills.map((s) => (
-          <label key={s.name} className="flex items-center gap-2 rounded-md border p-2 text-sm">
-            <Checkbox checked={visible.includes(s.name)} onCheckedChange={() => onToggle(s.name)} />
+          <label
+            key={s.name}
+            htmlFor={`${uid}-${s.name}`}
+            className="flex items-center gap-2 rounded-md border p-2 text-sm"
+          >
+            <Checkbox
+              id={`${uid}-${s.name}`}
+              checked={visible.includes(s.name)}
+              onCheckedChange={() => onToggle(s.name)}
+            />
             <span className="font-mono text-xs">{s.name}</span>
             {s.description && <span className="text-muted-foreground ml-auto truncate text-xs">{s.description}</span>}
           </label>
@@ -73,6 +89,7 @@ export function ToolsTab({
   captureOn: boolean;
   onToggle: (tool: Tool) => void;
 }) {
+  const uid = React.useId();
   return (
     <>
       <p className="text-muted-foreground mb-3 text-xs">{t("Check the built-in tools bound to this Agent.")}</p>
@@ -83,9 +100,11 @@ export function ToolsTab({
           return (
             <label
               key={tool.key}
+              htmlFor={`${uid}-${tool.key}`}
               className={cn("flex items-center gap-2 rounded-md border p-2 text-sm", gated && "opacity-60")}
             >
               <Checkbox
+                id={`${uid}-${tool.key}`}
                 checked={tool.agents.includes(agentKey)}
                 disabled={gated}
                 onCheckedChange={() => onToggle(tool)}

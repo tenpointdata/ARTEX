@@ -53,19 +53,27 @@ export function AgentEditor({ agentKey, onSaved }: { agentKey: string; onSaved?:
     api
       .mcpServers()
       .then(setMcp)
-      .catch(() => {});
+      .catch(() => {
+        // best effort: the MCP list is optional here
+      });
     api
       .skills()
       .then(setSkills)
-      .catch(() => {});
+      .catch(() => {
+        // best effort: the skill list is optional here
+      });
     api
       .tools()
       .then(setTools)
-      .catch(() => {});
+      .catch(() => {
+        // best effort: the tool list is optional here
+      });
     api
       .settings()
       .then(setSettings)
-      .catch(() => {});
+      .catch(() => {
+        // best effort: global gates default to off
+      });
   }, []);
   // global gates: traffic tools need traffic capture, web search needs the master switch.
   const captureOn = !!settings?.traffic_capture;
@@ -212,7 +220,7 @@ export function AgentEditor({ agentKey, onSaved }: { agentKey: string; onSaved?:
   function toggleMcp(id: number) {
     const on = mcpVisible.includes(id);
     const name = mcp.find((m) => m.id === id)?.name ?? String(id);
-    applyVis(
+    void applyVis(
       on ? mcpVisible.filter((x) => x !== id) : [...mcpVisible, id],
       skillVisible,
       on ? t('Revoked MCP "{name}" visibility', { name }) : t('Granted MCP "{name}" visibility', { name }),
@@ -220,7 +228,7 @@ export function AgentEditor({ agentKey, onSaved }: { agentKey: string; onSaved?:
   }
   function toggleSkill(name: string) {
     const on = skillVisible.includes(name);
-    applyVis(
+    void applyVis(
       mcpVisible,
       on ? skillVisible.filter((x) => x !== name) : [...skillVisible, name],
       on ? t('Revoked Skill "{name}" visibility', { name }) : t('Granted Skill "{name}" visibility', { name }),
@@ -246,7 +254,9 @@ export function AgentEditor({ agentKey, onSaved }: { agentKey: string; onSaved?:
       api
         .tools()
         .then(setTools)
-        .catch(() => {});
+        .catch(() => {
+          // best effort: reload() above already refreshed the agent state
+        });
     }
   }
 

@@ -37,11 +37,15 @@ export default function ToolsPage() {
     api
       .agents()
       .then(setAgents)
-      .catch(() => {});
+      .catch(() => {
+        // best effort: the agent list is optional here
+      });
     api
       .settings()
       .then((s) => setCaptureOn(!!s.traffic_capture))
-      .catch(() => {});
+      .catch(() => {
+        // best effort: capture state stays at its default
+      });
   }, [reload]);
 
   const [query, setQuery] = React.useState("");

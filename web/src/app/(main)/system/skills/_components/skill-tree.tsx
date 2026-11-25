@@ -84,6 +84,20 @@ export function SkillTree({
     );
   }
 
+  function selectSkillRoot(name: string) {
+    toggleExpanded(name);
+    setSelected({ skill: name, path: null });
+  }
+
+  // Row keyboard activation; ignores keys that bubble up from the row's inline action buttons.
+  const onActivateKey = (activate: () => void) => (e: React.KeyboardEvent) => {
+    if (e.target !== e.currentTarget) return;
+    if (e.key === "Enter" || e.key === " ") {
+      e.preventDefault();
+      activate();
+    }
+  };
+
   // ── Recursive tree renderer ───────────────────────────────────────────────
   function renderTree(nodes: TreeNode[], skill: string, depth: number): React.ReactNode {
     // depth+1: the skill root sits at 8px (px-2); its children indent one step
@@ -98,7 +112,12 @@ export function SkillTree({
             <div
               className="group relative flex cursor-pointer select-none items-center gap-1 rounded py-0.5 pr-1 text-sm hover:bg-muted"
               style={{ paddingLeft: baseIndent }}
+              role="treeitem"
+              aria-selected={false}
+              aria-expanded={open}
+              tabIndex={0}
               onClick={() => toggleExpanded(key)}
+              onKeyDown={onActivateKey(() => toggleExpanded(key))}
             >
               <ChevronRightIcon className={cn("size-3.5 shrink-0 transition-transform", open && "rotate-90")} />
               {open ? (
@@ -169,7 +188,11 @@ export function SkillTree({
             isSelected ? "bg-accent text-accent-foreground" : "hover:bg-muted",
           )}
           style={{ paddingLeft: baseIndent + 16 }}
+          role="treeitem"
+          aria-selected={isSelected}
+          tabIndex={0}
           onClick={() => setSelected({ skill, path: node.path })}
+          onKeyDown={onActivateKey(() => setSelected({ skill, path: node.path }))}
         >
           <FileTextIcon className="size-3.5 shrink-0 text-muted-foreground" />
           <span className="min-w-0 flex-1 truncate font-mono text-xs" title={node.path}>
@@ -201,7 +224,7 @@ export function SkillTree({
 
   return (
     <ScrollArea className="flex-1 [&>[data-slot=scroll-area-viewport]>div]:!block">
-      <div className="p-1">
+      <div className="p-1" role="tree">
         {skills.map((s) => {
           const isOpen = expanded.has(s.name);
           const tree = buildTree(s.files);
@@ -214,10 +237,12 @@ export function SkillTree({
                   "group relative flex cursor-pointer select-none items-center gap-1 rounded px-2 py-1 text-sm",
                   isSkillSelected ? "bg-accent text-accent-foreground" : "hover:bg-muted",
                 )}
-                onClick={() => {
-                  toggleExpanded(s.name);
-                  setSelected({ skill: s.name, path: null });
-                }}
+                role="treeitem"
+                aria-selected={isSkillSelected}
+                aria-expanded={isOpen}
+                tabIndex={0}
+                onClick={() => selectSkillRoot(s.name)}
+                onKeyDown={onActivateKey(() => selectSkillRoot(s.name))}
               >
                 <ChevronRightIcon className={cn("size-3.5 shrink-0 transition-transform", isOpen && "rotate-90")} />
                 {isOpen ? (

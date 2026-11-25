@@ -2,17 +2,7 @@
 
 import * as React from "react";
 
-import {
-  CheckIcon,
-  ChevronLeftIcon,
-  ChevronRightIcon,
-  CopyIcon,
-  Loader2Icon,
-  RadioIcon,
-  SearchIcon,
-  Trash2Icon,
-  XIcon,
-} from "lucide-react";
+import { ChevronLeftIcon, ChevronRightIcon, Loader2Icon, RadioIcon, SearchIcon, Trash2Icon, XIcon } from "lucide-react";
 
 import {
   AlertDialog,
@@ -35,6 +25,8 @@ import { intlLocale, t } from "@/i18n";
 import { api } from "@/lib/api";
 import type { LLMRecordDetail, LLMRecordItem, LLMTask } from "@/lib/types";
 import { cn } from "@/lib/utils";
+
+import { CopyButton } from "./_components/copy-button";
 
 function fmtTime(ts: string) {
   return new Date(ts).toLocaleString(intlLocale, {
@@ -62,56 +54,6 @@ function tryFormatJSON(s: string): string {
   } catch {
     return s;
   }
-}
-
-// Small button that copies the text in the current pane. Shows a brief checkmark after copying. Disabled when text is empty/only placeholders.
-function CopyButton({ text }: { text: string }) {
-  const [copied, setCopied] = React.useState(false);
-  const timer = React.useRef<ReturnType<typeof setTimeout> | null>(null);
-  React.useEffect(
-    () => () => {
-      if (timer.current) clearTimeout(timer.current);
-    },
-    [],
-  );
-
-  const disabled = !text;
-  const copy = async () => {
-    if (disabled) return;
-    try {
-      await navigator.clipboard.writeText(text);
-    } catch {
-      // navigator.clipboard is unavailable in non-secure contexts (e.g. http LAN); fall back to execCommand.
-      const ta = document.createElement("textarea");
-      ta.value = text;
-      ta.style.position = "fixed";
-      ta.style.opacity = "0";
-      document.body.appendChild(ta);
-      ta.select();
-      try {
-        document.execCommand("copy");
-      } catch {
-        /* ignore: stay silent if unsupported */
-      }
-      document.body.removeChild(ta);
-    }
-    setCopied(true);
-    if (timer.current) clearTimeout(timer.current);
-    timer.current = setTimeout(() => setCopied(false), 1500);
-  };
-
-  return (
-    <Button
-      variant="ghost"
-      size="icon"
-      className="size-5 shrink-0"
-      disabled={disabled}
-      title={copied ? t("Copied") : t("Copy content")}
-      onClick={copy}
-    >
-      {copied ? <CheckIcon className="size-3 text-emerald-600" /> : <CopyIcon className="size-3" />}
-    </Button>
-  );
 }
 
 const PAGE_SIZES = [25, 50, 100];
@@ -170,7 +112,9 @@ export default function LLMRecordsPage() {
         setRecEnabled(!!s.llm_record);
         setRecKnown(true);
       })
-      .catch(() => {});
+      .catch(() => {
+        // best effort: settings unavailable: recording state stays unknown
+      });
     return () => {
       alive = false;
     };
@@ -196,11 +140,13 @@ export default function LLMRecordsPage() {
   }, [session]);
 
   // Reset page on filter change.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: these values intentionally trigger a page reset.
   React.useEffect(() => {
     setPage(0);
   }, [sessionQ, model, size, pickedTask]);
 
   // Load list.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: reloadTick is an explicit manual-refetch trigger.
   React.useEffect(() => {
     let alive = true;
     setLoading(true);
@@ -217,14 +163,18 @@ export default function LLMRecordsPage() {
         setRecords(r.records ?? []);
         setTotal(r.total ?? 0);
       })
-      .catch(() => {})
+      .catch(() => {
+        // best effort: list load failure leaves the previous list in place
+      })
       .finally(() => alive && setLoading(false));
     api
       .llmTasks()
       .then((r) => {
         if (alive) setTasks(r.tasks ?? []);
       })
-      .catch(() => {});
+      .catch(() => {
+        // best effort: task list is optional; keep the current options
+      });
     return () => {
       alive = false;
     };
@@ -243,7 +193,9 @@ export default function LLMRecordsPage() {
         setPage(0);
         setReloadTick((t) => t + 1);
       })
-      .catch(() => {})
+      .catch(() => {
+        // best effort: delete failure leaves the records untouched
+      })
       .finally(() => setDeleting(false));
   };
 
@@ -261,7 +213,9 @@ export default function LLMRecordsPage() {
       .then((d) => {
         if (alive) setDetail(d);
       })
-      .catch(() => {})
+      .catch(() => {
+        // best effort: detail load failure leaves the detail pane empty
+      })
       .finally(() => {
         if (alive) setDetailLoading(false);
       });

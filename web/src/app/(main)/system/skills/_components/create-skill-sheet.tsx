@@ -183,8 +183,13 @@ export function CreateSkillSheet({
             ) : (
               <div className="flex flex-col gap-2">
                 {mcpOptions.map((m) => (
-                  <label key={m.id} className="flex cursor-pointer items-center gap-2 text-sm">
+                  <label
+                    key={m.id}
+                    htmlFor={`new-skill-mcp-${m.id}`}
+                    className="flex cursor-pointer items-center gap-2 text-sm"
+                  >
                     <Checkbox
+                      id={`new-skill-mcp-${m.id}`}
                       checked={newMcps.includes(m.name)}
                       onCheckedChange={(on) =>
                         setNewMcps((cur) => (on ? [...cur, m.name] : cur.filter((n) => n !== m.name)))
@@ -207,8 +212,13 @@ export function CreateSkillSheet({
             ) : (
               <div className="flex flex-col gap-2">
                 {agents.map((a) => (
-                  <label key={a.key} className="flex cursor-pointer items-center gap-2 text-sm">
+                  <label
+                    key={a.key}
+                    htmlFor={`new-skill-agent-${a.id}`}
+                    className="flex cursor-pointer items-center gap-2 text-sm"
+                  >
                     <Checkbox
+                      id={`new-skill-agent-${a.id}`}
                       checked={newVisibility.includes(a.id)}
                       onCheckedChange={(on) =>
                         setNewVisibility((cur) => (on ? [...cur, a.id] : cur.filter((id) => id !== a.id)))

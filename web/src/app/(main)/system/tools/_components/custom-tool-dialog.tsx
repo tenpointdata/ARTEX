@@ -48,6 +48,7 @@ export function CustomToolDialog({
 }) {
   const isNew = edit === "new";
   const tool = edit && edit !== "new" ? edit : null;
+  const uid = React.useId();
   const [key, setKey] = React.useState("");
   const [description, setDescription] = React.useState("");
   const [kind, setKind] = React.useState<"shell" | "command" | "script" | "http">("shell");
@@ -366,8 +367,9 @@ export function CustomToolDialog({
                     onChange={(e) => setEx({ ...ex, proxy: e.target.value })}
                   />
                 </div>
-                <label className="mt-4 flex items-center gap-2 text-sm">
+                <label htmlFor={`${uid}-rec-proxy`} className="mt-4 flex items-center gap-2 text-sm">
                   <Checkbox
+                    id={`${uid}-rec-proxy`}
                     checked={ex.use_recording_proxy}
                     onCheckedChange={(v) => setEx({ ...ex, use_recording_proxy: !!v })}
                   />
@@ -412,8 +414,12 @@ export function CustomToolDialog({
             <Label className="text-muted-foreground text-xs">{t("Bind agents")}</Label>
             <div className="flex flex-wrap gap-3">
               {agents.map((a) => (
-                <label key={a.key} className="flex items-center gap-2 text-sm">
-                  <Checkbox checked={bound.includes(a.key)} onCheckedChange={() => toggleAgent(a.key)} />
+                <label key={a.key} htmlFor={`${uid}-agent-${a.key}`} className="flex items-center gap-2 text-sm">
+                  <Checkbox
+                    id={`${uid}-agent-${a.key}`}
+                    checked={bound.includes(a.key)}
+                    onCheckedChange={() => toggleAgent(a.key)}
+                  />
                   {a.name}
                   <span className="font-mono text-muted-foreground text-xs">{a.key}</span>
                 </label>
@@ -422,12 +428,12 @@ export function CustomToolDialog({
           </div>
 
           <div className="flex items-center gap-6">
-            <label className="flex items-center gap-2 text-sm">
-              <Switch checked={enabled} onCheckedChange={setEnabled} /> {t("Enable")}
+            <label htmlFor={`${uid}-enabled`} className="flex items-center gap-2 text-sm">
+              <Switch id={`${uid}-enabled`} checked={enabled} onCheckedChange={setEnabled} /> {t("Enable")}
             </label>
             {kind !== "shell" && (
-              <label className="flex items-center gap-2 text-sm">
-                <Switch checked={deferred} onCheckedChange={setDeferred} />{" "}
+              <label htmlFor={`${uid}-deferred`} className="flex items-center gap-2 text-sm">
+                <Switch id={`${uid}-deferred`} checked={deferred} onCheckedChange={setDeferred} />{" "}
                 {t("deferred (enable only for many rarely-used tools)")}
               </label>
             )}

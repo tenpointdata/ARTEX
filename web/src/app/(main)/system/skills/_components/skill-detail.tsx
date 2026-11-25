@@ -122,8 +122,13 @@ export function SkillDetail({
             ) : (
               <div className="flex flex-wrap gap-x-4 gap-y-2">
                 {mcpOptions.map((m) => (
-                  <label key={m.id} className="flex cursor-pointer items-center gap-2 text-sm">
+                  <label
+                    key={m.id}
+                    htmlFor={`skill-mcp-${m.id}`}
+                    className="flex cursor-pointer items-center gap-2 text-sm"
+                  >
                     <Checkbox
+                      id={`skill-mcp-${m.id}`}
                       checked={detailMcps.includes(m.name)}
                       onCheckedChange={(on) => onToggleMcp(selectedSkill.name, m.name, !!on)}
                     />
@@ -138,8 +143,13 @@ export function SkillDetail({
             <Label className="text-xs text-muted-foreground">{t("Visibility (granted per agent)")}</Label>
             <div className="space-y-2">
               {agents.map((a) => (
-                <label key={a.key} className="flex cursor-pointer items-center gap-2 text-sm">
+                <label
+                  key={a.key}
+                  htmlFor={`skill-agent-${a.id}`}
+                  className="flex cursor-pointer items-center gap-2 text-sm"
+                >
                   <Checkbox
+                    id={`skill-agent-${a.id}`}
                     checked={(visibility[selectedSkill.name] ?? []).includes(a.id)}
                     onCheckedChange={() => onToggleVisibility(selectedSkill.name, a.id, a.name)}
                   />

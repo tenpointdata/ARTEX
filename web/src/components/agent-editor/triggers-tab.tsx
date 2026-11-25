@@ -234,7 +234,7 @@ export function AgentTriggersTab({ agentKey, agent }: { agentKey: string; agent?
               onValueChange={(v) => {
                 const rm = v as "serial" | "parallel";
                 setRunMode(rm);
-                saveBehavior({ trigger_run_mode: rm });
+                void saveBehavior({ trigger_run_mode: rm });
               }}
             >
               <SelectTrigger size="sm" className="h-8 w-40">
@@ -255,7 +255,7 @@ export function AgentTriggersTab({ agentKey, agent }: { agentKey: string; agent?
               onValueChange={(v) => {
                 const mm = v as "by_task" | "all" | "none";
                 setMergeMode(mm);
-                saveBehavior({ trigger_merge_mode: mm });
+                void saveBehavior({ trigger_merge_mode: mm });
               }}
             >
               <SelectTrigger size="sm" className="h-8 w-44">
@@ -284,7 +284,7 @@ export function AgentTriggersTab({ agentKey, agent }: { agentKey: string; agent?
                 onBlur={() => {
                   const n = Math.max(0, Math.floor(Number(maxParallel) || 0));
                   setMaxParallel(String(n));
-                  saveBehavior({ trigger_max_parallel: n });
+                  void saveBehavior({ trigger_max_parallel: n });
                 }}
               />
             </div>
@@ -317,8 +317,9 @@ export function AgentTriggersTab({ agentKey, agent }: { agentKey: string; agent?
 
         {/* schedule */}
         <div className="grid gap-1.5">
-          <label className="flex items-center gap-2 text-sm">
-            <Checkbox checked={onInterval} onCheckedChange={(v) => setOnInterval(!!v)} /> {t("Scheduled trigger")}
+          <label htmlFor="tr-onInterval" className="flex items-center gap-2 text-sm">
+            <Checkbox id="tr-onInterval" checked={onInterval} onCheckedChange={(v) => setOnInterval(!!v)} />{" "}
+            {t("Scheduled trigger")}
           </label>
           {onInterval && (
             <div className="grid gap-1.5">
@@ -349,8 +350,9 @@ export function AgentTriggersTab({ agentKey, agent }: { agentKey: string; agent?
 
         {/* finding */}
         <div className="grid gap-1.5">
-          <label className="flex items-center gap-2 text-sm">
-            <Checkbox checked={onFinding} onCheckedChange={(v) => setOnFinding(!!v)} /> {t("Trigger on finding")}
+          <label htmlFor="tr-onFinding" className="flex items-center gap-2 text-sm">
+            <Checkbox id="tr-onFinding" checked={onFinding} onCheckedChange={(v) => setOnFinding(!!v)} />{" "}
+            {t("Trigger on finding")}
           </label>
           {onFinding && (
             <Textarea
@@ -367,8 +369,9 @@ export function AgentTriggersTab({ agentKey, agent }: { agentKey: string; agent?
 
         {/* goal met */}
         <div className="grid gap-1.5">
-          <label className="flex items-center gap-2 text-sm">
-            <Checkbox checked={onGoalMet} onCheckedChange={(v) => setOnGoalMet(!!v)} /> {t("Trigger on goal met")}
+          <label htmlFor="tr-onGoalMet" className="flex items-center gap-2 text-sm">
+            <Checkbox id="tr-onGoalMet" checked={onGoalMet} onCheckedChange={(v) => setOnGoalMet(!!v)} />{" "}
+            {t("Trigger on goal met")}
           </label>
           {onGoalMet && (
             <Textarea
@@ -385,8 +388,8 @@ export function AgentTriggersTab({ agentKey, agent }: { agentKey: string; agent?
 
         {/* task timeout */}
         <div className="grid gap-1.5">
-          <label className="flex items-center gap-2 text-sm">
-            <Checkbox checked={onTaskTimeout} onCheckedChange={(v) => setOnTaskTimeout(!!v)} />{" "}
+          <label htmlFor="tr-onTaskTimeout" className="flex items-center gap-2 text-sm">
+            <Checkbox id="tr-onTaskTimeout" checked={onTaskTimeout} onCheckedChange={(v) => setOnTaskTimeout(!!v)} />{" "}
             {t("Trigger on task timeout")}
           </label>
           {onTaskTimeout && (
@@ -402,8 +405,9 @@ export function AgentTriggersTab({ agentKey, agent }: { agentKey: string; agent?
 
         {/* tool call */}
         <div className="grid gap-1.5">
-          <label className="flex items-center gap-2 text-sm">
-            <Checkbox checked={onToolCall} onCheckedChange={(v) => setOnToolCall(!!v)} /> {t("Trigger on tool call")}
+          <label htmlFor="tr-onToolCall" className="flex items-center gap-2 text-sm">
+            <Checkbox id="tr-onToolCall" checked={onToolCall} onCheckedChange={(v) => setOnToolCall(!!v)} />{" "}
+            {t("Trigger on tool call")}
           </label>
           {onToolCall && (
             <div className="grid gap-1.5">
@@ -421,8 +425,9 @@ export function AgentTriggersTab({ agentKey, agent }: { agentKey: string; agent?
                 )}
                 <div className="grid gap-1">
                   {tools.map((tool) => (
-                    <label key={tool.key} className="flex items-start gap-2 text-xs">
+                    <label key={tool.key} htmlFor={`tr-tool-${tool.key}`} className="flex items-start gap-2 text-xs">
                       <Checkbox
+                        id={`tr-tool-${tool.key}`}
                         className="mt-0.5"
                         checked={toolNames.includes(tool.key)}
                         onCheckedChange={() => toggleTool(tool.key)}
@@ -452,8 +457,8 @@ export function AgentTriggersTab({ agentKey, agent }: { agentKey: string; agent?
 
         {/* task created */}
         <div className="grid gap-1.5">
-          <label className="flex items-center gap-2 text-sm">
-            <Checkbox checked={onTaskCreate} onCheckedChange={(v) => setOnTaskCreate(!!v)} />{" "}
+          <label htmlFor="tr-onTaskCreate" className="flex items-center gap-2 text-sm">
+            <Checkbox id="tr-onTaskCreate" checked={onTaskCreate} onCheckedChange={(v) => setOnTaskCreate(!!v)} />{" "}
             {t("Trigger on task created")}
           </label>
           {onTaskCreate && (

@@ -1,3 +1,4 @@
+// biome-ignore-all lint/nursery/useNullishCoalescing: asset fields are optional strings where an empty string means "missing"; the `||` fallbacks are intentional display defaults.
 "use client";
 
 import type * as React from "react";

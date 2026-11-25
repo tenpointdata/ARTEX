@@ -174,6 +174,7 @@ export function graphLabel(n: CoverageGraphNode): string {
     if (n.port) parts.push(`:${n.port}`);
     if (n.page_title) parts.push(n.page_title);
     if (n.status_code) parts.push(String(n.status_code));
+    // biome-ignore lint/nursery/useNullishCoalescing: empty domain/ip strings must fall through to the next label.
     return parts.length ? parts.join(" · ") : n.domain || n.ip || n.label;
   }
   if (n.kind === "endpoint" && n.url) {

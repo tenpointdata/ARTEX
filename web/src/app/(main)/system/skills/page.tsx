@@ -65,27 +65,37 @@ export default function SkillsPage() {
     api
       .agents()
       .then(setAgents)
-      .catch(() => {});
+      .catch(() => {
+        // best effort: the agent list is optional here
+      });
     api
       .mcpServers()
       .then(setMcpOptions)
-      .catch(() => {});
+      .catch(() => {
+        // best effort: MCP options are optional here
+      });
     api
       .missingSkills()
       .then(setMissing)
-      .catch(() => {});
+      .catch(() => {
+        // best effort: the missing-skills hint is optional
+      });
     api
       .skills()
       .then((ss) => {
         setSkills(ss);
-        ss.forEach((s) =>
-          api
+        ss.forEach((s) => {
+          void api
             .skillVisibility(s.name)
             .then((ids) => setVisibility((v) => ({ ...v, [s.name]: ids })))
-            .catch(() => {}),
-        );
+            .catch(() => {
+              // best effort: visibility stays unset for this skill
+            });
+        });
       })
-      .catch(() => {});
+      .catch(() => {
+        // best effort: keep the current skill list
+      });
   }, []);
 
   React.useEffect(() => {
@@ -117,7 +127,7 @@ export default function SkillsPage() {
   function onUploadPick(e: React.ChangeEvent<HTMLInputElement>) {
     const f = e.target.files?.[0];
     e.target.value = ""; // reset so picking the same file again re-fires
-    if (f) uploadZip(f);
+    if (f) void uploadZip(f);
   }
 
   React.useEffect(() => {

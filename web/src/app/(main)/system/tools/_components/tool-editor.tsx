@@ -103,8 +103,9 @@ export function ToolEditor({
             </Label>
             <div className="flex flex-wrap gap-3">
               {agents.map((ag) => (
-                <label key={ag.key} className="flex items-center gap-2 text-sm">
+                <label key={ag.key} htmlFor={`bind-${tool.key}-${ag.key}`} className="flex items-center gap-2 text-sm">
                   <Checkbox
+                    id={`bind-${tool.key}-${ag.key}`}
                     checked={bound.includes(ag.key)}
                     disabled={trafficGated}
                     onCheckedChange={() => toggleAgent(ag.key)}
