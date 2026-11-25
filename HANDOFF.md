@@ -80,18 +80,13 @@ only the two known environment failures (`TestConnectWithoutPasswordRealPG` on a
 also fails on main (`traffic/` is identical to main; card `c-1a74a4`). Not verified: a live
 GitHub/Jira delivery (needs a publicly reachable instance), the sheet in a browser.
 
-**2026-11-24 — RSI proposer/critic (`c-c89f5b`, in review)** on `ej/20261124-192202-fbe9e3`.
-`cmd/artex-rsi-propose` (core `rsi/propose`: `Build` critic + pruner, `Slots` budget, `WriteArm`,
-rule table `rules.go`) reads closed tasks' `/outcome` + `/lessons`, `/api/skill-gaps` and the active
-goals/planner/worker bodies, keeps a rule only when its signal holds on ≥2 tasks across ≥2
-companies/categories (and ≥25% of tasks), and appends a fixed `## Field guidance` paragraph to one role's
-body. Writes `round-N/<name>.json|.tmpl` arms (`proposed_from: task:<id>`, rationale) + `plan.json`, at
-most the round's remaining budget from `GET /api/rsi/status` (now also reports `max_open`). Stops unless
-the server reports the loop on; client can only GET and `POST /api/rsi/proposals` (no adopt). Marker list
-moved to `agent.CodeOwnedTailMarkers` (server uses it). Verified: `rsi/propose` + CLI fake-server tests
-(budget per round 0–4, immutable surfaces/markers/forged drafts refused, loop off reads nothing else, post
-only proposes), generated arms load through `arms.load_arm` + `rsi_submit.proposal_body`,
-`scripts/verify.sh`. Not checked: a real instance (`c-4bbf29`). Model-drafted critic: `c-0aaa24`.
+**2026-11-24 — RSI proposer (`c-c89f5b`, on main via #77) + model drafter (`c-0aaa24`, in review on
+`ej/20261124-203755-708a1e`).** `cmd/artex-rsi-propose`
+(core `rsi/propose`) drafts goals/planner/worker body edits from closed tasks when a rule's signal holds
+on ≥2 tasks across ≥2 scopes, inside the round budget; `--draft-model` (off by default) lets a model
+rewrite the body through the same checks; the drafter must not be the judge. `verify.sh` there fails only
+on `TestSOCKS5RemoteScope` (fix in review, `c-1a74a4`) and the web i18n check (`c-430ba2`). Detail:
+`docs/handoff/2026-11-24-e3-rsi-loops.md`. Not checked: a real instance (`c-4bbf29`).
 
 **2026-11-24 — LLM sampling pin (`c-d73308`, E8; on main via #69).** Migration 0028 adds nullable
 `llm_profiles.sampling_seed`/`sampling_temperature`; `agent/sampling.go` splices them into the wire body
@@ -163,49 +158,9 @@ worker-node finding binds the control capture through a signed node RPC (`POST /
 `server/node_rpc.go`, HMAC under `db.NodeRPCKey`); design in `docs/DISTRIBUTED.md` "Evidence on worker
 nodes", verification in Deltas. Gap `c-7ad4da` (capture switch read at start-up) is closed by c-8cfbfe.
 
-**2026-11-24 — E10 code-security lane + its UI and exports (`c-72dd9d`, `c-d059ae`; in review)** on
-`ej/20261124-170322-736db7`, which merges the unlanded E10 branch `ej/20261124-150533-1ba29e` and main
-(E2 backend + UI are on main as migration 0015). **Land this branch, not the E10 branch alone.**
-- E10: SARIF imports get a lane (`runtime`/`sast`/`sca`); a task import with `asset_ids` writes an
-  exploration fact yielding a finding node per new finding; `GET /api/report` shows a Source line and
-  per-lane counts. Migration `0024_code_security_lane.sql` (E10's renumber of E2 to 0023 is dropped).
-- c-d059ae: `?lane=runtime|sast|sca` in the shared findings filter (list, groups, tree, export;
-  runtime = worker findings + runtime-scanner imports); finding DTOs carry `source` (lane, tool, rule,
-  path:line, import id; no raw record); findings Markdown exports get the Source line and CSV gets
-  Lane/Source Tool/Source Rule/Source Location/Import ID; import rows carry `lane_counts`.
-- Web: lane badge + `path:line` on the findings table and detail, a lane dropdown (URL `?lane=`), an
-  anchor-asset picker on Scanner imports (enabled once a task is chosen; lists `GET /assets?task_id=`),
-  and Lanes + Fact node columns on Past imports.
-- Verified on Postgres 16: `TestFindingFilterByLane`, `TestCodeScanJoinsTaskGraphAndReport` (now also
-  lane filter, DTO source, CSV/MD exports, unknown anchor leaves no import row), `report` tests;
-  `scripts/verify.sh` (only the known macOS SOCKS5 test fails) and `--web-only` pass. Not checked in a
-  browser. Gaps: `c-7651e5` (stat cards ignore lane/import filters; fact node has no deep link).
-- Detail of E2 and E10 (formats, decisions, verification): `docs/handoff/2026-11-24-e2-e10-integrations.md`.
-
 **2026-11-24 — SSE 401 after console login (`c-13e86c`, fixed; pre-E5).** Streams are same-origin only
 (`web/src/lib/sse.ts`), dev gzip off, `openSSE` writes `: open`. Test `server/activity_stream_auth_pg_test.go`;
 browser-checked on the E5 stack.
-
-**2026-11-24 (c-73af97, E9 frontend/UX pass)**: findings triage, the live dashboard and file sizes.
-
-- **File sizes and types.** Every `web/src` TS/TSX file is now ≤600 lines; the largest was 4290. No `any` remains: tools-page casts and `Record<string, any>` became typed narrowing and `unknown`. Split files keep their old paths as barrels, so imports are unchanged:
-  - `lib/types.ts` → `lib/types/*`
-  - `lib/api.ts` → `lib/api/*`
-  - `lib/mock/*` → `lib/mock/data/*` and `lib/mock/handler/*`
-- **Findings triage.** The pure core is `web/src/lib/triage.ts` (tests: `npm run test:triage`, added to `verify.sh`). An open finding has a verdict bar: Confirm, False positive, Duplicate, Accept risk, Ignore, In progress, with keys c/f/d/a/i/p, j/k to move, Esc to close. After a verdict the next finding opens on its own. Stat tiles are one-click filters, and Pending starts the queue.
-- **Findings URL.** The list now reads URL params (`?status=pending&severity=…&task=…&view=…&triage=1`), so the dashboard deep-links straight into the triage queue.
-- **Measured** in Chromium against the mock backend (`NEXT_PUBLIC_MOCK=1`), same build, triaging 3 pending findings:
-  - old path (status filter dropdown, expand, status dropdown): 11 interactions
-  - new path (Pending tile, then one key each): 4 interactions
-  - both took pending from 15 to 12
-- **Dashboard.** Now `dashboard/_components/*`: KPI tiles link to their lists; running tasks, newest findings and activity are tables. It is still polling (no global push channel exists): a Live/Paused indicator, pause when hidden, refresh on focus.
-- **Assets.** Clear-selection was added to the existing bulk delete. The per-type lists were already tables and are now driven from data.
-- **Traffic.** Select-all is now indeterminate when partly selected, and the selection survives paging. New bulk actions: copy URLs, and delete targets (whole hosts, behind a confirm). The hook-versions list is now a table.
-- **Verified:** `tsc` clean, `test:i18n` and all web node tests pass, findings and dashboard checked in a browser on the mock backend.
-- **Not checked:** the other split pages in a browser (they were split verbatim), and a real backend.
-- **Merged with main (c-45c921 base):** main's api/types changes live in the split modules: `sseUrl` is gone from `lib/api` (use `lib/sse`), `import_id` in `findingFilterParams` (`lib/api/core.ts`), E2 types in `lib/types/integrations.ts`, the import filter and tracker push in the findings `_components/`.
-- **Merge risk:** fork `h-683872` (`c-92bb52`, role-gating controls on existing pages) edits pages this pass split (system/*, tasks, traffic, assets). Expect conflicts; re-apply its gating inside the extracted `_components/`.
-- **Follow-ups:** `c-45c921` (dashboard push channel), `c-4b7989` (per-exchange traffic bulk delete/export), `c-f729e8` (approvals triage, grouped-view page advance, biome errors; in review).
 
 **2026-11-24 (c-ca2bd0, E4 follow-up)** — An operator can choose a task's methodologies. Migration
 **0022** adds `tasks.methodologies TEXT[]` (empty `{}` = automatic, as before). The create request
@@ -353,7 +308,7 @@ Card ids in brackets:
   [`c-da9198`] scheduled sync plus a per-tracker lock (on `ej/20261124-135159-6d9961`, also carried by the
   c-c2bdc8 branch); [`c-c2bdc8`] signed webhooks (in review on `ej/20261124-191156-37e38c`); [`c-ea60a0`] move agent `scan_ingest` onto
   `scanimport`, normalize default ports, and settle two dedup edge cases.
-- **E3** [`c-d25ff9`] — gate built (in review). Follow-ups: hardening `c-0d277f`, UI `c-936308`, first live run `c-772190`, proposer/critic `c-c89f5b` (in review; follow-ups `c-4bbf29` live run, `c-0aaa24` model drafter).
+- **E3** [`c-d25ff9`] — gate built (in review). Follow-ups: hardening `c-0d277f`, UI `c-936308`, first live run `c-772190`, proposer/critic `c-c89f5b` (on main; follow-ups `c-4bbf29` live run, `c-0aaa24` model drafter in review).
 - **E4** [`c-c0bb07`] Methodology-driven coverage: landed 2026-11-24 (see Current state). Follow-ups:
   [`c-ca2bd0`] an operator-chosen methodology per task (landed, in review; gaps `c-aed5fd`); [`c-ed937d`] checklist completion in the report export (after E1).
 - **E5** [`c-669406`] Engagement governance. The backend is done on `ej/20261124-055929-bd2253`. Follow-ups:
