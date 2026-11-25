@@ -54,6 +54,29 @@ of blocking the rest. The cursor lives in memory; a restart starts a new pass.
 tracker per run; a tracker with links left in its pass continues on the next 30-second tick. The
 runner re-reads the setting every tick, so a change applies without a restart.
 
+**Push updates (webhooks).** `POST /api/hooks/trackers/{id}` lets GitHub or Jira report a ticket
+change at once instead of waiting for the next sync. It is the one tracker route outside the
+session check (`requireAuth` exempts `/api/hooks/trackers/`); the caller proves itself with an
+HMAC-SHA256 of the raw body under the tracker's `webhook_secret` (optional config key, at least 16
+characters; sealed, masked and scrubbed like the token). The check is constant-time and runs before
+the body is parsed (`ticketing.WebhookReceiver`).
+- **GitHub:** a repository webhook, content type JSON, *Issues* events, the secret in GitHub's
+  secret field. The signature is `X-Hub-Signature-256`. Deliveries for another repository are ignored.
+- **Jira Cloud:** an admin webhook (*Issue updated*) registered with a secret; Jira signs it as
+  `X-Hub-Signature: sha256=…`. Issues outside `project_key` are ignored. Jira Connect JWT and
+  secrets in the URL are not supported (a URL secret ends up in proxy and access logs).
+- **DefectDojo:** no webhooks; use sync.
+
+A delivery is only a hint: its payload names the ticket, then the ordinary sync of that one link
+reads the state from the tracker's API under the tracker lock. A forged state cannot be injected
+and a replay can at most cause one more read; repeated delivery ids are also dropped for 10 minutes.
+Replies: 200 `{"status":"ok","synced":n}`, `ignored` (unknown ticket, other event, tracker
+disabled), `duplicate`; 202 `deferred` when a push or sync of the tracker holds the lock (the
+running sync or the next one picks the change up, and a redelivery is accepted); 401 for an unknown
+tracker, no secret, or a missing or bad signature (all the same, so tracker ids are not revealed);
+413 over 1 MiB; 503 past 4 concurrent deliveries. A delivery that pulls a status (or fails) is
+written to the audit chain as `ticket.webhook`. The tracker sheet shows the URL to register.
+
 The dedup key is `ticketing.DedupKey` over the finding's class, name and asset ids, or over the
 import key for an imported finding.
 

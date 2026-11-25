@@ -27,6 +27,8 @@ const (
 	// AuditClientScopeDenied: a client_read user asked for a route or id outside its company binding.
 	AuditClientScopeDenied = "rbac.client_scope_denied"
 	AuditKindRowPrefix     = "row."
+	// AuditTicketWebhook: a signed tracker webhook changed (or failed to sync) a finding's ticket link.
+	AuditTicketWebhook = "ticket.webhook"
 )
 
 // AuditEntry is one entry of the chain.
