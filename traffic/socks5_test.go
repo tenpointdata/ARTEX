@@ -138,6 +138,24 @@ func socks5DialNoAuth(t *testing.T, proxyAddr, host string, port int) (net.Conn,
 
 func socks5DialUserPass(t *testing.T, proxyAddr, user, pass, host string, port int) (net.Conn, byte) {
 	t.Helper()
+	c, status := socks5UserPassAuth(t, proxyAddr, user, pass)
+	if status != 0x00 {
+		_ = c.Close()
+		t.Fatalf("auth reply status = 0x%02x, want 0x00", status)
+	}
+	if _, err := c.Write(socks5BuildRequest(socks5CmdConnect, host, port)); err != nil {
+		_ = c.Close()
+		t.Fatalf("write connect req: %v", err)
+	}
+	rep := socks5ReadReply(t, c)
+	_ = c.SetDeadline(time.Time{})
+	return c, rep
+}
+
+// socks5UserPassAuth greets offering no-auth and user/pass, sends the
+// credential, and returns the connection with the RFC 1929 status byte.
+func socks5UserPassAuth(t *testing.T, proxyAddr, user, pass string) (net.Conn, byte) {
+	t.Helper()
 	c, err := net.DialTimeout("tcp", proxyAddr, 3*time.Second)
 	if err != nil {
 		t.Fatalf("dial proxy %s: %v", proxyAddr, err)
@@ -169,17 +187,11 @@ func socks5DialUserPass(t *testing.T, proxyAddr, user, pass, host string, port i
 		_ = c.Close()
 		t.Fatalf("read user/pass reply: %v", err)
 	}
-	if aresp[0] != socks5UserPassVer || aresp[1] != 0x00 {
+	if aresp[0] != socks5UserPassVer {
 		_ = c.Close()
-		t.Fatalf("auth reply = %v, want [1 0]", aresp)
+		t.Fatalf("auth reply version = %d, want 1", aresp[0])
 	}
-	if _, err := c.Write(socks5BuildRequest(socks5CmdConnect, host, port)); err != nil {
-		_ = c.Close()
-		t.Fatalf("write connect req: %v", err)
-	}
-	rep := socks5ReadReply(t, c)
-	_ = c.SetDeadline(time.Time{})
-	return c, rep
+	return c, aresp[1]
 }
 
 func waitForRawStreams(t *testing.T, tr *Traffic, want int) []RawTCPStream {
@@ -310,10 +322,10 @@ func TestSOCKS5HandshakeSuccessAuthAndHalfCloseNoHTTPExchange(t *testing.T) {
 		t.Fatalf("paced reply = %q err=%v", resp2, err)
 	}
 
-	// 3. Username/password with arbitrary/empty credentials still accepted.
-	c3, rep := socks5DialUserPass(t, proxyAddr, "", "", targetHost, targetPort)
+	// 3. The pace marker with an empty password is still the open-mode marker.
+	c3, rep := socks5DialUserPass(t, proxyAddr, egress.PaceUser, "", targetHost, targetPort)
 	if rep != socks5RepSuccess {
-		t.Fatalf("empty user/pass connect rep = 0x%02x, want 0x00", rep)
+		t.Fatalf("pace marker empty-password connect rep = 0x%02x, want 0x00", rep)
 	}
 	_, _ = c3.Write([]byte("anon"))
 	_ = c3.(*net.TCPConn).CloseWrite()

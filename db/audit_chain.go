@@ -29,6 +29,10 @@ const (
 	AuditKindRowPrefix     = "row."
 	// AuditTicketWebhook: a signed tracker webhook changed (or failed to sync) a finding's ticket link.
 	AuditTicketWebhook = "ticket.webhook"
+	// AuditTrafficBulkDelete / AuditTrafficBulkExport: an operator deleted or
+	// exported a selection of recorded exchanges by id.
+	AuditTrafficBulkDelete = "traffic.bulk_delete"
+	AuditTrafficBulkExport = "traffic.bulk_export"
 )
 
 // AuditEntry is one entry of the chain.

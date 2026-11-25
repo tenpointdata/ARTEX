@@ -93,6 +93,19 @@ It reuses the same filter parser and SQL predicate builder as `GET /api/traffic`
 
 - `host`, `method`, `path`, `status`, `q`, `body`, `rewritten` (`all` | `rewritten` | `original` | `true` | `false`), `resp_min`, `resp_max`.
 
+### Selection export: `POST /api/traffic/bulk-export`
+
+Body `{"ids": ["<exchange id>", ...]}` (trimmed, blanks and duplicates dropped, at most 5,000). Exports
+exactly those exchanges through the same exporter, limits, ordering and `X-ARTEX-HAR-*` headers as the
+filter export; unknown ids are skipped (`X-ARTEX-HAR-Matched` counts the ids found). It is the Traffic
+page's **Export selected as HAR** bulk action. RBAC `operate`; each call appends a
+`traffic.bulk_export` entry (actor, ids, counts) to the audit chain.
+
+Its counterpart `POST /api/traffic/bulk-delete` takes the same body and deletes exactly those exchanges
+(index, bodies, full-text rows, stream messages, rewrite trace, blob refs, and a legacy row's own
+directory, in one transaction), returning `{"deleted": n}`. RBAC `operate`, audited as
+`traffic.bulk_delete`. `DELETE /api/traffic/hosts` remains the host-scoped delete.
+
 ### HAR 1.2 compliance & unknown placeholders
 
 - `log.version` is `"1.2"` and `log.creator` is `{"name": "ARTEX", "version": "<build-version>"}`.

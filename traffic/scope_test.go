@@ -159,7 +159,7 @@ func TestProxyKeepAliveHostChange(t *testing.T) {
 }
 
 // The SOCKS5 listener takes a run's scope token as the RFC 1929 password: the
-// dial runs on the scope; an unknown token is refused (0x02) without a dial.
+// dial runs on the scope; an ended token is refused (RFC 1929 0x01) without a dial.
 func TestSOCKS5ScopedCredential(t *testing.T) {
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -210,11 +210,11 @@ func TestSOCKS5ScopedCredential(t *testing.T) {
 	if got := spy.take(); len(got) != 2 || got[0].run != "task-3" || got[1].run != "task-3" {
 		t.Fatalf("scoped SOCKS5 dials %v, want two on task-3", got)
 	}
-	if c, rep := socks5DialUserPass(t, addr, egress.ScopeUser, ended, host, port); rep != socks5RepNotAllowed {
-		if c != nil {
-			_ = c.Close()
-		}
-		t.Fatalf("ended scope: rep 0x%02x, want 0x02", rep)
+	// An ended scope's token is refused at authentication, not downgraded.
+	c, status := socks5UserPassAuth(t, addr, egress.ScopeUser, ended)
+	_ = c.Close()
+	if status != socks5UserPassFail {
+		t.Fatalf("ended scope: auth status 0x%02x, want 0x01", status)
 	}
 	if got := spy.take(); len(got) != 0 {
 		t.Fatalf("an ended scope dialled %v", got)

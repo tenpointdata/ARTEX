@@ -13,6 +13,7 @@ export function routeSystem({ m, path, seg, q, b }: RouteCtx): unknown {
   // ── traffic / audit / settings ──
   if (path === "/audit") return D.audit;
   if (path === "/traffic" && m === "DELETE") return { deleted: 0 };
+  if (path === "/traffic/bulk-delete" && m === "POST") return { deleted: (b.ids as unknown[])?.length ?? 0 };
   if (path === "/traffic/hosts" && m === "DELETE") return { deleted: (b.hosts as unknown[])?.length ?? 0 };
   if (path === "/traffic/hosts") return { hosts: D.trafficHosts };
   if (path === "/traffic") return D.traffic;
