@@ -7,7 +7,9 @@ import { ChevronDownIcon, ChevronRightIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { useTriageKeys } from "@/hooks/use-triage-keys";
 import { t } from "@/i18n";
+import { APPROVAL_VERDICTS, type ApprovalDecision, type TriageNav, triageTarget } from "@/lib/triage";
 import type { InterceptApprovalRow } from "@/lib/types";
 
 import { ApprovalDetail } from "./detail";
@@ -44,6 +46,13 @@ export function serverColumnCount() {
 
 export type Selection = { selected: Set<number>; toggle: (id: number) => void; toggleAll: () => void };
 
+/**
+ * Keyboard triage of the pending queue (lib/triage): A allows and D denies the open request, then the
+ * next one opens; J/K move between requests and Esc closes. `decide` resolves to whether the decision
+ * landed, so a failed decision leaves the request open.
+ */
+export type ApprovalTriage = { decide: (id: number, decision: ApprovalDecision) => Promise<boolean> };
+
 // Server limit on ids per batch-decide call (maxBatchDecide in server/intercept.go).
 export const batchDecideMax = 100;
 
@@ -54,6 +63,7 @@ export function ApprovalTable({
   revision,
   label,
   selection,
+  triage,
 }: {
   rows: InterceptApprovalRow[];
   busy: boolean;
@@ -61,8 +71,11 @@ export function ApprovalTable({
   revision: number;
   label: string;
   selection?: Selection;
+  triage?: ApprovalTriage;
 }) {
   const [expanded, setExpanded] = React.useState<Set<number>>(() => new Set());
+  // focus = the open request the triage keys act on: the one opened last.
+  const [focus, setFocus] = React.useState<number | null>(null);
   const columns =
     React.useSyncExternalStore(subscribeColumns, visibleColumnCount, serverColumnCount) + (selection ? 1 : 0);
   const selectedCount = selection ? rows.filter((row) => selection.selected.has(row.id)).length : 0;
@@ -70,13 +83,46 @@ export function ApprovalTable({
   if (selectedCount > 0 && selectedCount === rows.length) allChecked = true;
   const prefix = React.useId();
   function toggle(id: number) {
+    const opening = !expanded.has(id);
     setExpanded((prev) => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id);
       else next.add(id);
       return next;
     });
+    if (opening) setFocus(id);
+    else if (focus === id) setFocus(null);
   }
+  // moveFocus closes the focused request and opens `to` (or only closes, with null).
+  function moveFocus(to: number | null) {
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (focus !== null) next.delete(focus);
+      if (to !== null) next.add(to);
+      return next;
+    });
+    setFocus(to);
+  }
+  const keys = rows.map((row) => String(row.id));
+  const focusKey = focus !== null && expanded.has(focus) ? String(focus) : null;
+  const targetOf = (nav: "next" | "prev") => {
+    const key = triageTarget(keys, focusKey, nav);
+    return key === null ? null : Number(key);
+  };
+  const onNav = (nav: TriageNav) => {
+    if (nav === "close") moveFocus(null);
+    else {
+      const to = targetOf(nav);
+      if (to !== null) moveFocus(to);
+    }
+  };
+  const onVerdict = async (decision: ApprovalDecision) => {
+    const row = rows.find((r) => String(r.id) === focusKey);
+    if (!triage || busy || row?.status !== "pending") return;
+    const then = targetOf("next");
+    if (await triage.decide(row.id, decision)) moveFocus(then);
+  };
+  useTriageKeys(Boolean(triage) && rows.length > 0, APPROVAL_VERDICTS, (d) => void onVerdict(d), onNav);
   return (
     <Table className="table-fixed" aria-label={label}>
       <TableHeader>
@@ -183,7 +229,13 @@ export function ApprovalTable({
                 <TableRow className="hover:bg-transparent has-aria-expanded:bg-transparent">
                   <TableCell colSpan={columns} className="whitespace-normal p-0">
                     <section id={panelID} aria-label={t("Approval details #{id}", { id: row.id })}>
-                      <ApprovalDetail row={row} busy={busy} decide={decide} revision={revision} />
+                      <ApprovalDetail
+                        row={row}
+                        busy={busy}
+                        decide={decide}
+                        revision={revision}
+                        shortcuts={Boolean(triage) && focusKey === String(row.id)}
+                      />
                     </section>
                   </TableCell>
                 </TableRow>

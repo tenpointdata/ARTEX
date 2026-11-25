@@ -26,12 +26,12 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { t } from "@/i18n";
 import { api } from "@/lib/api";
 import { setVisibleInterval } from "@/lib/polling";
+import type { ApprovalDecision } from "@/lib/triage";
 import type { InterceptApprovalFilter, InterceptApprovalRow, InterceptPending } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 import { ApprovalDetail } from "./approval-records/detail";
-import type { Decide } from "./approval-records/shared";
-import { ApprovalTable, batchDecideMax, type Selection } from "./approval-records/table";
+import { ApprovalTable, type ApprovalTriage, batchDecideMax, type Selection } from "./approval-records/table";
 
 export { ApprovalDetail };
 export function ApprovalRecords({ taskId }: { taskId?: string }) {
@@ -130,8 +130,10 @@ export function ApprovalRecords({ taskId }: { taskId?: string }) {
     setLoading(true);
   };
 
-  const decide: Decide = async (id, decision) => {
-    if (decisionLock.current) return;
+  // decide sends one human decision (the Allow/Deny buttons and the A/D triage keys) and resolves to
+  // whether it landed; a failed decision leaves the request pending.
+  const decide = async (id: number, decision: ApprovalDecision): Promise<boolean> => {
+    if (decisionLock.current) return false;
     decisionLock.current = true;
     setDeciding(true);
     try {
@@ -150,15 +152,18 @@ export function ApprovalRecords({ taskId }: { taskId?: string }) {
       toast.success(decision === "allowed" ? t("Execution allowed") : t("Execution denied"));
       // Re-fetch counts and rows: a decided item may no longer match the filter.
       await latestLoad.current(true);
+      return true;
     } catch (e) {
       toast.error((e as Error).message);
       await latestLoad.current(true);
+      return false;
     } finally {
       decisionLock.current = false;
       setDeciding(false);
     }
   };
 
+  const triage: ApprovalTriage = { decide };
   const historyById = new Map(rows.map((row) => [row.id, row]));
   const pending: InterceptApprovalRow[] = pendingRows
     .filter((row) => !taskId || row.task_id === taskId)
@@ -372,6 +377,9 @@ export function ApprovalRecords({ taskId }: { taskId?: string }) {
             <ShieldAlertIcon className="size-4" />
             {t("Pending ({count})", { count: pending.length })}
             <span className="text-muted-foreground text-xs">{t("expand to allow or deny")}</span>
+            <span className="ml-auto hidden text-muted-foreground text-xs sm:inline">
+              {t("Keys: A allow, D deny, J/K next/previous, Esc close")}
+            </span>
           </div>
           <ApprovalTable
             rows={pending}
@@ -380,6 +388,7 @@ export function ApprovalRecords({ taskId }: { taskId?: string }) {
             revision={revision}
             label={t("Pending approvals")}
             selection={selection}
+            triage={triage}
           />
           <div className="flex flex-wrap items-center justify-between gap-2 border-t px-4 py-3 text-sm">
             <span className="text-muted-foreground">{t("{count} selected", { count: selectedRows.length })}</span>

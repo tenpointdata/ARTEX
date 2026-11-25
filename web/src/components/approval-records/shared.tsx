@@ -8,8 +8,10 @@ import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import { Kbd } from "@/components/ui/kbd";
 import { intlLocale, t } from "@/i18n";
 import { api } from "@/lib/api";
+import { APPROVAL_VERDICTS, type ApprovalDecision } from "@/lib/triage";
 import type { InterceptApprovalRow, InterceptAudit, InterceptReviewInput, InterceptRisk } from "@/lib/types";
 export function fmtTime(value?: string) {
   if (!value) return "—";
@@ -325,19 +327,46 @@ export function ModelReviewContext({ input }: { input: InterceptReviewInput }) {
   );
 }
 
-export type Decide = (id: number, decision: "allowed" | "denied") => Promise<void>;
+// Callers fire and forget; an implementation may resolve to a result (ApprovalRecords: whether it landed).
+export type Decide = (id: number, decision: ApprovalDecision) => Promise<unknown>;
 
-export function DecisionActions({ row, busy, decide }: { row: InterceptApprovalRow; busy: boolean; decide: Decide }) {
+// DecisionActions are a pending request's Allow and Deny buttons; with `shortcuts` they show the
+// triage key each one answers to (APPROVAL_VERDICTS).
+export function DecisionActions({
+  row,
+  busy,
+  decide,
+  shortcuts = false,
+}: {
+  row: InterceptApprovalRow;
+  busy: boolean;
+  decide: Decide;
+  shortcuts?: boolean;
+}) {
   if (row.status !== "pending") return null;
+  const keyOf = (decision: ApprovalDecision) => APPROVAL_VERDICTS.find((v) => v.status === decision)?.key ?? "";
   return (
     <div className="flex flex-wrap gap-2">
-      <Button size="sm" disabled={busy} onClick={() => void decide(row.id, "allowed")}>
+      <Button
+        size="sm"
+        disabled={busy}
+        aria-keyshortcuts={shortcuts ? keyOf("allowed") : undefined}
+        onClick={() => void decide(row.id, "allowed")}
+      >
         <CheckIcon data-icon="inline-start" />
         {t("Allow")}
+        {shortcuts ? <Kbd>{keyOf("allowed").toUpperCase()}</Kbd> : null}
       </Button>
-      <Button size="sm" variant="destructive" disabled={busy} onClick={() => void decide(row.id, "denied")}>
+      <Button
+        size="sm"
+        variant="destructive"
+        disabled={busy}
+        aria-keyshortcuts={shortcuts ? keyOf("denied") : undefined}
+        onClick={() => void decide(row.id, "denied")}
+      >
         <XIcon data-icon="inline-start" />
         {t("Deny")}
+        {shortcuts ? <Kbd>{keyOf("denied").toUpperCase()}</Kbd> : null}
       </Button>
     </div>
   );

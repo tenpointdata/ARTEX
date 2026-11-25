@@ -1005,6 +1005,7 @@
   "Expand approval details": "展开审批详情",
   "Expand details": "展开详情",
   "expand to allow or deny": "展开后允许或拒绝",
+  "Keys: A allow, D deny, J/K next/previous, Esc close": "按键：A 允许，D 拒绝，J/K 下一个/上一个，Esc 关闭",
   "Expanded the tool call for approval #{id}": "已展开审批 #{id} 的工具调用",
   "Experimental features": "实验功能",
   "Explain how this set of requests/responses supports the vulnerability conclusion.": "说明这组请求/响应如何支持漏洞结论。",

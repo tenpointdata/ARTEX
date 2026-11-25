@@ -37,6 +37,7 @@ export function ApprovalDetail({
   revision,
   readOnly = false,
   defaultExpanded = false,
+  shortcuts = false,
   onResolved,
 }: {
   row: InterceptApprovalRow;
@@ -45,6 +46,8 @@ export function ApprovalDetail({
   revision: number;
   readOnly?: boolean;
   defaultExpanded?: boolean;
+  /** Show the triage keys on the decision buttons (the request is the one the keys act on). */
+  shortcuts?: boolean;
   onResolved?: (status: "allowed" | "denied" | "timeout") => void;
 }) {
   const [detail, setDetail] = React.useState<InterceptDetail | null>(null);
@@ -171,7 +174,7 @@ export function ApprovalDetail({
               </>
             ) : null}
           </dl>
-          {!readOnly ? <DecisionActions row={current} busy={busy} decide={decide} /> : null}
+          {!readOnly ? <DecisionActions row={current} busy={busy} decide={decide} shortcuts={shortcuts} /> : null}
           {!readOnly && current.status === "pending" && row.tool_name === "Bash" ? (
             <AlwaysAllowAction id={row.id} prefix={detail?.always_allow_prefix} />
           ) : null}

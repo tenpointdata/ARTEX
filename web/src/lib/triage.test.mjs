@@ -1,4 +1,13 @@
-import { isTypingTarget, matchesStatusFilter, TRIAGE_VERDICTS, triageCommandForKey, triageTarget } from "./triage.ts";
+import {
+  APPROVAL_VERDICTS,
+  firstNewKey,
+  isTypingTarget,
+  matchesStatusFilter,
+  TRIAGE_VERDICTS,
+  triageCommandForKey,
+  triageNextPage,
+  triageTarget,
+} from "./triage.ts";
 import assert from "node:assert/strict";
 import test from "node:test";
 
@@ -62,4 +71,40 @@ test("triaging findings takes fewer interactions than before", () => {
   for (const n of [1, 10, 50]) assert.ok(interactions(AFTER, n) < interactions(BEFORE, n));
   assert.equal(interactions(BEFORE, 10), 32);
   assert.equal(interactions(AFTER, 10), 11);
+});
+
+test("approval verdicts: A allows, D denies, navigation keys stay the same", () => {
+  const keys = APPROVAL_VERDICTS.map((v) => v.key);
+  assert.equal(new Set(keys).size, keys.length);
+  assert.deepEqual(triageCommandForKey("a", APPROVAL_VERDICTS), { kind: "verdict", status: "allowed" });
+  assert.deepEqual(triageCommandForKey("D", APPROVAL_VERDICTS), { kind: "verdict", status: "denied" });
+  assert.deepEqual(triageCommandForKey("j", APPROVAL_VERDICTS), { kind: "nav", nav: "next" });
+  for (const k of ["j", "k", "ArrowDown", "ArrowUp", "Escape"]) {
+    assert.equal(triageCommandForKey(k, APPROVAL_VERDICTS)?.kind, "nav");
+  }
+  // Finding verdict keys mean nothing in the approval queue.
+  assert.equal(triageCommandForKey("c", APPROVAL_VERDICTS), null);
+  assert.equal(triageCommandForKey("f", APPROVAL_VERDICTS), null);
+});
+
+test("triageNextPage: reload the same page when the row dropped, else the next page, null at the end", () => {
+  // 25 items, 10 per page, on page 1.
+  assert.equal(triageNextPage(1, 10, 25, false), 2);
+  assert.equal(triageNextPage(1, 10, 25, true), 1);
+  // Last page.
+  assert.equal(triageNextPage(3, 10, 25, false), null);
+  assert.equal(triageNextPage(3, 10, 25, true), 3); // 24 left; page 3 still holds items 21..24
+  // The dropped row was the only one on the last page.
+  assert.equal(triageNextPage(3, 10, 21, true), null);
+  // Exactly full pages.
+  assert.equal(triageNextPage(2, 10, 20, false), null);
+  assert.equal(triageNextPage(1, 10, 10, true), 1);
+  assert.equal(triageNextPage(1, 10, 1, true), null);
+});
+
+test("firstNewKey skips items already on the page", () => {
+  assert.equal(firstNewKey(["a", "b", "c"], ["a", "b", "d", "e"]), "d");
+  assert.equal(firstNewKey(["a", "b"], ["c", "d"]), "c");
+  assert.equal(firstNewKey(["a", "b"], ["a", "b"]), null);
+  assert.equal(firstNewKey([], []), null);
 });

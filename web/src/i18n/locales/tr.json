@@ -1005,6 +1005,7 @@
   "Expand approval details": "Onay ayrıntılarını genişlet",
   "Expand details": "Ayrıntıları genişlet",
   "expand to allow or deny": "izin vermek veya reddetmek için genişletin",
+  "Keys: A allow, D deny, J/K next/previous, Esc close": "Tuşlar: A izin ver, D reddet, J/K sonraki/önceki, Esc kapat",
   "Expanded the tool call for approval #{id}": "#{id} onayının araç çağrısı genişletildi",
   "Experimental features": "Deneysel özellikler",
   "Explain how this set of requests/responses supports the vulnerability conclusion.": "Bu istek/yanıt kümesinin zafiyet sonucunu nasıl desteklediğini açıklayın.",
