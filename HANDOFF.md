@@ -450,7 +450,7 @@ Card ids in brackets:
   harness post with operator tokens; adopt stays `operate` + owner password. Not a blanket `/api/rsi` mutate rule,
   which would lock the proposer out. Reverses the earlier "reject and rollback need only a session" line in `RSI.md`.
   The RSI page (c-936308, unmerged branch `ej/20261124-192153-48c72c`) must gate the Rollback button on
-  `useCan("admin")` and keep reject on `useCan("operate")`.
+  `useCan("admin")` and keep reject on `useCan("operate")` (follow-up c-a842a0).
 
 - **2026-11-24 c-f729e8 (approvals triage):** approval keys are A/D (separate verdict set from findings' C/F/D/A/I/P;
   the meaning of a key depends on the queue). They act only on an open pending request, never on a selection or with
