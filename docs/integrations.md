@@ -27,7 +27,9 @@ API:
 - `GET|POST /api/integrations/trackers`, `PATCH|DELETE /api/integrations/trackers/{id}`.
 - `POST /api/integrations/trackers/{id}/push` `{"finding_ids":[…]}` — create or update tickets.
   Idempotent: a stored link is reused, otherwise the tracker is searched by dedup key.
-- `POST /api/integrations/trackers/{id}/sync` — reconcile every ticket of the tracker.
+- `POST /api/integrations/trackers/{id}/sync[?limit=N]` — reconcile the tracker's tickets, at most
+  `limit` per call (default 100, max 500), oldest sync first. The reply is
+  `{"results":[…],"more":bool}`; `more` means the pass has links left and the next call continues it.
 - `GET /api/exploration/findings/{id}/integrations` — a finding's tickets and import provenance.
 
 Status mapping: pending/in_progress/confirmed → open; resolved/fixed → closed as fixed;
@@ -35,6 +37,22 @@ false_positive, risk_accepted, duplicate → closed with that resolution; ignore
 won't fix. Reading back, an open ticket reopens a closed finding as `confirmed`. A sync compares
 each side with the state both agreed on last time (`finding_tickets`); when both changed, the
 tracker wins. A ticket status changes the finding's disposition only, never its verification.
+
+**One run per tracker at a time.** Push, sync, and a destination change of one tracker run under
+the PostgreSQL advisory lock `ticket_sync:<id>` (`db.WithTryAdvisoryLock`), so two requests, a
+request and the background run, or two ARTEX instances on one database never reconcile the same
+links at once. A busy lock answers **409** (the background run skips that round); it is never
+waited on.
+
+**Cursor.** Sync walks a tracker's links in passes (`db.TicketSyncCursor`): a pass visits every
+link synced before it started exactly once, oldest first. A link synced during the pass waits for
+the next one, and a link that keeps failing (its `synced_at` does not move) is passed over instead
+of blocking the rest. The cursor lives in memory; a restart starts a new pass.
+
+**Background sync** (off by default). The setting `ticket_sync_interval_min` (`PUT /api/settings`,
+0–1440, 0 = off) makes the server sync every enabled tracker that often, one capped batch per
+tracker per run; a tracker with links left in its pass continues on the next 30-second tick. The
+runner re-reads the setting every tick, so a change applies without a restart.
 
 The dedup key is `ticketing.DedupKey` over the finding's class, name and asset ids, or over the
 import key for an imported finding.

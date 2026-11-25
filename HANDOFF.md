@@ -1,6 +1,6 @@
 # HANDOFF.md — ARTEX
 
-**Last updated:** 2026-11-24 18:55 MST, by claude-code: c-d73308 (E8 follow-up) landed on main via #69 and verified on a real PostgreSQL; an HTTP-level test was added. Earlier hand-offs are under Deltas and in `ej handoff log`.
+**Last updated:** 2026-11-24 19:45 MST, by claude-code: c-2e4034 replays the c-da9198 ticket-sync backend (per-tracker lock, capped cursor, background runner) onto main as one commit. Earlier hand-offs are under Deltas and in `ej handoff log`.
 
 > Single entry point for whoever picks this up next (any agent or human), with no access to the
 > originating conversation. Read this first, then the sections of the code it points at.
@@ -58,6 +58,18 @@ See `docs/ARCHITECTURE.md` for the code-level map. Summary:
 - `docs/` — `ARCHITECTURE.md`, `OPS.md`, traffic docs, `RSI.md` (self-improvement governance contract).
 
 ## Current state
+
+**2026-11-24 — E2 ticket sync lock/cursor/background (`c-da9198`, landed by `c-2e4034`).** Only commit
+`0f8cd35f` was replayed onto main (not its stale copy of the E2 branch). Push, sync and a tracker
+destination change run under `pg_try_advisory_lock('ticket_sync:<id>')` (`db.WithTryAdvisoryLock`);
+busy = **409**. `POST …/trackers/{id}/sync[?limit=N]` handles ≤100 links by default (max 500) and replies
+`{results, more}`, walking passes over `synced_at` (`db.TicketSyncCursor`, in memory). Setting
+`ticket_sync_interval_min` (0 = off) drives `ticketSyncRunner` (`server/ticket_sync_run.go`), started
+**on the control node only** (inside server.go's `!worker` block, beside the Scheduler and Notifier). No
+migration. Verified on Postgres 18: the four c-da9198 tests plus new
+`TestTicketSyncDefaultCapLoopsToCompletion` (151 links → 2 calls, each link once). The UI half
+(`c-224317`: interval field, Sync loops while `more`, 409 = "already running") is **not on main yet**; it
+is on `ej/20261124-191201-980dda`. Until it lands, the UI's Sync does one capped call.
 
 **2026-11-24 — LLM sampling pin (`c-d73308`, E8; on main via #69).** Migration 0028 adds nullable
 `llm_profiles.sampling_seed`/`sampling_temperature`; `agent/sampling.go` splices them into the wire body
@@ -308,7 +320,7 @@ Card ids in brackets:
 - **E1** [`c-8f9cca`] Client-grade reporting & deliverables (scoring, remediation, framework mappings, branded export).
 - **E2** [`c-6def05`] Backend, UI (`c-597eb6`) and UI follow-ups (`c-2d91eb`) are done, in review on `ej/20261124-150516-d78c96` (see Current state). Follow-ups:
   [`c-119206`] role-gate the E2 UI controls; [`c-1198a2`] run `scripts/e2e/integrations.sh` in CI (after c-cc25b6);
-  [`c-da9198`] scheduled sync plus a per-tracker lock; [`c-ea60a0`] move agent `scan_ingest` onto
+  [`c-da9198`] scheduled sync plus a per-tracker lock (backend on main via `c-2e4034`; UI `c-224317` pending, webhooks `c-c2bdc8`); [`c-ea60a0`] move agent `scan_ingest` onto
   `scanimport`, normalize default ports, and settle two dedup edge cases.
 - **E3** [`c-d25ff9`] — gate built (in review). Follow-ups: hardening `c-0d277f`, UI `c-936308`, first live run `c-772190`, proposer/critic `c-c89f5b`.
 - **E4** [`c-c0bb07`] Methodology-driven coverage: landed 2026-11-24 (see Current state). Follow-ups:
@@ -353,6 +365,7 @@ Card ids in brackets:
   [`c-5c4009`] tracker RBAC (E2×E5).
 
 ## Known issues and gotchas
+- Ticket push/sync of one tracker refuses with 409 while another holds `ticket_sync:<id>`; callers retry rather than wait. The sync cursor is per process (in memory), so a restart or a second instance starts a new pass (an extra visit per link, never a skipped one).
 - **PG-backed Go tests on a Mac with a throwaway cluster:** `ARTEX_PG_DSN` must be a `postgres://` URL
   (a key=value DSN makes every PG test skip silently), and Homebrew `postgres` aborts at start
   ("postmaster became multithreaded") unless `LC_ALL` is set. Recipe: `export LC_ALL=en_US.UTF-8;
