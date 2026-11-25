@@ -84,40 +84,24 @@ worker-node finding binds the control capture through a signed node RPC (`POST /
 `server/node_rpc.go`, HMAC under `db.NodeRPCKey`); design in `docs/DISTRIBUTED.md` "Evidence on worker
 nodes", verification in Deltas. Gap: `c-7ad4da` (capture switch read at start-up).
 
-**2026-11-24 — E10 code-security lane (card `c-72dd9d`, in review)** on `ej/20261124-150533-1ba29e`,
-which merges the E2 backend branch `ej/20261124-055326-6bcfa9` (so E2 lands with it). SAST and SCA
-results come in as SARIF through the E2 import API and now share the runtime record:
-- `scanimport` gives each finding a lane (`runtime`/`sast`/`sca`, from the tool, an advisory-style
-  rule id, or a manifest or lockfile; `scanimport/lane.go`).
-- `POST /api/integrations/imports?format=sarif&task_id=N&asset_ids=…` writes one exploration fact
-  for the scan run that `yields` a finding node per new finding (`findings.node_id` set), anchored to
-  the runtime assets the code serves, which must already be in the task's scope or asset set
-  (`db/code_findings.go`, `server/scan_import_lane.go`). The fact itself anchors nothing (coverage).
-  Task imports dedup per task.
-- `GET /api/report` lists code and runtime findings together, with a Source line
-  (lane, tool, rule, `path:line`, import id) and a per-lane summary (`report/source.go`).
-- `findings_total` skips imported claims and `finding_list` marks them; `prove_goal` already refused them.
-- Migration `0024_code_security_lane.sql` adds lane/location/line and fact/anchor columns. E2's
-  `0015_integrations.sql` landed on main, so the renumber to 0023 was dropped when c-d059ae merged
-  this branch; 0024 follows main's `0023_distributed_workers.sql`.
-- An independent review found four anchor and dedup problems (client cross-visibility, inflated
-  coverage, a second task missing known results, task deletion owning foreign assets); all are
-  fixed in `d483374b`.
-- E2 × E5 fix: `GET /api/exploration/findings/{id}/integrations` now needs `read`, not client_read.
-- Verified against Postgres 16: `TestCodeScanJoinsTaskGraphAndReport` (semgrep + trivy/osv SARIF
-  plus a runtime finding in one task report), the `db`, `agent`, `report` and `scanimport` suites, and
-  `scripts/verify.sh`. The `./server` suite passes except `TestManagerSOCKS5UDP…` (no `127.0.0.2` alias on macOS).
-- Docs: `docs/integrations.md` § Code-security lane. Follow-ups: `c-d059ae` (UI and exports),
-  `c-c978e3` (SAST-guided runtime verification), `c-5c4009` (tracker RBAC).
-
-**2026-11-24** — **E2 integrations** (card `c-6def05`, branch `ej/20261124-055326-6bcfa9`, landing with
-E10's branch; UI `c-597eb6` on `ej/20261124-132955-7aef3f`). See `docs/integrations.md`.
-- Findings out: package `ticketing` (GitHub Issues, Jira, DefectDojo) over `notify.Do` (SSRF guard,
-  redaction); tracker configs sealed at rest and masked; `/api/integrations/trackers` (CRUD, `push`,
-  `sync`); status round-trips, tracker wins on conflict, verification never touched.
-- Scanner data in: package `scanimport` (Nmap XML, Nuclei JSONL, ZAP JSON, Burp XML, SARIF);
-  `POST /api/integrations/imports` writes assets with provenance and unverified POE-0 findings; a
-  re-import never edits or promotes. Migration `0015_integrations.sql` (on main).
+**2026-11-24 — E10 code-security lane + its UI and exports (`c-72dd9d`, `c-d059ae`; in review)** on
+`ej/20261124-170322-736db7`, which merges the unlanded E10 branch `ej/20261124-150533-1ba29e` and main
+(E2 backend + UI are on main as migration 0015). **Land this branch, not the E10 branch alone.**
+- E10: SARIF imports get a lane (`runtime`/`sast`/`sca`); a task import with `asset_ids` writes an
+  exploration fact yielding a finding node per new finding; `GET /api/report` shows a Source line and
+  per-lane counts. Migration `0024_code_security_lane.sql` (E10's renumber of E2 to 0023 is dropped).
+- c-d059ae: `?lane=runtime|sast|sca` in the shared findings filter (list, groups, tree, export;
+  runtime = worker findings + runtime-scanner imports); finding DTOs carry `source` (lane, tool, rule,
+  path:line, import id; no raw record); findings Markdown exports get the Source line and CSV gets
+  Lane/Source Tool/Source Rule/Source Location/Import ID; import rows carry `lane_counts`.
+- Web: lane badge + `path:line` on the findings table and detail, a lane dropdown (URL `?lane=`), an
+  anchor-asset picker on Scanner imports (enabled once a task is chosen; lists `GET /assets?task_id=`),
+  and Lanes + Fact node columns on Past imports.
+- Verified on Postgres 16: `TestFindingFilterByLane`, `TestCodeScanJoinsTaskGraphAndReport` (now also
+  lane filter, DTO source, CSV/MD exports, unknown anchor leaves no import row), `report` tests;
+  `scripts/verify.sh` (only the known macOS SOCKS5 test fails) and `--web-only` pass. Not checked in a
+  browser. Gaps: `c-7651e5` (stat cards ignore lane/import filters; fact node has no deep link).
+- Detail of E2 and E10 (formats, decisions, verification): `docs/handoff/2026-11-24-e2-e10-integrations.md`.
 
 **2026-11-24 — SSE 401 after console login (`c-13e86c`, fixed; pre-E5).** Streams are same-origin only
 (`web/src/lib/sse.ts`), dev gzip off, `openSSE` writes `: open`. Test `server/activity_stream_auth_pg_test.go`;
@@ -148,30 +132,6 @@ companies lands on Reports, sees only Reports + Findings and a switcher with jus
 switches between them and reads each one's findings and report; all 51 `/api` responses were 200.
 
 **2026-11-24 — E5 web UI (`c-869050`, in review).** Detail moved to `docs/handoff/2026-11-24-e5-web-ui.md`.
-
-**2026-11-24** — **E2 integrations** (backend `c-6def05`, UI `c-597eb6`, follow-ups `c-2d91eb`, all in review)
-are on branch `ej/20261124-150516-d78c96`. It merges the UI branch `ej/20261124-132955-7aef3f`, which carries
-the backend `ej/20261124-055326-6bcfa9`, so landing it lands all of E2. See `docs/integrations.md`.
-- **Findings out:** package `ticketing` (GitHub Issues, Jira, DefectDojo) goes through `notify.Do` (the SSRF
-  guard and redaction). Tracker configs are sealed and masked, and a destination change needs the credentials again.
-  `/api/integrations/trackers` has CRUD, `push` and `sync`. Status round-trips, and the tracker wins a conflict.
-- **Scanner data in:** package `scanimport` reads Nmap, Nuclei, ZAP, Burp and SARIF. `POST /api/integrations/imports`
-  writes assets with provenance and unverified POE-0 findings (`finding_import_sources`), and never edits on re-import.
-  `GET /api/integrations/imports?limit=&offset=` returns `{imports, total}`.
-- **UI:** System → Integrations (the trackers table and a masked-credential sheet) and Scanner imports (format
-  detection, Past imports with a pager). Each import's New findings count links to
-  `/function/findings?import_id=N`. `import_id` is in the shared findings filter (`db.FindingFilter.ImportID`),
-  so it applies to the list, groups, asset tree and export, and the page shows a chip that clears it.
-  The findings bulk bar and the detail page have Push to tracker; the detail has a Tickets card.
-- **RBAC (with E5):** `GET /api/exploration/findings/{id}/integrations` needs `read`, not `client_read`.
-  Tracker create/edit/delete need `admin`, the same as notification channels. Push, sync and import need `operate`.
-  The E2 pages do not yet gate their controls by role (`c-119206`).
-- **Browser e2e:** `scripts/e2e/integrations.sh` sets up a throwaway Postgres, the backend, a Next production
-  build and Playwright, then runs `integrations-e2e.js` against `fake-github.js`. It passed 24 checks
-  locally on 2026-11-24. It is not a CI job yet (`c-1198a2`, after c-cc25b6).
-- Migration `0015_integrations.sql` is unreleased, and its checksum is enforced, so do not edit it. Fix forward.
-- Local `./server` failures that are environment, not code: `TestConnectWithoutPasswordRealPG` (trust-auth Postgres)
-  and the SOCKS5 test that needs a `127.0.0.2` alias.
 
 **2026-11-24 (c-d25ff9, E3)** — The `RSI.md` Loop C benchmark gate and Loop B lesson graduation are built,
 flag off (`ARTEX_RSI_LOOP`, default off, read per request). Pure core `rsi/` (search-space allowlist:
@@ -293,8 +253,9 @@ body, through the versioned prompt API, and the starting bodies are restored aft
 
 8. *(unclaimed)* — **E2×E5 tracker RBAC** (S), card `c-5c4009`. Done = tracker create/update/delete
    need admin (like notify channels), push/sync stay operator; RBAC tests pass.
-9. *(unclaimed)* — **E10 lane in UI and exports** (M), card `c-d059ae` (after the E2 UI branch lands).
-   Done = anchor picker on Scanner imports, lane badge/filter on findings, lane in both exports.
+9. *(unclaimed)* — **Findings stat cards honour lane/import filters; fact-node deep link** (S), card
+   `c-7651e5`. Done = stat cards match the filtered list under `lane=`/`import_id=` (db test); the
+   Past imports fact node opens the task graph on that node.
 
 - *(unclaimed)* — **RSI gate hardening** (M), card `c-0d277f`: server-side per-task arm ledger, suite
   pre-registration, adopted-lesson retire sync. Done = Postgres tests for each.
@@ -395,7 +356,8 @@ Card ids in brackets:
 - **E8 follow-ups** [`c-f1518c`] first live run, [`c-75c593`] bench
   image from a clean clone, [`c-d73308`] optional provider sampling seed per LLM profile.
 - **E10** [`c-72dd9d`] Code-security lane: built 2026-11-24, in review (see Current state). Follow-ups:
-  [`c-d059ae`] lane in UI and exports; [`c-c978e3`] SAST-guided runtime verification;
+  [`c-d059ae`] lane in UI and exports (built, in review on `ej/20261124-170322-736db7`);
+  [`c-7651e5`] stat cards + fact-node link; [`c-c978e3`] SAST-guided runtime verification;
   [`c-5c4009`] tracker RBAC (E2×E5).
 
 ## Known issues and gotchas
