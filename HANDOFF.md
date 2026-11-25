@@ -59,16 +59,19 @@ See `docs/ARCHITECTURE.md` for the code-level map. Summary:
 
 ## Current state
 
-**2026-11-24 — Role probe (`c-80fe4e`, in review).** `scripts/e2e/role-probe.sh` runs on the
-`integrations.sh` harness. It signs in as reviewer, operator and client_read, clicks every enabled control
-on every page under `web/src/app/(main)` (detail pages get seeded ids), and opens a WebSocket exchange
-recorded through the real proxy in the traffic sheet's Stream tab. Writes are faked in the browser. It
-fails on any /api 4xx, and on any request whose permission (parsed from `server/rbac_policy.go` by
-`scripts/e2e/rbac-policy.js`) the role lacks.
-- **main fails.** c-92bb52 is not merged yet.
-- **On the c-92bb52 branch:** operator passes. Reviewer has 2 reads left (task Overview by-model, `/system/logs`
-  opened by URL). client_read gets 403s from the dashboard's requests on sign-in and on every non-client page
-  opened by URL. Both are now card `c-bd9b7a`.
+**2026-11-24 — Role route guard + c-92bb52 gates (`c-bd9b7a`, in review on `ej/20261124-191154-865292`).**
+`scripts/e2e/role-probe.sh` now **passes for reviewer, operator and client_read** (no /api >= 400, no
+request needing a missing permission). The probe itself (`c-80fe4e`) is on this branch too.
+- `RouteGuard` (`web/src/app/(main)/_components/route-guard.tsx`, pure resolver `web/src/lib/route-access.ts`
+  + `route-access.test.mjs`) takes a path's permission from the sidebar's `need` (detail pages inherit their
+  parent; uncovered paths need read) and sends a role lacking it to `landingPath` without mounting the page.
+- c-92bb52's gating (`ej/20261124-144553-d5978e`) could not be git-merged: its one commit both gated and split
+  files, conflicting with main's E9 split in ~40 files. Its intent was **re-applied onto main's files** here, so
+  this branch supersedes it: **do not land `ej/20261124-144553-d5978e`.** Not ported: its `errorText(e)` swaps.
+- Beyond the branch: task Overview `TokensCard` (`/api/llm/records/by-model`) needs operate; integrations page
+  (tracker create/edit/enable/delete admin, sync operate) and tracker reads on findings pages skipped for client_read.
+- Run the probe with spare ports when another harness is up: `ARTEX_E2E_API_PORT=38787 ARTEX_E2E_UI_PORT=35173
+  ARTEX_E2E_PG_PORT=46432 ARTEX_E2E_PROXY_PORT=38788 scripts/e2e/role-probe.sh`.
 - Findings are in `docs/handoff/2026-11-24-role-probe-findings.md`.
 - `integrations.sh` now runs the backend from its work dir (it used to write `jwt.key`/`secret.key` into the
   caller's cwd) and takes `ARTEX_E2E_PROXY_PORT`.
@@ -181,7 +184,7 @@ browser-checked on the E5 stack.
 - **Verified:** `tsc` clean, `test:i18n` and all web node tests pass, findings and dashboard checked in a browser on the mock backend.
 - **Not checked:** the other split pages in a browser (they were split verbatim), and a real backend.
 - **Merged with main (c-45c921 base):** main's api/types changes live in the split modules: `sseUrl` is gone from `lib/api` (use `lib/sse`), `import_id` in `findingFilterParams` (`lib/api/core.ts`), E2 types in `lib/types/integrations.ts`, the import filter and tracker push in the findings `_components/`.
-- **Merge risk:** fork `h-683872` (`c-92bb52`, role-gating controls on existing pages) edits pages this pass split (system/*, tasks, traffic, assets). Expect conflicts; re-apply its gating inside the extracted `_components/`.
+- **c-92bb52's gating** was re-applied onto these split files by `c-bd9b7a`.
 - **Follow-ups:** `c-45c921` (dashboard push channel), `c-4b7989` (per-exchange traffic bulk delete/export), `c-f729e8` (approvals triage, grouped-view page advance, biome errors; in review).
 
 **2026-11-24 (c-ca2bd0, E4 follow-up)** — An operator can choose a task's methodologies. Migration
@@ -230,11 +233,9 @@ the full Docker image, the E8 suite) are in `docs/handoff/2026-11-24-current-sta
    "Done when" is on each card.
 3. *(unclaimed)* — **SEC: per-task uid follow-ups** (S each): `c-12df03` (single-uid start-up fails on a
    socket; MCP uid not egress-filtered), `c-e70e5c` (release ended tasks at start-up; per-key lock). The "Done when" is on each card.
-4. *(unclaimed)* — **E5 UI: land c-92bb52 (`ej/20261124-144553-d5978e`), then the route guard** (M), card
-   `c-bd9b7a`. Done = `scripts/e2e/role-probe.sh` passes for reviewer, operator and client_read. (Before:
-   **E5 UI: hide role-lacking actions on existing pages**, card `c-92bb52`.) Done = as
-   reviewer and operator, no visible control answers 403. Then `c-601ec6` (chain newest-first paging, S).
-   (`c-7c4715`, the client_read console, is built and in review on `ej/20261124-144554-67afc9`.)
+4. *(unclaimed)* — **E5: chain newest-first paging** (S), card `c-601ec6`. (`c-bd9b7a` role guard + c-92bb52
+   gates are in review on `ej/20261124-191154-865292`; `c-7c4715`, the client_read console, is in review on
+   `ej/20261124-144554-67afc9`.)
 5. *(unclaimed)* — **SEC: gorilla/websocket bump, GO-2026-6278** (XS), card `c-c10f2c`; needs network.
    Done = govulncheck clean.
 6. *(unclaimed)* — **SEC: upstream-gate residuals** (M), card `c-5a6f96`: task-scoped rules on proxy
