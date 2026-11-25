@@ -63,7 +63,7 @@ See `docs/ARCHITECTURE.md` for the code-level map. Summary:
 the unlanded E9 branch (`ej/20261124-145257-79147f`), so landing it lands E9 too. `GET /api/events/stream`
 (`server/events_stream.go`) pushes `{kind: finding|approval|task|resync, op, id, task}` frames, with ids only.
 Triggers on `findings`, `intercept_pending` and `tasks` (status, paused, queued, deleted_at) call
-`NOTIFY artex_changes` (`schema.sql` + migration **0023**). One pooled connection runs `LISTEN`
+`NOTIFY artex_changes` (`schema.sql` + migration **0027**). One pooled connection runs `LISTEN`
 (`db.ListenChanges`). `changeHub` (`server/events_hub.go`) starts on the first subscriber and fans the
 events out; an overrun or a listener reconnect becomes `resync`. client_read is bound by `bindCompany`
 and gets only its company's findings and tasks, never approvals or deletions. The web side is

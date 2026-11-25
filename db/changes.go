@@ -10,7 +10,7 @@ import (
 	"github.com/jackc/pgx/v5/stdlib"
 )
 
-// Change notifications. Triggers in schema.sql (migration 0023) NOTIFY
+// Change notifications. Triggers in schema.sql (migration 0027) NOTIFY
 // ChangeChannel once per changed row of findings, intercept_pending and tasks
 // (status-like columns only), at commit. A Change is a hint that something the
 // console shows has moved: listeners re-read through the normal, access-checked
