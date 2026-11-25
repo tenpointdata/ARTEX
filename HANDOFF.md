@@ -358,6 +358,8 @@ Card ids in brackets:
 
 ## Known issues and gotchas
 
+- **bbot `portscan` (masscan) cannot run as the executor**: it needs raw sockets and fails setup with
+  `No such file or directory: 'sudo'`. This is by design (see Decisions, c-18c9c6); use `nmap -sT`.
 - **`next dev` writes `web/AGENTS.md`** (Next 16 agent rules) on start. Delete it before committing; it
   is not this repo's file.
 - **SSE in dev goes through the Next rewrite** (`/api/*` → `AUTOPENTEST_API`, default :8787). Keep
@@ -408,6 +410,18 @@ Card ids in brackets:
   `ARTEX_SECRET_KEY`) loses stored secrets.
 
 ## Decisions
+
+- **2026-11-24** — c-18c9c6: bbot's `portscan` (masscan) stays **unsupported** for the executor
+  (option a); masscan does not get `cap_net_raw` (option b rejected). Two reasons. (1) It would not
+  work without weakening an invariant: the executor runs under no_new_privs (Docker's
+  `no-new-privileges` and ARTEX's own `setNoNewPrivs` in `server/execpriv_nnp_linux.go`), which
+  ignores file capabilities on execve. Making it work means lifting NNP or granting ambient caps to
+  the executor. (2) It would bypass the egress governor: masscan transmits through libpcap/AF_PACKET
+  with its own TCP/IP stack, and packet-socket frames skip netfilter's OUTPUT chain, so
+  `egress.sh`'s `-m owner --uid-owner` rules never see them. Cloud metadata, the host gateway and the
+  API port would be reachable, and raw sockets also allow forged source addresses. The bbot-recon
+  skill now says to use `nmap -sT` instead. Revisit only with a server-side (root) port-scan service
+  that applies the scope gate and egress denies itself, never by giving the executor raw sockets.
 
 - **2026-11-24** — c-548e8b: the worker pins the control API's CA (`ARTEX_CONTROL_CA`) rather than
   trusting system roots, so a publicly valid certificate for the same name cannot impersonate the
