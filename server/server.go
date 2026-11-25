@@ -77,13 +77,17 @@ type Server struct {
 	authHashKey    string
 	authVersionKey string
 
+	ticketCursors  ticketCursors      // per-tracker ticket sync cursor (ticket_sync_run.go)
+	ticketWebhooks ticketWebhookGuard // in-flight cap + delivery replay window (ticket_webhook.go)
+
 	// Test-only seams for pgListModels SSRF checks. All remain zero/nil in
 	// production (strict public-only default; only exact host:port entries in
 	// ARTEX_LLM_PRIVATE_ENDPOINTS may resolve to private addresses).
 	allowLoopbackModels bool
-	modelLookupIP       func(ctx context.Context, host string) ([]netip.Addr, error)
-	modelDialContext    func(ctx context.Context, network, addr string) (net.Conn, error)
-	modelRootCAs        *x509.CertPool
+
+	modelLookupIP    func(ctx context.Context, host string) ([]netip.Addr, error)
+	modelDialContext func(ctx context.Context, network, addr string) (net.Conn, error)
+	modelRootCAs     *x509.CertPool
 
 	loginLimit     *loginLimiter  // per-IP attempt limit on POST /api/auth/login
 	pwdLimit       *loginLimiter  // attempt limit on POST /api/auth/change-password (IP + session token)
@@ -306,6 +310,7 @@ func New(ctx context.Context, m *Manager, skillDir string, dataDir string, keyDi
 			// Vulnerability IM push delivery engine. Sits beside the Scheduler but independent: push latency demands (3s)
 			// differ from the triggers' business cadence, and neither's failures drag the other down — a stuck push must not affect agent triggers.
 			go newNotifier(s).Run(s.ctx)
+			go newTicketSyncRunner(s).Run(s.ctx) // background ticket sync; off unless ticket_sync_interval_min > 0
 		}
 		logSink.SetDB(ctx, m.pg) // restore last 100 log rows and enable async persistence
 	}
@@ -1005,6 +1010,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("DELETE /api/integrations/trackers/{id}", s.deleteTracker)
 	mux.HandleFunc("POST /api/integrations/trackers/{id}/push", s.pushTickets)
 	mux.HandleFunc("POST /api/integrations/trackers/{id}/sync", s.syncTickets)
+	mux.HandleFunc("POST "+ticketWebhookPrefix+"{id}", s.ticketWebhook) // public: HMAC-authenticated (requireAuth exempts it)
 	mux.HandleFunc("GET /api/integrations/imports", s.listScanImports)
 	mux.HandleFunc("POST /api/integrations/imports", s.importScan)
 	mux.HandleFunc("GET /api/exploration/findings/{id}/integrations", s.findingIntegrations)
@@ -4029,6 +4035,8 @@ func (s *Server) settingsPayload() map[string]any {
 		"notify_enabled":             s.m.pg.GetBool(settingNotifyEnabled, true),
 		"notify_public_base_url":     notifyPublicBaseURL(s.m.pg),
 		"notify_digest_interval_min": notifyDigestIntervalMin(s.m.pg),
+		// Background ticket sync period in minutes; 0 = off (sync only on request).
+		"ticket_sync_interval_min": ticketSyncInterval(s.m.pg),
 		// Render limits of IM messages; 0 = no truncation.
 		"notify_summary_max_runes": limits.SummaryRunes,
 		"notify_assets_max_shown":  limits.AssetsShown,
@@ -4108,6 +4116,8 @@ func (s *Server) putSettings(w http.ResponseWriter, r *http.Request) {
 		NotifyEnabled    *bool   `json:"notify_enabled"`
 		NotifyBaseURL    *string `json:"notify_public_base_url"`
 		NotifyDigestMins *int    `json:"notify_digest_interval_min"`
+		// Background ticket sync period (minutes, 0 = off); the runner re-reads it every tick.
+		TicketSyncMins *int `json:"ticket_sync_interval_min"`
 		// Render limits of IM messages: summary characters (0-4000) and asset names listed (0-50); 0 = no truncation.
 		NotifySummaryMaxRunes *int `json:"notify_summary_max_runes"`
 		NotifyAssetsMaxShown  *int `json:"notify_assets_max_shown"`
@@ -4181,6 +4191,16 @@ func (s *Server) putSettings(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if err := s.m.pg.SetSetting(settingNotifyDigestMinutes, strconv.Itoa(*req.NotifyDigestMins)); err != nil {
+			writeErr(w, 500, err.Error())
+			return
+		}
+	}
+	if req.TicketSyncMins != nil {
+		if *req.TicketSyncMins < 0 || *req.TicketSyncMins > ticketSyncIntervalMax {
+			writeErr(w, 400, fmt.Sprintf("ticket sync interval must be between 0 (off) and %d minutes", ticketSyncIntervalMax))
+			return
+		}
+		if err := s.m.pg.SetSetting(settingTicketSyncInterval, strconv.Itoa(*req.TicketSyncMins)); err != nil {
 			writeErr(w, 500, err.Error())
 			return
 		}

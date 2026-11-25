@@ -81,7 +81,7 @@ func TestIsBlockedDialIP(t *testing.T) {
 		"169.254.1.1", "fe80::1",
 		"0.0.0.0", "::",
 		"224.0.0.1", "ff02::1",
-		"::ffff:127.0.0.1", // the IPv4-mapped form must be converted back before the check, otherwise it is a bypass
+		"::ffff:127.0.0.1",                                  // the IPv4-mapped form must be converted back before the check, otherwise it is a bypass
 		"10.0.0.5", "172.16.3.4", "192.168.1.10", "fd12::1", // private
 		"100.64.0.1", "198.18.0.1", // CGNAT / shared
 		"100.100.100.200", "fd00:ec2::254", "168.63.129.16", // metadata
