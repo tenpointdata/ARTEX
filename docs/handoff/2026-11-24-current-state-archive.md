@@ -2,6 +2,89 @@
 
 Older, mostly landed status blocks, moved out to keep HANDOFF.md under its size limit. HANDOFF.md's Current state holds what is in flight; `ej handoff log` has the full history.
 
+(Moved 2026-11-25:)
+
+**2026-11-24 — Real-cluster install kit (`c-620510`, E7; blocked on a human).** On `ej/20261124-173856-b39c78`. `deploy/lab/values-multihost.yaml` (renders/lints), runbook
+`deploy/lab/README.md` "Real cluster", and `scripts/k8s-install-checks.sh NS [RELEASE]`, which prints the check
+table. Not run on any cluster.
+
+**2026-11-24 — E7 kind install (`c-8cfbfe`) + cluster egress deny re-resolved (`c-d4946f`); in review on
+`ej/20261124-172839-c17308`, which merges the c-8cfbfe branch.** `egress.sh` re-resolves the deny/allow names
+every 10 s and swaps the chain atomically; verified live on kind. Detail: `docs/handoff/2026-11-24-e7-kind-install-egress.md`.
+
+**2026-11-24 — Stale `worker_nodes` rows pruned (`c-597b06`, E7; in review).** Under Kubernetes the
+node id is the pod name, so each rollout left dead rows. `db.NodeRetention` (20 × NodeTTL = 15 min):
+`ListNodes` hides older rows and every node heartbeat runs `PruneNodes` (`db/worker_nodes.go`,
+`server/node.go`). Test `db/worker_nodes_test.go` passes on Postgres 18; documented in
+`docs/DISTRIBUTED.md` ("Node registry"). Not re-run on a kind cluster.
+**2026-11-24 — dashboard push channel (`c-45c921`, in review)** on `ej/20261124-170157-3aeba5`, which merges
+the unlanded E9 branch (`ej/20261124-145257-79147f`), so landing it lands E9 too. `GET /api/events/stream`
+(`server/events_stream.go`) pushes `{kind: finding|approval|task|resync, op, id, task}` frames, with ids only.
+Triggers on `findings`, `intercept_pending` and `tasks` (status, paused, queued, deleted_at) call
+`NOTIFY artex_changes` (`schema.sql` + migration **0027**). One pooled connection runs `LISTEN`
+(`db.ListenChanges`). `changeHub` (`server/events_hub.go`) starts on the first subscriber and fans the
+events out; an overrun or a listener reconnect becomes `resync`. client_read is bound by `bindCompany`
+and gets only its company's findings and tasks, never approvals or deletions. The web side is
+`web/src/hooks/use-live-events.ts` + `web/src/lib/live-events.ts`; `use-dashboard-data.ts` reloads the
+pushed panels 250ms after a frame, polls them every 60s while the stream is open and every 5s when it is
+not. Verified on Postgres 16: `TestEventsStreamPushesScopedChangesPG` (finding change reached the client
+session in 15ms; B's finding, approvals and other companies withheld), the hub unit tests, RBAC/binder
+coverage tests and `scripts/verify.sh`. Not checked: the dashboard in a real browser.
+
+**2026-11-24 — TLS between worker nodes and the control node by default (`c-548e8b`, E7; in review).**
+Worker nodes reach the control API (node RPC) over **TLS with the CA pinned**: `ARTEX_CONTROL_CA`
+(`server/node_tls.go`) makes the worker accept only `https://` and trust only that CA, never the system
+roots; without it an `http://` API still works with a start-up WARNING. The control listener rereads a
+renewed `ARTEX_TLS_CERT`/`KEY` within 30 s (`cmd/artex/certreload.go`). Helm: `controlTLS.enabled=true`
+by default, `source` = `generate` (chart-made CA via `lookup`) | `secret` | `certManager`; HTTPS probes,
+`appProtocol: https`, nginx backend-protocol annotation; worker pods mount only the CA key. Compose
+overlay: one-shot `artex-tls-init` runs the new `artex node-tls` subcommand (CA + pair, CA key
+discarded) into separate volumes. Docs: `docs/DISTRIBUTED.md` "Transport", chart README.
+**This branch merges the unmerged c-3b781a branch (`ej/20261124-155351-f5bfb9`), which carries E7, so
+landing it lands E7 + c-3b781a.** Verified: `TestWorkerNodeFindingBindsControlCapture` now runs its
+control API over pinned TLS (Postgres 16, passes); `TestControlRPCPinnedCA` (wrong CA and system roots
+refused), cert reload and `node-tls` tests; `helm lint` and `helm template` in all three sources plus
+disabled and the error cases; a chart-generated cert verified by the pinned Go client;
+`docker compose config` of the overlay; `scripts/verify.sh` passed. Full `go test ./server` with
+Postgres: only the known macOS SOCKS5 test and the order-dependent
+`TestFindingWorkflowAutoHintToPlannerAndSetting` (passes alone) failed. **Not checked:** a live
+`helm install` (c-8cfbfe) or a live compose run with a built image. **Still clear text:** the
+worker→control recording-proxy hop (plain-HTTP targets and the scope token), carded `c-677166`.
+
+**2026-11-24 — Worker-node findings carry their captured proof (`c-3b781a`, E7; in review).** A
+worker-node finding binds the control capture through a signed node RPC (`POST /api/node/rpc/{op}`,
+`server/node_rpc.go`, HMAC under `db.NodeRPCKey`); design in `docs/DISTRIBUTED.md` "Evidence on worker
+nodes", verification in Deltas. Gap `c-7ad4da` (capture switch read at start-up) is closed by c-8cfbfe.
+
+**2026-11-24 — SSE 401 after console login (`c-13e86c`, fixed; pre-E5).** Streams are same-origin only
+(`web/src/lib/sse.ts`), dev gzip off, `openSSE` writes `: open`. Test `server/activity_stream_auth_pg_test.go`;
+browser-checked on the E5 stack.
+
+**2026-11-24 (c-ca2bd0, E4 follow-up)** — An operator can choose a task's methodologies. Migration
+**0022** adds `tasks.methodologies TEXT[]` (empty `{}` = automatic, as before). The create request
+(`methodologies`, ids matched loosely, stored canonical, unknown id = 400) and the create form
+(`methodology-picker.tsx`, a table fed by the new `GET /api/methodologies`) set it; `db.TaskMethodologies`
+uses it when set, so the coverage API and the planner block show only the chosen checklists. It is
+carried through archive/restore and echoed on the task DTO. This branch merges the unmerged E4 branch
+(`ej/20261124-123222-d3dc8a`). Verified against Postgres 16: `TestTaskMethodologiesOperatorChoice`,
+the archive round-trip, `TestCreateTaskMethodologies` (server), the full `go test -p 1 ./...` (only the
+known macOS 127.0.0.2 SOCKS5 test fails), web `tsc` and i18n. Not checked: the form in a browser.
+Gaps carded as `c-aed5fd`: no "none" choice, and the choice is fixed at creation.
+
+**2026-11-24 — client_read console (`c-7c4715`, in review)** on `ej/20261124-144554-67afc9`. New
+`GET /api/me/companies` and `GET /api/me/tasks?company=` (`server/client_console.go`, binders
+`bindBound`/`bindCompany`), both `client_read`. Web: `ClientCompanyGate` (`web/src/app/(main)/_components/`)
+loads the bound companies and holds pages until one is active; the sidebar switcher in bound mode offers
+only those; new **Reports** page `/function/reports` (client landing; hidden for `read` holders via the
+nav item's new `hideWith`) lists the company's engagements in a table with the selected one's outcome
+and Markdown report. Verified: `TestClientReadBoundToCompanyPG` (now also a client bound to two
+companies reading each one's tasks, findings, report, stats and outcome with no refusal), the RBAC route
+tests, web `tsc`, governance unit tests, i18n and `scripts/verify.sh` (only the two known env failures).
+Browser-checked in headless Chromium against a real backend + Postgres 17: a client bound to two
+companies lands on Reports, sees only Reports + Findings and a switcher with just its two companies,
+switches between them and reads each one's findings and report; all 51 `/api` responses were 200.
+
+
 **2026-11-24 — E5 engagement governance (card `c-669406`)** is on `main` (#31); see `docs/GOVERNANCE.md`.
 Roles `admin`/`operator`/`reviewer`/`client_read` over the JWT (`artex_users`, `/api/users`, policy in
 `server/rbac_policy.go`, enforced in `requireAuth`; `ARTEX` is the break-glass admin). The per-task
