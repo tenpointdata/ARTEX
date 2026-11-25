@@ -11,11 +11,11 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
+import { t } from "@/i18n";
 import { ApiError, api } from "@/lib/api";
 import { parseRawRequest, splitReplayHeaders } from "@/lib/replay";
 import type { TrafficExchange, TrafficReplayHeader, TrafficReplayResult } from "@/lib/types";
 import { cn } from "@/lib/utils";
-import { t } from "@/i18n";
 
 type HeaderRow = TrafficReplayHeader & { key: number };
 

@@ -12,8 +12,8 @@ import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { t } from "@/i18n";
 import { api } from "@/lib/api";
-import type { TaskCredential } from "@/lib/types";
 import { setVisibleInterval } from "@/lib/polling";
+import type { TaskCredential } from "@/lib/types";
 
 // Credentials tab (#3): the task's test accounts — user-declared (program alias
 // accounts) and agent-recorded (accounts the workers registered themselves).
@@ -80,7 +80,9 @@ export function CredentialsTab({ taskId }: { taskId: string }) {
       <CardHeader>
         <CardTitle>{t("Test accounts")}</CardTitle>
         <CardDescription>
-          {t("Test accounts for this task. Entries with an empty password mean the agent registers that account and records it. Agent-recorded accounts appear here automatically.")}
+          {t(
+            "Test accounts for this task. Entries with an empty password mean the agent registers that account and records it. Agent-recorded accounts appear here automatically.",
+          )}
         </CardDescription>
       </CardHeader>
       <CardContent className="flex flex-col gap-4">
@@ -92,7 +94,9 @@ export function CredentialsTab({ taskId }: { taskId: string }) {
             <EmptyHeader>
               <EmptyTitle>{t("No test accounts")}</EmptyTitle>
               <EmptyDescription>
-                {t("Add one below, or declare them when creating the task — the agent reuses them for authenticated testing.")}
+                {t(
+                  "Add one below, or declare them when creating the task — the agent reuses them for authenticated testing.",
+                )}
               </EmptyDescription>
             </EmptyHeader>
           </Empty>
@@ -109,7 +113,13 @@ export function CredentialsTab({ taskId }: { taskId: string }) {
                   <code className="max-w-40 truncate rounded bg-muted px-2 py-0.5 text-sm">
                     {c.password === "" ? t("— agent generates —") : t("stored, hidden")}
                   </code>
-                  <Button size="icon" variant="ghost" className="size-7" aria-label={t("Delete credential")} onClick={() => remove(c.id)}>
+                  <Button
+                    size="icon"
+                    variant="ghost"
+                    className="size-7"
+                    aria-label={t("Delete credential")}
+                    onClick={() => remove(c.id)}
+                  >
                     <TrashIcon />
                   </Button>
                 </div>
@@ -119,7 +129,11 @@ export function CredentialsTab({ taskId }: { taskId: string }) {
           </div>
         )}
         <div className="grid gap-2 sm:grid-cols-[1fr_1fr_1fr_auto]">
-          <Input placeholder={t("domain (e.g. target.example.com)")} value={domain} onChange={(e) => setDomain(e.target.value)} />
+          <Input
+            placeholder={t("domain (e.g. target.example.com)")}
+            value={domain}
+            onChange={(e) => setDomain(e.target.value)}
+          />
           <Input placeholder={t("email or username")} value={username} onChange={(e) => setUsername(e.target.value)} />
           <Input
             placeholder={t("password (empty = agent generates)")}
@@ -130,7 +144,12 @@ export function CredentialsTab({ taskId }: { taskId: string }) {
           <Button variant="outline" disabled={adding || !domain.trim() || !username.trim()} onClick={add}>
             <PlusIcon /> {t("Add")}
           </Button>
-          <Input className="sm:col-span-4" placeholder={t("note (optional, e.g. program alias account)")} value={note} onChange={(e) => setNote(e.target.value)} />
+          <Input
+            className="sm:col-span-4"
+            placeholder={t("note (optional, e.g. program alias account)")}
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+          />
         </div>
       </CardContent>
     </Card>

@@ -24,7 +24,9 @@ export function FindingLineageView({ findingId }: { findingId: string }) {
         setNodes(g.nodes ?? []);
         setEdges(g.edges ?? []);
       })
-      .catch(() => {})
+      .catch(() => {
+        // The lineage panel is optional context: on failure it renders as empty.
+      })
       .finally(() => {
         if (alive) setLoaded(true);
       });
