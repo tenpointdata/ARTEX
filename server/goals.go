@@ -39,13 +39,38 @@ func (s *Server) launchTask(t *Task, seedText string, seedFirstIntent bool) {
 	}
 }
 
+// goalDecompositionRoundSummary marks the round-0 decomposition in the activity
+// log. needsGoalBootstrap relies on it being the only round marker written
+// before the first real planning round.
+const goalDecompositionRoundSummary = "round 0 goal decomposition"
+
+// needsGoalBootstrap reports whether t never finished its round-0 goal
+// decomposition: it has no goal nodes and no persisted planner round besides
+// round 0. That state is left behind when the process stops while
+// startTaskEngine is in flight. A task that is goalless by the human's choice
+// (all goals met, or every goal deleted from the overview) has completed at
+// least one real planning round, because a finished decomposition always
+// writes a goal and Run plans against it, so it is not re-decomposed. On a
+// lookup error it answers false: running the existing graph is the safe default.
+func needsGoalBootstrap(t *Task) bool {
+	if t == nil || t.Store == nil {
+		return false
+	}
+	goals, err := t.Store.ListByKind(db.KindGoal, 1)
+	if err != nil || len(goals) > 0 {
+		return false
+	}
+	planned, err := t.Store.HasRoundOtherThan(goalDecompositionRoundSummary)
+	return err == nil && !planned
+}
+
 func (s *Server) startTaskEngine(t *Task) {
 	ctx := s.engine.execContextFor(s.ctx, t.ID)
 	if ctx.Err() != nil || s.engine.IsDeleting(t.ID) {
 		return
 	}
 	s.engine.emitActivity(t, db.Activity{Worker: "planner", Kind: "round",
-		Summary: "round 0 goal decomposition"})
+		Summary: goalDecompositionRoundSummary})
 	goals := s.createGoals(ctx, t, func(r db.Activity) {
 		s.engine.emitActivity(t, r)
 	})

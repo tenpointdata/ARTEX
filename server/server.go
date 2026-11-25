@@ -390,11 +390,37 @@ func (s *Server) restoreTaskRuntimes() {
 	// occupants without live loops, which could permanently block the persistent
 	// FIFO. Paused loops remain idle; queued tasks are admitted below as slots allow.
 	for _, t := range m.List() {
-		lifecycle := t.lifecycleSnapshot()
-		if !lifecycle.Queued && !isTerminalStatus(lifecycle.Status) {
-			s.engine.Run(s.ctx, t)
+		if mode, ok := restoreRunMode(t); ok {
+			s.startRestoredTask(t, mode)
 		}
 	}
+}
+
+// restoreRunMode picks how startup restores an admitted task: ok=false for
+// queued or terminal tasks (FIFO admission or nothing), "bootstrap" for a task
+// whose round-0 goal decomposition was lost with the previous process (the
+// in-memory barrier does not survive a restart, and a bare Run would let the
+// goalless branch settle it done with no goals), "resume" otherwise. A paused
+// task stays on "resume": its loops idle, and resumeAdmissionMode re-derives
+// bootstrap when the human resumes it.
+func restoreRunMode(t *Task) (mode string, ok bool) {
+	lifecycle := t.lifecycleSnapshot()
+	if lifecycle.Queued || isTerminalStatus(lifecycle.Status) {
+		return "", false
+	}
+	if !lifecycle.Paused && needsGoalBootstrap(t) {
+		return "bootstrap", true
+	}
+	return "resume", true
+}
+
+func (s *Server) startRestoredTask(t *Task, mode string) {
+	if mode == "bootstrap" {
+		log.Printf("[engine] task %s restarted before its goal decomposition finished; decomposing again", t.ID)
+		s.startAdmittedTask(t, "bootstrap")
+		return
+	}
+	s.engine.Run(s.ctx, t)
 }
 
 // Wait blocks until the task goroutines snapshotted now, and the archive
