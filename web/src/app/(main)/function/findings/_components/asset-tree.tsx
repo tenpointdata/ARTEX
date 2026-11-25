@@ -18,9 +18,9 @@ import {
 
 import { Button } from "@/components/ui/button";
 import { InputGroup, InputGroupAddon, InputGroupInput } from "@/components/ui/input-group";
+import { t } from "@/i18n";
 import type { FindingAssetKind, FindingAssetNode } from "@/lib/types";
 import { cn } from "@/lib/utils";
-import { t } from "@/i18n";
 
 // Icons reuse the assets page's type mapping, so the same asset kind looks the same in both places.
 const KIND_ICON: Record<FindingAssetKind, LucideIcon> = {
