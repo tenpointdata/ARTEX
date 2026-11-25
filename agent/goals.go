@@ -126,7 +126,7 @@ func DecomposeGoalsWithProvider(ctx context.Context, prov llm.Provider, dataDir,
 	// worker="goals" tags the goal nodes' provenance; ts/taskID let set_goals link
 	// each goal under the task root. This is the catalog's real set_goals tool, so a
 	// web-edited description/schema on it applies here too.
-	tsx := &ToolSet{as: as, ts: ts, taskID: taskID, worker: "goals"}
+	tsx := &ToolSet{as: as, ts: ts, taskID: taskID, worker: goalsDecomposerOrigin}
 	// Description rides in the user message (same channel as the goal), NOT via the
 	// {{.EngagementDescription}} template var — else a prompt that references the var
 	// would inject the description twice. System prompt stays pure static instructions.
@@ -145,6 +145,12 @@ func DecomposeGoalsWithProvider(ctx context.Context, prov llm.Provider, dataDir,
 	userMsg := "Task goal:\n" + goalText
 	if d := strings.TrimSpace(desc); d != "" {
 		userMsg += "\n\nTask description (background information, may include target scope / flag count / engagement notes; for reference only — do not invent anything it does not mention):\n" + d
+	}
+	if prior := recordedGoalTexts(ts); len(prior) > 0 {
+		// A restart cut an earlier decomposition short after these were written
+		// (set_goals persists each goal as it is produced). Ask only for what is
+		// missing; set_goals also drops exact repeats from this decomposer.
+		userMsg += "\n\nGoals already recorded for this task by an earlier decomposition that was interrupted (keep them; do not resubmit them; submit only the goals still missing, or none if the set is already complete):\n- " + strings.Join(prior, "\n- ")
 	}
 	// Use captureRun so every LLM step is emitted as an activity record (visible in
 	// the plan tab under the round-0 marker). Falls back gracefully when emit is nil.
@@ -170,17 +176,37 @@ func DecomposeGoalsWithProvider(ctx context.Context, prov llm.Provider, dataDir,
 	if ts == nil {
 		return nil
 	}
+	return recordedGoals(ts)
+}
+
+// recordedGoals reads every goal node with non-empty text back from ts.
+func recordedGoals(ts *db.ExplorationStore) []GoalSpec {
+	if ts == nil {
+		return nil
+	}
 	nodes, _ := ts.ListByKind(db.KindGoal, 10000)
 	var out []GoalSpec
 	for _, n := range nodes {
-		var p struct {
-			Text      string `json:"text"`
-			VulnClass string `json:"vulnclass"`
-		}
+		var p GoalSpec
 		_ = json.Unmarshal(n.Payload, &p)
 		if strings.TrimSpace(p.Text) != "" {
 			out = append(out, GoalSpec{Text: p.Text, VulnClass: p.VulnClass})
 		}
 	}
 	return out
+}
+
+// recordedGoalTexts lists the trimmed texts of the goals already in ts.
+func recordedGoalTexts(ts *db.ExplorationStore) []string {
+	var out []string
+	for _, g := range recordedGoals(ts) {
+		out = append(out, strings.TrimSpace(g.Text))
+	}
+	return out
+}
+
+// sameGoalText is the duplicate test for re-decomposition: equal after trimming
+// and case folding.
+func sameGoalText(a, b string) bool {
+	return strings.EqualFold(strings.TrimSpace(a), strings.TrimSpace(b))
 }

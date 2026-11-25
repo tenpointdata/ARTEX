@@ -118,3 +118,48 @@ func TestRestoreKeepsGoalNodesAndDeliberatelyGoallessTasks(t *testing.T) {
 		t.Fatal("terminal task must not be restored")
 	}
 }
+
+// The decomposer persists each goal as it is produced, so a restart can leave
+// 1 of N goals behind with only the round-0 start marker. That task is still
+// mid-decomposition; with the completion marker it is not.
+func TestRestoreReDecomposesPartialGoalSet(t *testing.T) {
+	m, err := NewManager(t.TempDir(), "")
+	if err != nil {
+		db.SkipPGUnavailable(t, err)
+	}
+	defer m.Close()
+	s := newAdmissionTestServer(m, nil)
+
+	newTask := func(name string, markers ...db.Activity) *Task {
+		task, err := m.CreateTask(name, "find the admin panel and read the flag", nil, 0, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _, _ = m.DeleteTask(task.ID, DeleteTaskOptions{}) })
+		for _, a := range markers {
+			if _, err := task.Store.AppendActivity(a); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if _, err := task.Store.AddNode(db.KindGoal, map[string]any{"text": "find the admin panel"}, 0, "open", "goals", nil); err != nil {
+			t.Fatal(err)
+		}
+		return task
+	}
+	start := db.Activity{Worker: "planner", Kind: "round", Summary: goalDecompositionRoundSummary}
+	done := db.Activity{Worker: "planner", Kind: "text", Summary: goalDecompositionDoneSummary}
+
+	partial := newTask("partial goal set", start)
+	reloaded := reloadTask(t, partial.ID)
+	if mode, ok := restoreRunMode(reloaded); !ok || mode != "bootstrap" {
+		t.Fatalf("partial goal set restored as mode=%q ok=%v, want bootstrap", mode, ok)
+	}
+	if got := s.resumeAdmissionMode(reloaded); got != "bootstrap" {
+		t.Fatalf("partial goal set resumeAdmissionMode=%q, want bootstrap", got)
+	}
+
+	complete := newTask("complete goal set", start, done)
+	if mode, ok := restoreRunMode(reloadTask(t, complete.ID)); !ok || mode != "resume" {
+		t.Fatalf("completed decomposition restored as mode=%q ok=%v, want resume", mode, ok)
+	}
+}

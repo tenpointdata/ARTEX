@@ -1988,6 +1988,13 @@ func (t *ToolSet) addOneGoal(it goalItem) (int64, error) {
 	if origin == "" {
 		origin = "system"
 	}
+	if origin == goalsDecomposerOrigin {
+		// A decomposition re-run after a restart sees the goals it already wrote;
+		// an exact repeat maps to the existing node instead of a duplicate.
+		if id, ok := t.existingGoalID(text); ok {
+			return id, nil
+		}
+	}
 	id, err := t.ts.AddNode(db.KindGoal, payload, 0, "open", origin, nil)
 	if err != nil {
 		return 0, err
@@ -1996,6 +2003,25 @@ func (t *ToolSet) addOneGoal(it goalItem) (int64, error) {
 		_ = t.ts.Link(of, db.RelSpawns, id) // goals descend from the task root (origin fact)
 	}
 	return id, nil
+}
+
+// goalsDecomposerOrigin is the ToolSet worker (and goal-node origin) of the
+// round-0 goal decomposer.
+const goalsDecomposerOrigin = "goals"
+
+// existingGoalID finds a goal node whose text matches text (sameGoalText).
+func (t *ToolSet) existingGoalID(text string) (int64, bool) {
+	nodes, err := t.ts.ListByKind(db.KindGoal, 10000)
+	if err != nil {
+		return 0, false
+	}
+	for _, n := range nodes {
+		var p GoalSpec
+		if json.Unmarshal(n.Payload, &p) == nil && sameGoalText(p.Text, text) {
+			return n.ID, true
+		}
+	}
+	return 0, false
 }
 
 // setGoals adds exploration goals (goal nodes) to [this task]. It is both the goal

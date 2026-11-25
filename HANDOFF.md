@@ -1,6 +1,6 @@
 # HANDOFF.md — ARTEX
 
-**Last updated:** 2026-11-24 19:20 MST, by claude-code: c-3d7433 built, in review: a restart during round-0 goal decomposition now re-decomposes instead of settling `done` with no goals. Earlier hand-offs are under Deltas and in `ej handoff log`.
+**Last updated:** 2026-11-24 19:45 MST, by claude-code: c-19089f built on top of c-3d7433 (merged into this branch), in review: a restart after some round-0 goals were written now re-decomposes, keeping the goals already recorded. Earlier hand-offs are under Deltas and in `ej handoff log`.
 
 > Single entry point for whoever picks this up next (any agent or human), with no access to the
 > originating conversation. Read this first, then the sections of the code it points at.
@@ -65,7 +65,19 @@ through `startAdmittedTask(t, "bootstrap")` when `needsGoalBootstrap` (`server/g
 **and** no persisted planner `round` activity other than the round-0 marker (`db.ExplorationStore.HasRoundOtherThan`).
 `resumeAdmissionMode` uses the same test in place of its old `first_run_at == 0` check, which was only stamped
 for tasks with a timeout. A task that is goalless by choice (goals met, or all deleted after planning) keeps a plain
-`Run`. A partial goal set left by a restart is still not detected: `c-19089f`.
+`Run`.
+
+**2026-11-24 — partial goal set after a restart (`c-19089f`, on top of `c-3d7433`; in review).** `startTaskEngine`
+now writes a durable completion marker (activity planner/text `round 0 goal decomposition complete`) after the
+goals are persisted and before `Run`. `needsGoalBootstrap` treats a task as finished with round 0 when that marker
+exists, a real planner round exists, or goals exist without a round-0 start marker (non-decomposer goals, or a task
+from before these markers). Goals plus a start marker and nothing else means the run was cut short, so restore
+re-decomposes: `startTaskEngine` emits a visible "interrupted ... goal set may have been partial" activity, the
+decomposer's prompt lists the goals already recorded and asks only for the missing ones, and `set_goals` from the
+decomposer (origin `goals`) maps an exact repeat (trimmed, case-insensitive) to the existing node. Main-agent
+`set_goals` keeps plain add semantics. Tests: `TestRestoreReDecomposesPartialGoalSet`,
+`TestDecomposerSetGoalsSkipsRecordedGoals`. Gap: a reworded repeat from the LLM is not caught by the exact-text
+dedupe; the prompt is the only guard there.
 
 **2026-11-24 — LLM sampling pin (`c-d73308`, E8; on main via #69).** Migration 0028 adds nullable
 `llm_profiles.sampling_seed`/`sampling_temperature`; `agent/sampling.go` splices them into the wire body

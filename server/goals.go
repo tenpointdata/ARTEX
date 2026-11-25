@@ -39,29 +39,49 @@ func (s *Server) launchTask(t *Task, seedText string, seedFirstIntent bool) {
 	}
 }
 
-// goalDecompositionRoundSummary marks the round-0 decomposition in the activity
-// log. needsGoalBootstrap relies on it being the only round marker written
-// before the first real planning round.
+// goalDecompositionRoundSummary marks the start of the round-0 decomposition in
+// the activity log. needsGoalBootstrap relies on it being the only round marker
+// written before the first real planning round.
 const goalDecompositionRoundSummary = "round 0 goal decomposition"
 
+// goalDecompositionDoneSummary is the durable completion marker startTaskEngine
+// writes (worker=planner, kind=text) once every decomposed goal is persisted and
+// before the engine starts planning against them.
+const goalDecompositionDoneSummary = "round 0 goal decomposition complete"
+
 // needsGoalBootstrap reports whether t never finished its round-0 goal
-// decomposition: it has no goal nodes and no persisted planner round besides
-// round 0. That state is left behind when the process stops while
-// startTaskEngine is in flight. A task that is goalless by the human's choice
-// (all goals met, or every goal deleted from the overview) has completed at
-// least one real planning round, because a finished decomposition always
-// writes a goal and Run plans against it, so it is not re-decomposed. On a
-// lookup error it answers false: running the existing graph is the safe default.
+// decomposition, which is what a process stop while startTaskEngine was in
+// flight leaves behind. The decomposer persists each goal as it is produced, so
+// goal nodes alone do not prove it finished. It is finished when any of these
+// holds: the completion marker was written, a real planning round ran (the
+// planner only runs after decomposition), or goals exist without a round-0
+// start marker (goals that did not come from startTaskEngine, or a task from
+// before these markers that was already past round 0). Otherwise it is
+// interrupted: no goals at all, or a goal set that may be partial. A task that
+// is goalless by the human's choice has completed a real planning round and is
+// not re-decomposed. On a lookup error it answers false: running the existing
+// graph is the safe default.
 func needsGoalBootstrap(t *Task) bool {
 	if t == nil || t.Store == nil {
 		return false
 	}
-	goals, err := t.Store.ListByKind(db.KindGoal, 1)
-	if err != nil || len(goals) > 0 {
+	planned, err := t.Store.HasRoundOtherThan(goalDecompositionRoundSummary)
+	if err != nil || planned {
 		return false
 	}
-	planned, err := t.Store.HasRoundOtherThan(goalDecompositionRoundSummary)
-	return err == nil && !planned
+	done, err := t.Store.HasActivity("planner", "text", goalDecompositionDoneSummary)
+	if err != nil || done {
+		return false
+	}
+	goals, err := t.Store.ListByKind(db.KindGoal, 1)
+	if err != nil {
+		return false
+	}
+	if len(goals) == 0 {
+		return true
+	}
+	started, err := t.Store.HasActivity("planner", "round", goalDecompositionRoundSummary)
+	return err == nil && started
 }
 
 func (s *Server) startTaskEngine(t *Task) {
@@ -71,6 +91,13 @@ func (s *Server) startTaskEngine(t *Task) {
 	}
 	s.engine.emitActivity(t, db.Activity{Worker: "planner", Kind: "round",
 		Summary: goalDecompositionRoundSummary})
+	if n := countGoals(t); n > 0 {
+		// Only a restart mid-decomposition reaches here with goals already written.
+		// Say so: the earlier run may have been cut short, and the human should
+		// not have to infer that from the goal list.
+		s.engine.emitActivity(t, db.Activity{Worker: "planner", Kind: "text", Summary: fmt.Sprintf(
+			"Goal decomposition was interrupted by a restart after %d goal(s) were written; the goal set may have been partial, so decomposing again and keeping the goals already recorded", n)})
+	}
 	goals := s.createGoals(ctx, t, func(r db.Activity) {
 		s.engine.emitActivity(t, r)
 	})
@@ -87,7 +114,20 @@ func (s *Server) startTaskEngine(t *Task) {
 	if ctx.Err() != nil || s.engine.IsDeleting(t.ID) {
 		return
 	}
+	s.engine.emitActivity(t, db.Activity{Worker: "planner", Kind: "text", Summary: goalDecompositionDoneSummary})
 	s.engine.Run(s.ctx, t)
+}
+
+// countGoals returns how many goal nodes t has (0 on a lookup error).
+func countGoals(t *Task) int {
+	if t == nil || t.Store == nil {
+		return 0
+	}
+	goals, err := t.Store.ListByKind(db.KindGoal, 10000)
+	if err != nil {
+		return 0
+	}
+	return len(goals)
 }
 
 func (s *Server) occupiesConcurrencySlot(t *Task) bool {

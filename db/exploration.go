@@ -1289,6 +1289,17 @@ WHERE exploration_id=$1 AND worker='planner' AND kind='round' AND COALESCE(summa
 	return exists, err
 }
 
+// HasActivity reports whether this exploration persisted an activity with
+// exactly this worker, kind and summary. Used for durable lifecycle markers
+// (for example the round-0 goal-decomposition start and completion records).
+// Callers must flush the activity outbox first.
+func (s *ExplorationStore) HasActivity(worker, kind, summary string) (bool, error) {
+	var exists bool
+	err := s.db.QueryRow(`SELECT EXISTS(SELECT 1 FROM activity
+WHERE exploration_id=$1 AND worker=$2 AND kind=$3 AND summary=$4)`, s.expID, worker, kind, summary).Scan(&exists)
+	return exists, err
+}
+
 // OpenGoalFingerprint returns a stable fingerprint of the open-goal set: the
 // sorted goal ids joined by commas, "" when none. Planner quiet-mode (#79) uses
 // it to tell "the goal set changed since the last planning round" apart from
