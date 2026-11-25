@@ -126,14 +126,19 @@ def deploy_corpus(args) -> dict:
     subprocess.run(["docker", "rm", "-f", name], capture_output=True)
     port = str(args.port)
     print(f"[corpus] docker run {args.image} -> 127.0.0.1:{port}")
-    subprocess.run(["docker", "run", "-d", "--rm", "--name", name, "-p", f"127.0.0.1:{port}:{args.container_port}", args.image], check=True, capture_output=True)
+    net = ["--network", args.corpus_network] if args.corpus_network else []
+    subprocess.run(["docker", "run", "-d", "--rm", "--name", name, *net, "-p", f"127.0.0.1:{port}:{args.container_port}", args.image],
+                   check=True, capture_output=True)
     url = f"http://127.0.0.1:{port}"
+    # On a shared Docker network ARTEX reaches the corpus by container name, so the
+    # agent never needs the host gateway (egress.sh denies it by default).
+    task_url = f"http://{name}:{args.container_port}" if args.corpus_network else None
     for _ in range(90):
         try:
             with urllib.request.urlopen(url, timeout=5) as resp:
                 if resp.status == 200:
                     print(f"[corpus] up at {url}")
-                    return {"url": url, "flag": None}
+                    return {"url": url, "flag": None, "task_url": task_url}
         except Exception:
             time.sleep(2)
     raise SystemExit("corpus did not become reachable; run with --keep and inspect the container")
@@ -473,6 +478,7 @@ def build_parser() -> argparse.ArgumentParser:
     ap.add_argument("--deploy-only", action="store_true", help="drost mode: bring the challenge up, print URL and flag, skip the task")
     ap.add_argument("--llm-profiles", default="", help="comma-separated llm profile ids for the task chain, head first (e.g. 3,2); stamped into the result")
     ap.add_argument("--target-host", default="127.0.0.1", help="host the task should target, as reachable from ARTEX (use 172.17.0.1 when ARTEX runs in a container)")
+    ap.add_argument("--corpus-network", default="", help="image mode: also attach the corpus container to this Docker network and point the task at it by container name (ARTEX in Compose: e.g. artex-bench_default); no host-gateway egress exception needed")
     ap.add_argument("--run-id", default=time.strftime("%Y%m%d-%H%M%S"))
     ap.add_argument("--image", default="bkimminich/juice-shop:latest")
     ap.add_argument("--port", type=int, default=13100)
@@ -483,6 +489,8 @@ def build_parser() -> argparse.ArgumentParser:
     ap.add_argument("--gt-version", default="v1")
     ap.add_argument("--subject-model", default="", help="model the task's active profile runs on (for the self-judge guard); required unless --deploy-only")
     ap.add_argument("--judge-url", default=os.environ.get("JUDGE_BASE_URL", ""))
+    ap.add_argument("--judge-key", default=os.environ.get("JUDGE_API_KEY", ""),
+                    help="judge API key (default: env JUDGE_API_KEY). An argparse arg so eval_suite's per-run args carry it, not just prepare()'s probe args.")
     ap.add_argument("--judge-model", default=os.environ.get("JUDGE_MODEL", ""))
     ap.add_argument("--judge-timeout", type=int, default=900)
     ap.add_argument("--allow-self-judge", action="store_true")
@@ -494,7 +502,10 @@ def build_parser() -> argparse.ArgumentParser:
 def prepare(args) -> str:
     """Validate the run configuration; returns the ARTEX bearer token ("" for --deploy-only)."""
     token = ""
-    args.judge_key = os.environ.get("JUDGE_API_KEY", "")
+    # judge_key is an argparse arg (default env JUDGE_API_KEY); kept here only so a
+    # Namespace built without the parser (older callers/tests) still has it.
+    if not hasattr(args, "judge_key"):
+        args.judge_key = os.environ.get("JUDGE_API_KEY", "")
     if args.corpus_type == "drost":
         if not (args.drost_repo and args.drost_id):
             raise SystemExit("drost mode needs --drost-repo (or DROST_REPO) and --drost-id")
@@ -554,8 +565,10 @@ def run(args, token: str) -> dict | None:
                   f"  (cwd {dep['challenge_dir']})")
             return None
 
-        task_url = corpus_url
-        if args.target_host != "127.0.0.1":
+        task_url = dep.get("task_url") or corpus_url
+        if dep.get("task_url"):
+            print(f"[corpus] task target on network {args.corpus_network}: {task_url}")
+        elif args.target_host != "127.0.0.1":
             task_url = f"http://{args.target_host}:{corpus_url.rsplit(':', 1)[1]}"
             print(f"[corpus] task target rewritten for ARTEX reachability: {task_url}")
 

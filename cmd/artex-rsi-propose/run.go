@@ -132,11 +132,15 @@ func run(c *client, opt options, log io.Writer) (*result, error) {
 			res.Posted = append(res.Posted, out.Proposal.ID)
 		}
 	}
-	if len(plan.Drafts) > 0 {
-		raw, _ := json.MarshalIndent(res, "", "  ")
-		if err := os.WriteFile(filepath.Join(dir, "plan.json"), append(raw, '\n'), 0o644); err != nil {
-			return res, err
-		}
+	// Always record the plan, even when every rule was pruned: the skipped-rule
+	// reasons are the operator's view of why nothing fired, and a dry run on
+	// low-signal real tasks is exactly when that view matters most.
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return res, err
+	}
+	raw, _ := json.MarshalIndent(res, "", "  ")
+	if err := os.WriteFile(filepath.Join(dir, "plan.json"), append(raw, '\n'), 0o644); err != nil {
+		return res, err
 	}
 	return res, nil
 }

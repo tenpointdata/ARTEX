@@ -81,6 +81,8 @@ def run_argv(target: dict, opts, run_id: str, out_root: pathlib.Path, gt_version
         argv += ["--llm-profiles", opts.llm_profiles]
     if opts.allow_self_judge:
         argv.append("--allow-self-judge")
+    if opts.corpus_network and target["type"] == "image":
+        argv += ["--corpus-network", opts.corpus_network]
     if target["type"] == "drost":
         return argv + ["--corpus-type", "drost", "--drost-repo", opts.drost_repo, "--drost-id", target["id"]]
     return argv + ["--corpus", target["ground_truth"], "--image", target["image"], "--port", str(target["port"]),
@@ -248,6 +250,7 @@ def build_parser() -> argparse.ArgumentParser:
     r.add_argument("--seed", type=int, default=0, help="schedule seed (target and arm order); stamped")
     r.add_argument("--task-timeout", type=int, default=5400, help="per-task budget in seconds, identical for both arms")
     r.add_argument("--target-host", default="127.0.0.1")
+    r.add_argument("--corpus-network", default="", help="image targets: Docker network shared with ARTEX (see run_bench.py)")
     r.add_argument("--artex-url", default=run_bench.os.environ.get("ARTEX_BASE", "http://localhost:8787"))
     r.add_argument("--drost-repo", default=run_bench.os.environ.get("DROST_REPO", ""))
     r.add_argument("--run-id", default="")
