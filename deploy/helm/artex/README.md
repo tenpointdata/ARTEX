@@ -81,7 +81,8 @@ A pod-wide NetworkPolicy cannot do this: the server and its agent processes shar
 server needs PostgreSQL. Names are resolved once, so a rescheduled database pod's new IP and the
 control pod's own IP are not covered. For a strict deployment set `egress.clusterCIDRs` to the
 cluster's pod and Service CIDRs; the proxy Service is then allowed by name
-(`ARTEX_EGRESS_ALLOW_HOSTS`) and in-cluster lab targets need `egress.allow`. Check what was
+(`ARTEX_EGRESS_ALLOW_HOSTS`), DNS (port 53) to the pod's resolvers stays open, and in-cluster
+lab targets need `egress.allow`. `deploy/lab/` reproduces the recorded install on kind. Check what was
 installed with `kubectl logs <pod> | grep egress:`.
 
 ## Ingress

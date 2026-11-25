@@ -21,6 +21,13 @@ All notable changes to this project are documented in this file. The format is b
 
 ### Fixed
 
+- **Kubernetes install (E7 follow-up)**, verified on a 3-node kind cluster (`docs/DISTRIBUTED.md`, "Recorded install"):
+  - The server makes world-writable data and key volume roots root-owned (0755 / 0700) before the isolation self-test. Kubernetes emptyDir and many PersistentVolumes are 0777, and the self-test refused to start on them.
+  - Worker nodes follow traffic capture, the global egress proxy and web search through `settings.agent_settings_revision`. Before, a worker read them only at start, so its agents bypassed the recording proxy after capture was turned on.
+  - The control node now wakes the planner for intents settled by worker nodes even when a fresh task's first poll found none. Before, that first batch was dropped.
+  - `jwt.key` is created atomically. A pod killed mid-write left a 0-byte key that blocked every later start.
+  - Chart: agent processes are denied PostgreSQL and the control API by default (`egress.denyClusterServices`; the new `egress.sh` variables are `ARTEX_EGRESS_DENY_HOSTS` and `ARTEX_EGRESS_ALLOW_HOSTS`), and `egress.clusterCIDRs` gives a strict mode. `egress.sh` keeps DNS to the resolvers open. Worker rollouts use `maxSurge: 0`, so hard anti-affinity no longer deadlocks them. `scripts/k8s-egress-probe.sh` and `deploy/lab/` reproduce the checks.
+
 - **A goal URL followed by punctuation is still seeded**: a goal such as `Assess http://juiceshop:3000.` no longer logs `could not parse a target host/IP` and skips the site. Trailing punctuation, including full-width `。` and a closing bracket that has no matching opener, is trimmed from the URL before it is parsed, so `http://[::1]` is left alone. The scheme the goal names is kept and a final period does not end up in the host.
 - **Task timeout triggers fire for every task**: `on_task_timeout` used the task id as a watermark, but tasks time out in deadline order. Once a newer task timed out first, an older task that timed out later was never fired for. Fired timeouts are now kept in a persisted set, like met goals; on first start the set is seeded with the tasks already timed out, so nothing replays.
 - **A named pipe in the task workspace no longer hangs the archive worker**: packing opened every non-directory entry, and opening a FIFO blocks until a writer appears, so the single archive worker stopped there and every later archive, restore and delete job waited behind it. A socket failed the archive instead, and a device was packed but refused on restore. The packer now skips every entry that is neither a directory nor a regular file, as it already did for symlinks.

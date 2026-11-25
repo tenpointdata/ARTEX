@@ -59,6 +59,22 @@ See `docs/ARCHITECTURE.md` for the code-level map. Summary:
 
 ## Current state
 
+**2026-11-24 — E7 follow-up (`c-8cfbfe`, in review on `ej/20261124-155353-b1c60a`).** This branch merges the
+unmerged E7 branch `ej/20261124-150525-1a95b3` (c-d60149). The chart was installed on a 3-node kind cluster and
+the checks are recorded in `docs/DISTRIBUTED.md` ("Recorded install"): two workers on separate hosts, nodes API,
+a task whose 6 intents split across both hosts, traffic recorded on the control node, and the caps set unchanged.
+Five defects were fixed, each with a test:
+- volume-root modes (`server/execpriv_volume_unix.go`);
+- worker nodes follow agent settings (`server/worker_node_settings.go`, `settings.agent_settings_revision`);
+- the planner wakes after an empty first settle poll (`settleCursor`, `server/engine_distributed.go`);
+- `jwt.key` is created atomically (`server/auth.go`);
+- worker rollouts use `maxSurge: 0`.
+
+New chart default: agent egress deny for PostgreSQL and the control API (`egress.denyClusterServices`; the
+`egress.sh` variables are `ARTEX_EGRESS_DENY_HOSTS` and `ARTEX_EGRESS_ALLOW_HOSTS`, and DNS stays allowed),
+plus the strict `egress.clusterCIDRs` mode. The lab fixtures are in `deploy/lab/` (an LLM stub and the kind
+values); `scripts/k8s-egress-probe.sh` runs the egress probe.
+
 **2026-11-24 — SSE 401 after console login (`c-13e86c`, fixed; pre-E5).** Streams are same-origin only
 (`web/src/lib/sse.ts`), dev gzip off, `openSSE` writes `: open`. Test `server/activity_stream_auth_pg_test.go`;
 browser-checked on the E5 stack.
@@ -205,6 +221,10 @@ body, through the versioned prompt API, and the starting bodies are restored aft
 ## Triage (next handful)
 
 **Agents' lane**
+0. *(unclaimed)* — **E7: worker nodes miss other runtime control-node state** (M), card `c-6bcdd3`: LLM profiles,
+   MCP servers, custom tools and similar are rebuilt only at start. Done = each one is followed or listed in
+   DISTRIBUTED.md Limits. Then `c-d4946f` (re-resolve the cluster egress deny, M) and `c-597b06` (stale
+   worker_nodes rows, S).
 1. *(unclaimed)* — **SEC: per-task uid follow-ups** (S each): `c-12df03` (single-uid start-up fails on a
    socket; MCP uid not egress-filtered), `c-e70e5c` (release ended tasks at start-up; per-key lock). The "Done when" is on each card.
 2. *(unclaimed)* — **E5 UI: hide role-lacking actions on existing pages** (M), card `c-92bb52`. Done = as
@@ -242,6 +262,9 @@ body, through the versioned prompt API, and the starting bodies are restored aft
   whether tasks with an artifact must have the target gate forced on (card `c-f4115c` item 2), and
   whether the extra admin-only routes in `server/rbac_policy.go` (tools, MCP, agents, LLM config,
   notify) suit how operators work.
+
+- **E7 on a real multi-machine cluster with a real model** (card `c-620510`): separate hosts, a real CNI
+  with `networkPolicy.enabled`, an LLM key and an Ingress with TLS. Redo the table in docs/DISTRIBUTED.md.
 
 **Blocked**
 - Nothing blocked.
@@ -363,6 +386,13 @@ Card ids in brackets:
   `ARTEX_SECRET_KEY`) loses stored secrets.
 
 ## Decisions
+
+- **2026-11-24** — c-8cfbfe: the worker-pod egress deny is in the uid-scoped `egress.sh` filter, not a
+  NetworkPolicy. A NetworkPolicy applies to the whole pod, and the root server process in the same pod must
+  reach PostgreSQL. The deny is name-based by default (zero configuration, resolved at start) and CIDR-based
+  as an opt-in, because the pod and Service CIDRs differ per cluster. The volume roots are tightened by the
+  binary rather than by the chart (fsGroup or an initContainer), so bare-metal bind mounts with loose modes
+  are fixed too.
 
 - **2026-11-24** — c-13e86c: SSE streams are same-origin only, with no cross-origin override. The cookie is
   the only credential a script-free EventSource can present, and the backend's CORS answers `*`, which a
