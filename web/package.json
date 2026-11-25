@@ -22,7 +22,8 @@
     "test:bash": "node --test src/lib/bash-exit-status.test.mjs",
     "test:governance": "node --test src/lib/governance.test.mjs",
     "test:integrations": "node --test src/lib/integrations.test.mjs",
-    "test:sse": "node --test src/lib/sse.test.mjs"
+    "test:sse": "node --test src/lib/sse.test.mjs",
+    "test:cost": "node --test 'src/app/(main)/function/cost/_components/cost-metrics.test.mjs'"
   },
   "lint-staged": {
     "*.{js,ts,jsx,tsx}": [

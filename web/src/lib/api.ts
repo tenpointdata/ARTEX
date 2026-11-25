@@ -68,6 +68,8 @@ import type {
   MethodologySummary,
   MissingSkill,
   ModelTokenStat,
+  CostGroupBy,
+  CostResponse,
   NotificationChannel,
   NotificationDelivery,
   NotificationFilter,
@@ -1483,6 +1485,8 @@ export const api = {
   llmRecordDetail: (id: number) => get<LLMRecordDetail>(`/llm/records/${id}`),
   llmTasks: () => get<{ tasks: LLMTask[] }>(`/llm/records/tasks`),
   llmRecordsDeleteTask: (task: string) => del<{ deleted: number }>(`/llm/records?task=${encodeURIComponent(task)}`),
+  // LLM spend and efficiency grouped by task / profile / worker lane / model; days=0 is all time.
+  llmCost: (by: CostGroupBy, days: number) => get<CostResponse>(`/llm/cost?by=${by}&days=${days}`),
   // Token usage of this task aggregated per model (from the always-on llm_usage metering
   // ledger, exact per call, covering per-agent bindings / pooling / interrupted spend).
   tokensByModel: (task: string) =>

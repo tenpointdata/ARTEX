@@ -145,6 +145,7 @@ if want_web; then
   run_step "web traffic stream tests" bash -c 'cd web && npm run test:traffic-stream'
   run_step "web governance tests" bash -c 'cd web && npm run test:governance'
   run_step "web sse tests" bash -c 'cd web && npm run test:sse'
+  run_step "web cost metrics tests" bash -c 'cd web && npm run test:cost'
   run_step "web i18n check" bash -c 'cd web && npm run test:i18n'
   run_step "web integrations tests" bash -c 'cd web && npm run test:integrations'
   if [ "$FULL" -eq 1 ]; then

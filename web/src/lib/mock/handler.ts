@@ -1603,6 +1603,40 @@ function route(m: string, path: string, seg: string[], q: URLSearchParams, b: Re
       ],
     };
 
+  // ── LLM cost & efficiency (demo) ──
+  if (path === "/llm/cost") {
+    const by = (q.get("by") || "task") as "task" | "profile" | "worker" | "model";
+    const names: Record<typeof by, string[]> = {
+      task: ["Recon example.com", "Auth bypass hunt"],
+      profile: ["claude-main", "local-llama"],
+      worker: ["main", "retester"],
+      model: ["claude-opus-4-8", "llama-3.3-70b"],
+    };
+    return {
+      by,
+      days: Number(q.get("days") ?? 30),
+      rows: names[by].map((label, i) => ({
+        key: label,
+        label,
+        calls: 120 - i * 70,
+        tasks: 2 - i,
+        errors: i * 3,
+        input_tokens: 2400000 - i * 2000000,
+        output_tokens: 180000 - i * 150000,
+        cache_read_tokens: 1700000 - i * 1700000,
+        cache_write_tokens: 200000 - i * 200000,
+        latency_ms: 540000 - i * 400000,
+        first_ts: "2026-11-20T09:00:00Z",
+        last_ts: "2026-11-20T13:30:00Z",
+        cost_eur: i === 0 ? 6.42 : null,
+        unpriced_calls: i === 0 ? 0 : 50,
+      })),
+      tasks: 2,
+      archived_included: 1,
+      archived_omitted: 0,
+    };
+  }
+
   // ── Token usage by model (demo: one sample) ──
   if (path === "/llm/records/by-model")
     return {

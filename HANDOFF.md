@@ -120,6 +120,17 @@ nodes", verification in Deltas. Gap `c-7ad4da` (capture switch read at start-up)
 **2026-11-24 — SSE 401 after console login (`c-13e86c`, fixed; pre-E5).** Streams are same-origin only
 (`web/src/lib/sse.ts`), dev gzip off, `openSSE` writes `: open`. Test `server/activity_stream_auth_pg_test.go`;
 browser-checked on the E5 stack.
+**2026-11-24 (c-f4a69d, E6 follow-up)** — The Cost & efficiency view now includes archived tasks.
+Archives record `aggregate_stats.cost_cells` (per profile, worker, model and UTC day: calls, errors,
+tokens, latency, first/last call; `db/llm_cost_archive.go`), and `db.CostBreakdown` folds them in, so an
+archived task appears in every dimension and day window. Archives made earlier have only per-profile
+totals: they count under All by task/profile and are reported as `archived_omitted` elsewhere (the page
+says how many). `GET /api/llm/cost` also returns `tasks` (distinct), used by the totals row instead of
+summing. `npm run test:cost` (cost-metrics helpers) runs in `scripts/verify.sh`; biome is clean on the
+cost files. This branch merges the unmerged E6 branch `ej/20261124-123231-b78990`, so landing it lands
+E6. Verified: `TestCostBreakdownIncludesArchivedTasks` and the archive round-trip against Postgres 16, the
+web test, tsc, i18n, `scripts/verify.sh`. Not checked: the page in a browser (`c-4c8fd6`). Older
+archives are not backfilled (`c-888292`).
 
 **2026-11-24 (c-ca2bd0, E4 follow-up)** — An operator can choose a task's methodologies. Migration
 **0022** adds `tasks.methodologies TEXT[]` (empty `{}` = automatic, as before). The create request
@@ -151,6 +162,17 @@ switches between them and reads each one's findings and report; all 51 `/api` re
 
 **2026-11-24 (c-c0bb07, E4)** — OWASP WSTG 4.2 and API Top 10 2023 checklists drive coverage (`methodology/`). Detail moved to `docs/handoff/2026-11-24-e4-methodology-coverage.md`.
 
+**2026-11-24 (c-cb0093, E6)** — Cost & observability: **Function → Cost & efficiency** page
+(`web/src/app/(main)/function/cost/`) and `GET /api/llm/cost?by=task|profile|worker|model&days=N`
+(`server/llm_cost.go`, `db/llm_cost.go`) show spend (EUR from profile prices, priced per profile), tokens,
+cache hit rate, output/input ratio, EUR per 1M tokens, LLM time, wall time, average latency and errors as a
+sortable table. A new dependency-free `otlp/` package (OTLP/HTTP JSON) exports per-LLM-call metrics
+(`artex.llm.calls`, `artex.llm.tokens`, `gen_ai.client.*`) and spans (one trace per task) when
+`OTEL_EXPORTER_OTLP_ENDPOINT` is set (`cmd/artex/telemetry.go`, `llmrec/observer.go`); see
+`docs/cost-and-telemetry.md`. Verified: DB tests against Postgres 16, exporter tests, web type-check/tests/static
+build, and a live `otel/opentelemetry-collector` 0.165.0 that decoded 4 metrics / 7 points / 1 span with no
+errors. Not verified: the page in a browser against real LLM traffic (card `c-4c8fd6`).
+
 **2026-11-24 (c-75c593)** — The benchmark subject instance (`docker-compose.bench.yml`) now builds from a
 clean clone: production `Dockerfile`, a sibling Postgres, named volumes, committed `bench/.env.example`
 with `ARTEX_RSI_LESSONS=off`. Verified on Docker Desktop arm64: `up --build` brings both containers up,
@@ -168,26 +190,8 @@ With `ARTEX_PG_DSN`, `go test ./...` fails only `TestGateOffTaskIsUnchanged` (`c
 **2026-11-24 — client_read bound to companies (card `c-5b5421`, in review).** Detail (branch, verification, gaps) moved to `docs/handoff/2026-11-24-client-read-company-bindings.md`.
 
 **2026-11-23** — Fixes for the High and Medium findings from the 2026-11-23 security audit are on
-`main` (PR #1, branch `ej/20261123-145205-6a3af6`); the Linux/Docker verification fixes come from
-`ej/20261123-152406-fccff3`. It covers audit findings #1–#16 except as listed under Open work.
-Verified 2026-11-23 (card `c-dadc14`, done):
-- `go vet ./...` + `go test ./...` **as root on Linux** (golang:1.26.11-bookworm, arm64) with
-  `ARTEX_PG_DSN` set: all packages ok, including the `*AsRoot` executor/isolation tests,
-  `TestExecHomePerRunDirAsRoot` and the MCP uid-10002 split. Two test fixes were needed (commit
-  `fc8c3f9`): the isolation probe could not exec the `go test` binary from its 0700 build dir (also
-  broken on main), and `TestGateOffTaskIsUnchanged` still expected zero lookups with the gate off.
-- Docker egress: through the real `docker-compose.yml` (NET_ADMIN) on a slim image of the same
-  runtime base, `[artex] egress: installed` is logged, `-m owner`/`-m addrtype` load on bookworm's
-  nf_tables iptables 1.8.9, and the executor is refused for 169.254.169.254, 100.100.100.200, the
-  gateway, host.docker.internal (root reaches the host service) and :8787 on every local address,
-  while a LAN router, another container and the internet stay reachable. The full image gives the
-  same results (2026-11-24, `c-a6891b`, below).
-- Web: `npm ci` and `npx tsc --noEmit` clean. `npm run lint` fails with 84 errors, all already on main
-  and none in the changed files (`c-834a5a`). Headless Chromium: setup, login, Sign out over the
-  HttpOnly SameSite=Strict cookie work and `document.cookie` is empty, **but a token copied before
-  logout stays valid for 7 days** (`c-a0af33`).
-- The stock compose cannot start on Docker Desktop for Mac: bind mounts ignore permissions, so the
-  isolation self-test fails closed (also on main; `c-775dc2`). Use named volumes there.
+`main` (PR #1); verified as root on Linux and in Docker (card `c-dadc14`, done). The full verification
+detail and root-test gotchas are in `docs/handoff/security-audit-2026-11-23.md`.
 
 Operator-facing changes from that audit (unsandboxed-start refusal, TLS on non-loopback binds, and more): `docs/handoff/2026-11-23-security-audit-operator-changes.md`.
 
@@ -277,6 +281,8 @@ body, through the versioned prompt API, and the starting bodies are restored aft
 **Blocked**
 - **E2 browser e2e as a CI job** (S), card `c-1198a2`: blocked on c-cc25b6's SHA-pinned ci.yml landing. Done = a
   `web-e2e` job runs `scripts/e2e/integrations.sh` on pull requests and fails when the import filter is broken.
+- **E6: admin gate on `/api/llm/cost`** (S), card `c-9ca57a`; waits for client_read (c-5b5421) to merge.
+  Done = client_read users get 403 or only their companies' rows, by a test.
 
 ## Set up / run / test / deploy
 
@@ -321,7 +327,8 @@ Card ids in brackets:
   `c-5b5421` (client binding), `c-869050` (UI, in review), `c-f4115c` (lifecycle gaps), `c-92bb52`
   (role-aware controls on existing pages), `c-7c4715` (client_read console, in review), `c-601ec6` (chain paging).
 - **TEST** [`c-3157b4`] `TestGateOffTaskIsUnchanged` fails on main with Postgres (also fails before E5).
-- **E6** [`c-cb0093`] Cost/observability dashboard + OpenTelemetry export, building on existing context telemetry.
+- **E6 follow-ups** (E6 itself landed 2026-11-24, `c-cb0093`): admin/company gate on `/api/llm/cost` once client_read lands [`c-9ca57a`];
+  live browser + collector check [`c-4c8fd6`]; archived tasks in the cost view + cost-metrics web test [`c-f4a69d`, done 2026-11-24, in review]. Backfill `cost_cells` for older archives [`c-888292`, low].
 - **E7** [`c-d60149`] Distributed/remote workers (queue-backed intents) for larger engagements; Helm chart.
   Follow-ups: `c-3b781a` and `c-548e8b` (TLS to the control API) in review; `c-677166` (TLS on the
   proxy hop), `c-29ff19`, `c-18f7a8`; `c-8cfbfe` (kind install recorded, in review; `c-7ad4da` closed by it).
@@ -484,6 +491,12 @@ Card ids in brackets:
   credentialed request may not use. Credentialed CORS for dev origins was rejected: cookies are not
   port-isolated, so it would let a page on another port of the same host (a lab target) read the streams.
 
+- **2026-11-24** — c-f4a69d: archived cost comes from a new additive archive aggregate (`cost_cells`,
+  per profile × worker × model × UTC day) rather than re-reading cold archive files, so the cost view
+  stays one DB read and every dimension and day window works for archives made from now on. Archives
+  made earlier are not backfilled: their per-profile totals are used where they fit (All, by task or
+  profile) and counted as omitted elsewhere, which the page states instead of guessing. The distinct
+  task total is computed by the server, since only it can dedupe a task across groups.
 - **2026-11-24** — c-ca2bd0: the operator's methodology choice is a list column on `tasks`, with an empty
   list meaning automatic, so existing tasks and every other create path (spawn, templates) keep the
   goal-word selection. A non-empty list replaces the automatic set rather than adding to it, which also
@@ -536,6 +549,13 @@ Card ids in brackets:
   reason), or a non-false-positive finding of that class. A citing intent only makes the item
   in_progress. Within one methodology an alias names one item (Validate), so one "xss" entry never
   ticks three items. The scores are not added to the report: c-8f9cca (E1) owns `report/` right now.
+
+- **2026-11-24** — E6 (c-cb0093): OpenTelemetry export is a small in-repo OTLP/HTTP-JSON exporter (`otlp/`)
+  instead of the OpenTelemetry Go SDK: three signals' worth of need (counters, histograms, spans) did not
+  justify a large dependency tree in a security tool, and the wire format is stable. It was checked against a
+  real collector. gRPC/protobuf is refused with a log line. Task ids go on spans only (bounded metric cardinality).
+  Cost is computed in ARTEX, not exported, because prices live here. Spans follow the GenAI semantic conventions.
+
 - **2026-11-24** — c-75c593: the bench subject instance builds from the production `Dockerfile` instead
   of a separate `Dockerfile.bench`, so the benchmark measures the shipped image and there is one image
   definition. Postgres is a sibling service (not baked in), data/keys are named volumes (Docker Desktop
@@ -645,6 +665,7 @@ Card ids in brackets:
 <!-- composite:deltas · newest first; Composite rewrites this block on every merge (ej handoff merge / merge_handoff) -->
 - **2026-11-24 17:39 MST** · claude-code · `ej/20261124-172839-c17308` `9c6a6a7`→`4d5d6e4` (1 commit) · `h-2932ac` — c-d4946f (E7, in review): the cluster egress deny now follows moved pods. egress.sh re-resolves ARTEX_EGRESS_DENY_HOSTS/ALLOW_HOSTS every ARTEX_EGRESS_REFRESH s (chart egress.refreshSeconds, default 10) in a loop start.sh starts. When an answer changes it rewrites ARTEX_EGRESS in one iptables-restore --noflush commit (also used at start). A name that stops resolving keeps its last addresses; NAME:PORT denies one TCP port. Chart: new headless <release>-control-pods (API port on the control pod IP); the PostgreSQL Service publishes not-ready addresses. Verified live on kind (own namespace, removed): after deleting artex-postgresql-0 (.13 → .14) and the control pod (.12 → .15), k8s-egress-probe.sh showed the executor refused at the new IPs, with 0 restarts. scripts/verify.sh passed. The branch merges the unlanded c-8cfbfe branch ej/20261124-155353-b1c60a. **Next:** Land ej/20261124-172839-c17308; it carries c-8cfbfe. Optionally test on a socket-LB CNI such as Cilium KPR, where denying the control pod IP may also refuse the proxy Service (gotcha in docs/handoff/2026-11-24-e7-kind-install-egress.md). **Decided:** The re-resolve loop is in egress.sh rather than the Go server, so one code path writes the executor rules for Docker and Kubernetes. Rebuilds are atomic through iptables-restore --noflush. Unresolvable names keep their last addresses (fail closed). CIDR auto-detection was rejected: a pod has no portable source for the pod and Service CIDRs. Strict clusterCIDRs stays opt-in.
 - _Older hand-offs, a line each; `ej handoff log` has them whole:_
+- **2026-11-24 15:30 MST** · claude-code · `h-124b6f` — c-f4a69d (E6 follow-up, in review; card c-888292 opened): the Cost & efficiency view now includes archived tasks. **Next:** c-4c8fd6 browser check; c-888292 backfill.
 - **2026-11-24 17:39 MST** · claude-code · `h-50b1c4` — c-81193b (now in review): the finding detail hides controls the role is refused. **Next:** Land this branch (it carries c-119206).
 - **2026-11-24 17:30 MST** · claude-code · `h-8ce710` — c-597b06 (E7, in review): stale worker_nodes rows no longer pile up under Kubernetes. **Next:** Land this branch with E7.
 - **2026-11-24 17:28 MST** · claude-code · `h-1cba84` — c-45c921 (now in review), on a branch that merges the unlanded E9 branch (ej/20261124-145257-79147f), so landing it lands E9 too. **Next:** Land ej/20261124-170157-3aeba5; it carries E9.

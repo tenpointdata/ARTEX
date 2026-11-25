@@ -949,6 +949,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/exploration/tokens", s.tokenStats)
 	mux.HandleFunc("GET /api/tokens/daily", s.tokenDailyStats)
 	mux.HandleFunc("GET /api/tokens/conversations", s.conversationTokens)
+	mux.HandleFunc("GET /api/llm/cost", s.llmCost)          // spend + efficiency per task/profile/worker/model
 	mux.HandleFunc("GET /api/tokens/usage", s.pgUsageStats) // global llm_usage aggregation (new dashboard view)
 
 	mux.HandleFunc("GET /api/audit", s.getAudit)
