@@ -239,9 +239,11 @@ These are known and carded on the ARTEX board:
 
 The chart was installed on a kind v0.30 cluster (Kubernetes 1.34, one
 control-plane node and two worker nodes) with the fixtures in `deploy/lab/`
-(an LLM stub instead of a model, Juice Shop as the lab target). It ran the E7
-branch as it stood before the control-API TLS work merged into `main` (#46), so
-`controlTLS` was not part of it; re-run the checks with TLS on (card `c-620510`).
+(an LLM stub instead of a model, Juice Shop as the lab target). The checks ran
+first on the E7 branch and again, all passing, on that work merged with `main`
+(#46), which includes the default `controlTLS` (generated CA). Workers reached
+`https://artex-control:8787` with `ARTEX_CONTROL_CA` pinned and logged no
+plain-HTTP warning.
 
 | Check | Result |
 |---|---|
@@ -259,4 +261,6 @@ reading traffic capture only at start (now the agent settings revision); the
 planner never waking when a fresh task's first settle poll was empty
 (`settleCursor`); a 0-byte `jwt.key` left by a pod killed mid-write (the key is
 now created atomically); `clusterCIDRs` taking DNS from agents (port 53 to the
-resolvers is now allowed first).
+resolvers is now allowed first); Service-link env (`ARTEX_CONTROL_PORT`,
+`ARTEX_CONTROL_SERVICE_HOST`, …) injected into ARTEX's own env namespace
+(pods now set `enableServiceLinks: false`).

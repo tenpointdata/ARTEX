@@ -60,7 +60,8 @@ See `docs/ARCHITECTURE.md` for the code-level map. Summary:
 ## Current state
 
 **2026-11-24 — E7 follow-up (`c-8cfbfe`, in review on `ej/20261124-155353-b1c60a`).** Built on the E7
-branch before main's #46 squash and merged with main after; the kind run predates `controlTLS`. The chart was installed on a 3-node kind cluster and
+branch, then merged with main (#46). The checks were re-run on the merged build with the default `controlTLS`,
+on a fresh database, and all passed. The chart was installed on a 3-node kind cluster and
 the checks are recorded in `docs/DISTRIBUTED.md` ("Recorded install"): two workers on separate hosts, nodes API,
 a task whose 6 intents split across both hosts, traffic recorded on the control node, and the caps set unchanged.
 Five defects were fixed, each with a test:
@@ -69,7 +70,8 @@ Five defects were fixed, each with a test:
   which closes `c-7ad4da`, the capture switch read at start-up;
 - the planner wakes after an empty first settle poll (`settleCursor`, `server/engine_distributed.go`);
 - `jwt.key` is created atomically (`server/auth.go`);
-- worker rollouts use `maxSurge: 0`.
+- worker rollouts use `maxSurge: 0`;
+- pods set `enableServiceLinks: false`, because Service links injected `ARTEX_CONTROL_*` env.
 
 New chart default: agent egress deny for PostgreSQL and the control API (`egress.denyClusterServices`; the
 `egress.sh` variables are `ARTEX_EGRESS_DENY_HOSTS` and `ARTEX_EGRESS_ALLOW_HOSTS`, and DNS stays allowed),
@@ -383,6 +385,11 @@ Card ids in brackets:
 - **E10** [`c-72dd9d`] Code-security testing lane (SAST/dependency ingest) feeding the same dual-graph + evidence model.
 
 ## Known issues and gotchas
+
+- **A database created from an unmerged E7 branch does not start on `main`.** It already applied
+  `0023_distributed_workers`, and `main` then added `0015_integrations` (E2). The migrator refuses an
+  inserted migration ("migrations must be appended, never inserted"). Only databases from branch builds
+  are affected; use a fresh database (seen in the c-8cfbfe kind lab and in test databases).
 
 - **`next dev` writes `web/AGENTS.md`** (Next 16 agent rules) on start. Delete it before committing; it
   is not this repo's file.

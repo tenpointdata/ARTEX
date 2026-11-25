@@ -24,6 +24,9 @@ spec:
     spec:
       serviceAccountName: {{ include "artex.serviceAccountName" . }}
       automountServiceAccountToken: false
+      # No Service-link env: Services named <release>-control… would inject ARTEX_CONTROL_PORT,
+      # ARTEX_CONTROL_SERVICE_HOST and the like into ARTEX's own env namespace. DNS is used instead.
+      enableServiceLinks: false
       terminationGracePeriodSeconds: {{ $w.terminationGracePeriodSeconds }}
       {{- with .Values.imagePullSecrets }}
       imagePullSecrets: {{ toYaml . | nindent 8 }}
