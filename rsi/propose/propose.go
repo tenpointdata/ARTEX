@@ -12,7 +12,10 @@
 // span several scopes (companies or task categories), so an edit that fits one
 // target is pruned before it is ever proposed. Text taken from live tasks
 // (lesson cues, skill names, finding titles) never enters a drafted body: live
-// output is untrusted, so drafts cite task ids and counts only.
+// output is untrusted, so drafts cite task ids and counts only. An optional
+// Drafter (drafter.go) may rewrite the body instead of appending; it is given
+// the same code-owned guidance and counts, never task text, and its output
+// passes the same checks.
 package propose
 
 import (
@@ -85,10 +88,11 @@ type Rule struct {
 
 // Prior is an existing proposal, from GET /api/rsi/proposals.
 type Prior struct {
-	Round  int    `json:"round"`
-	Target string `json:"target"`
-	Body   string `json:"body"`
-	Status string `json:"status"`
+	Round     int    `json:"round"`
+	Target    string `json:"target"`
+	Body      string `json:"body"`
+	Status    string `json:"status"`
+	Rationale string `json:"rationale"`
 }
 
 // Config holds the transfer thresholds.
@@ -110,6 +114,8 @@ type Input struct {
 	Prior   []Prior
 	Rules   []Rule
 	Markers []string // code-owned tail markers (agent.CodeOwnedTailMarkers)
+	Drafter Drafter  // optional: a model rewrites the body; nil appends the fixed guidance
+	Judge   string   // the suite's judge model; a drafter must differ from it (CheckDrafter)
 }
 
 // Draft is one candidate edit, ready to write as an arm file and to post.
@@ -123,6 +129,7 @@ type Draft struct {
 	Support      int      `json:"support"`
 	Of           int      `json:"of"`
 	Scopes       int      `json:"scopes"`
+	DraftedBy    string   `json:"drafted_by,omitempty"` // drafting model; empty = fixed guidance
 }
 
 // Skip records a rule the critic or the pruner dropped, and why.
@@ -146,7 +153,9 @@ const GuidanceHeading = "## Field guidance"
 func Build(in Input, cfg Config) Plan {
 	plan := Plan{Round: in.Round, Slots: max(in.Slots, 0), Drafts: []Draft{}, Skipped: []Skip{}}
 	var cands []Draft
+	rules := map[string]Rule{}
 	for _, r := range in.Rules {
+		rules[r.ID] = r
 		d, why := critique(r, in, cfg)
 		if why != "" {
 			plan.Skipped = append(plan.Skipped, Skip{Rule: r.ID, Reason: why})
@@ -165,6 +174,13 @@ func Build(in Input, cfg Config) Plan {
 		if len(plan.Drafts) >= plan.Slots {
 			plan.Skipped = append(plan.Skipped, Skip{Rule: d.Rule, Reason: fmt.Sprintf("round %d budget exhausted", in.Round)})
 			continue
+		}
+		if in.Drafter != nil { // drafted in rank order, so a refused body frees its slot
+			var why string
+			if d, why = redraft(d, rules[d.Rule], in); why != "" {
+				plan.Skipped = append(plan.Skipped, Skip{Rule: d.Rule, Reason: why})
+				continue
+			}
 		}
 		plan.Drafts = append(plan.Drafts, d)
 	}
@@ -197,21 +213,22 @@ func critique(r Rule, in Input, cfg Config) (Draft, string) {
 	if strings.TrimSpace(cur) == "" {
 		return Draft{}, fmt.Sprintf("role %q has no stored body to extend", r.Role)
 	}
-	block := GuidanceHeading + "\n" + strings.TrimSpace(r.Guidance)
-	if strings.Contains(cur, strings.TrimSpace(r.Guidance)) {
+	guidance := strings.TrimSpace(r.Guidance)
+	if strings.Contains(guidance, "{{") {
+		return Draft{}, "guidance must not carry template actions"
+	}
+	if strings.Contains(cur, guidance) {
 		return Draft{}, "the active body already carries this guidance"
 	}
 	for _, p := range in.Prior {
-		if p.Target == r.Role && strings.Contains(p.Body, strings.TrimSpace(r.Guidance)) {
+		if p.Target == r.Role && strings.Contains(p.Body, guidance) {
 			return Draft{}, fmt.Sprintf("already proposed (status %s)", p.Status)
 		}
 	}
-	edit := rsi.Edit{Surface: rsi.SurfacePromptBody, Target: r.Role, Body: strings.TrimRight(cur, "\n") + "\n\n" + block + "\n"}
+	edit := rsi.Edit{Surface: rsi.SurfacePromptBody, Target: r.Role,
+		Body: strings.TrimRight(cur, "\n") + "\n\n" + GuidanceHeading + "\n" + guidance + "\n"}
 	if err := rsi.ValidateEdit(edit, in.Markers); err != nil {
 		return Draft{}, "refused by rsi.ValidateEdit: " + err.Error()
-	}
-	if strings.Contains(r.Guidance, "{{") {
-		return Draft{}, "guidance must not carry template actions"
 	}
 	return Draft{
 		Name: fmt.Sprintf("r%d-%s", in.Round, r.ID), Round: in.Round, Rule: r.ID, Edit: edit,
