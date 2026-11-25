@@ -124,7 +124,9 @@ export function TaskLLMProfileChain({
                 )}
           </p>
           {rotate && value.length < 2 && (
-            <p className="text-amber-600 text-xs">{t("Select at least two profiles to distribute work across providers.")}</p>
+            <p className="text-amber-600 text-xs">
+              {t("Select at least two profiles to distribute work across providers.")}
+            </p>
           )}
           {rotate && workerBinding != null && (
             <p role="alert" className="text-amber-600 text-xs">
@@ -135,7 +137,9 @@ export function TaskLLMProfileChain({
           )}
           {rotate && bindingCheckFailed && (
             <p className="text-amber-600 text-xs">
-              {t("Worker binding could not be checked. A fixed Worker model overrides rotation; verify Agent settings.")}
+              {t(
+                "Worker binding could not be checked. A fixed Worker model overrides rotation; verify Agent settings.",
+              )}
             </p>
           )}
           {rotate && (
@@ -208,7 +212,9 @@ export function TaskLLMProfileChain({
                 <div className="min-w-0 sm:flex-1">
                   <p className="truncate font-medium text-sm">{profile?.name ?? t("Profile #{id}", { id })}</p>
                   <div className="flex min-w-0 items-center gap-2">
-                    <p className="truncate text-muted-foreground text-xs">{profile?.model ?? t("Profile unavailable")}</p>
+                    <p className="truncate text-muted-foreground text-xs">
+                      {profile?.model ?? t("Profile unavailable")}
+                    </p>
                   </div>
                 </div>
                 {rotate ? (

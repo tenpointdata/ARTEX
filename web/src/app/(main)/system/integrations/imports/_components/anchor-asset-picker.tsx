@@ -27,6 +27,7 @@ export function AnchorAssetPicker({
   value: number[];
   onChange: (ids: number[]) => void;
 }) {
+  const uid = React.useId();
   const [assets, setAssets] = React.useState<Asset[]>([]);
   const [total, setTotal] = React.useState(0);
   const [loading, setLoading] = React.useState(false);
@@ -110,8 +111,15 @@ export function AnchorAssetPicker({
             <ul>
               {rows.map((a) => (
                 <li key={a.id}>
-                  <label className="hover:bg-muted flex cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-sm">
-                    <Checkbox checked={selected.has(a.id)} onCheckedChange={(c) => toggle(a.id, c === true)} />
+                  <label
+                    htmlFor={`${uid}-asset-${a.id}`}
+                    className="hover:bg-muted flex cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-sm"
+                  >
+                    <Checkbox
+                      id={`${uid}-asset-${a.id}`}
+                      checked={selected.has(a.id)}
+                      onCheckedChange={(c) => toggle(a.id, c === true)}
+                    />
                     <span className="min-w-0 flex-1 truncate font-mono text-xs" title={assetLabel(a)}>
                       {assetLabel(a)}
                     </span>

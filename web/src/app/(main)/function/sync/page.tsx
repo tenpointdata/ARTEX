@@ -13,9 +13,9 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { t } from "@/i18n";
 import { api } from "@/lib/api";
 import type { SSProject, SSTask } from "@/lib/types";
-import { t } from "@/i18n";
 
 type SSStatus = {
   exists: boolean;

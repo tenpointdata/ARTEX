@@ -10,9 +10,9 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { intlLocale, t } from "@/i18n";
 import { api } from "@/lib/api";
 import type { FindingTrafficDetail, TrafficDetail } from "@/lib/types";
-import { intlLocale, t } from "@/i18n";
 
 export function TrafficEvidenceViewer({
   findingId,
@@ -166,7 +166,9 @@ export function CapturedTrafficViewer({ id, onClose }: { id: string | null; onCl
       <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-4xl">
         <DialogHeader>
           <DialogTitle>{t("Traffic preview")}</DialogTitle>
-          <DialogDescription>{t("Traffic ID: {id}. The full body is saved when binding.", { id: id ?? "" })}</DialogDescription>
+          <DialogDescription>
+            {t("Traffic ID: {id}. The full body is saved when binding.", { id: id ?? "" })}
+          </DialogDescription>
         </DialogHeader>
         {error ? (
           <Alert variant="destructive">

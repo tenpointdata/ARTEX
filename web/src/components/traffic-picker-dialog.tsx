@@ -21,9 +21,9 @@ import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { intlLocale, t } from "@/i18n";
 import { api } from "@/lib/api";
 import type { FindingTrafficBinding, TrafficResp } from "@/lib/types";
-import { intlLocale, t } from "@/i18n";
 
 const METHODS = ["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"];
 
@@ -115,7 +115,9 @@ export function TrafficPickerDialog({
           <DialogHeader>
             <DialogTitle>{t("Bind traffic")}</DialogTitle>
             <DialogDescription>
-              {t("Filter and multi-select requests/responses; selections persist across pages. After binding you can set purpose, notes, and order.")}
+              {t(
+                "Filter and multi-select requests/responses; selections persist across pages. After binding you can set purpose, notes, and order.",
+              )}
             </DialogDescription>
           </DialogHeader>
           <FieldGroup className="flex flex-col gap-3 sm:flex-row">

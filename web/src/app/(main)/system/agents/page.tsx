@@ -1,30 +1,11 @@
 "use client";
 
 import * as React from "react";
-import { toast } from "sonner";
-import { Bot, PlusIcon, Trash2Icon } from "lucide-react";
 
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@/components/ui/dialog";
+import { Bot, PlusIcon, Trash2Icon } from "lucide-react";
+import { toast } from "sonner";
+
+import { AgentEditor } from "@/components/agent-editor";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -36,23 +17,29 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
-import { AgentEditor } from "@/components/agent-editor";
+import { Textarea } from "@/components/ui/textarea";
 import { t } from "@/i18n";
 import { api } from "@/lib/api";
 import type { Agent } from "@/lib/types";
 
 // AgentGridCard is one clickable tile opening the agent's editor drawer. Custom
 // (non-builtin) agents get a delete button.
-function AgentGridCard({
-  agent,
-  onOpen,
-  onDeleted,
-}: {
-  agent: Agent;
-  onOpen: () => void;
-  onDeleted: () => void;
-}) {
+function AgentGridCard({ agent, onOpen, onDeleted }: { agent: Agent; onOpen: () => void; onDeleted: () => void }) {
   async function del() {
     try {
       await api.deleteAgent(agent.key);
@@ -85,6 +72,7 @@ function AgentGridCard({
           )}
         </div>
         <p className="text-muted-foreground line-clamp-2 min-h-8 text-xs">
+          {/* biome-ignore lint/nursery/useNullishCoalescing: an empty description must show the placeholder. */}
           {agent.description || t("(no description)")}
         </p>
         <div className="text-muted-foreground flex flex-wrap gap-1.5 text-[10px]">
@@ -109,7 +97,9 @@ function AgentGridCard({
             <AlertDialogHeader>
               <AlertDialogTitle>{t('Delete agent "{name}"?', { name: agent.name })}</AlertDialogTitle>
               <AlertDialogDescription>
-                {t("This also deletes its prompt, variables, visibility and tool bindings. This action cannot be undone.")}
+                {t(
+                  "This also deletes its prompt, variables, visibility and tool bindings. This action cannot be undone.",
+                )}
               </AlertDialogDescription>
             </AlertDialogHeader>
             <AlertDialogFooter>
@@ -217,7 +207,10 @@ export default function AgentsPage() {
   const [editKey, setEditKey] = React.useState<string | null>(null);
 
   const reload = React.useCallback(() => {
-    api.agents().then(setAgents).catch(() => setAgents([]));
+    api
+      .agents()
+      .then(setAgents)
+      .catch(() => setAgents([]));
   }, []);
   React.useEffect(() => {
     reload();

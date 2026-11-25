@@ -81,7 +81,7 @@ func clientReadAllowed(method, path string) bool {
 	}
 	switch path {
 	case "/api/report", "/api/stats", "/api/tasks/{id}/outcome", "/api/tasks/{id}/coverage",
-		"/api/me/companies", "/api/me/tasks":
+		"/api/me/companies", "/api/me/tasks", "/api/events/stream":
 		return true
 	}
 	switch path {

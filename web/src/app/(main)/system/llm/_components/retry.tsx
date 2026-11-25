@@ -55,9 +55,15 @@ export const RETRY_LAYERS = {
   connect: {
     title: t("Connect retry"),
     where: t("SDK · before a 200 arrives"),
-    trigger: t("Cannot connect or no 200 yet: network-layer errors such as connection reset / read-write timeout / DNS failure, plus HTTP 408, 429, 500, 502, 503, 504."),
-    skips: t("The remaining status codes (400 / 401 / 403 / 404 / 413 / 422 etc.) are deterministic rejections — resending fails the same way, so they bubble up directly."),
-    desc: t("Resends the same request verbatim. Once the stream has started (a 200 was received), a mid-stream drop is no longer this layer's business."),
+    trigger: t(
+      "Cannot connect or no 200 yet: network-layer errors such as connection reset / read-write timeout / DNS failure, plus HTTP 408, 429, 500, 502, 503, 504.",
+    ),
+    skips: t(
+      "The remaining status codes (400 / 401 / 403 / 404 / 413 / 422 etc.) are deterministic rejections — resending fails the same way, so they bubble up directly.",
+    ),
+    desc: t(
+      "Resends the same request verbatim. Once the stream has started (a 200 was received), a mid-stream drop is no longer this layer's business.",
+    ),
     attemptsLabel: t("Retry attempts"),
     defAttempts: 3,
     defInterval: t("0.5s→1s→2s exponential (capped at 8s)"),
@@ -66,8 +72,12 @@ export const RETRY_LAYERS = {
   empty: {
     title: t("Empty-response retry"),
     where: t("SDK · openai format only"),
-    trigger: t("HTTP 200 with a normal stop finish_reason, yet not a single content block in the response — gateway empty frames, dropped thinking-field frames and sampling hiccups all look like this."),
-    skips: t("Empty because of max_tokens truncation does not count (fix that by raising the output cap; resending just hits it again)."),
+    trigger: t(
+      "HTTP 200 with a normal stop finish_reason, yet not a single content block in the response — gateway empty frames, dropped thinking-field frames and sampling hiccups all look like this.",
+    ),
+    skips: t(
+      "Empty because of max_tokens truncation does not count (fix that by raising the output cap; resending just hits it again).",
+    ),
     desc: t("Resends the entire prompt, so it is relatively expensive on long contexts; keep the count small."),
     attemptsLabel: t("Retry attempts"),
     defAttempts: 2,
@@ -77,9 +87,15 @@ export const RETRY_LAYERS = {
   stream: {
     title: t("Same-provider safe-window retry"),
     where: t("This project · before any output is delivered"),
-    trigger: t("Trouble only after the stream is established (a 200 received): mid-stream disconnects, provider overloaded, in-stream 429 / 5xx error events — while not a single token has been handed to the caller yet."),
-    skips: t("Quota exhausted (402 / insufficient_quota, handed to the pool to switch configs), context too long (413 / context length, handed to compression), and deterministic rejections (400 / 401 / 403 / 404 / 422) are never retried."),
-    desc: t("Replays the same request on the same config. Since no output has been delivered yet, the replay cannot duplicate model output or tool executions."),
+    trigger: t(
+      "Trouble only after the stream is established (a 200 received): mid-stream disconnects, provider overloaded, in-stream 429 / 5xx error events — while not a single token has been handed to the caller yet.",
+    ),
+    skips: t(
+      "Quota exhausted (402 / insufficient_quota, handed to the pool to switch configs), context too long (413 / context length, handed to compression), and deterministic rejections (400 / 401 / 403 / 404 / 422) are never retried.",
+    ),
+    desc: t(
+      "Replays the same request on the same config. Since no output has been delivered yet, the replay cannot duplicate model output or tool executions.",
+    ),
     attemptsLabel: t("Retry attempts"),
     defAttempts: 2,
     defInterval: t("0.5s→1s exponential (capped at 4s)"),
@@ -88,9 +104,13 @@ export const RETRY_LAYERS = {
   breaker: {
     title: t("Pool breaker"),
     where: t("This project · process-level, one global copy"),
-    trigger: t("Trips when transient failures (429, 5xx, network errors) accumulate consecutively to the threshold; deterministic failures — insufficient balance (402), dead key (401 / 403), missing model (404) — ignore the threshold and trip on the first occurrence."),
+    trigger: t(
+      "Trips when transient failures (429, 5xx, network errors) accumulate consecutively to the threshold; deterministic failures — insufficient balance (402), dead key (401 / 403), missing model (404) — ignore the threshold and trip on the first occurrence.",
+    ),
     skips: t("One success resets the counter, so an occasionally flaky config is not slowly ground into tripping."),
-    desc: t("After tripping it enters cooldown, and while cooling the pool skips the config outright. State is persisted, surviving restarts."),
+    desc: t(
+      "After tripping it enters cooldown, and while cooling the pool skips the config outright. State is persisted, surviving restarts.",
+    ),
     attemptsLabel: t("Consecutive failures to trip"),
     defAttempts: 3,
     defInterval: t("1min→5min→30min gradient"),
@@ -99,9 +119,15 @@ export const RETRY_LAYERS = {
   intent: {
     title: t("Intent rerun"),
     where: t("This project · process-level, one global copy"),
-    trigger: t("The earlier layers could not save it: the worker ends with model_error — inner retries all exhausted, or the stream broke only after output delivery had started (when replay is unsafe and only a full rerun works)."),
-    skips: t("Quota exhaustion is already handled by the pool switching configs and is not rerun here; when the task is paused / aborted / wrapping up it yields immediately, spending no backoff time."),
-    desc: t("Reruns the whole intent from scratch. It is the outermost layer, so one rerun multiplies the inner layers' attempt counts once more."),
+    trigger: t(
+      "The earlier layers could not save it: the worker ends with model_error — inner retries all exhausted, or the stream broke only after output delivery had started (when replay is unsafe and only a full rerun works).",
+    ),
+    skips: t(
+      "Quota exhaustion is already handled by the pool switching configs and is not rerun here; when the task is paused / aborted / wrapping up it yields immediately, spending no backoff time.",
+    ),
+    desc: t(
+      "Reruns the whole intent from scratch. It is the outermost layer, so one rerun multiplies the inner layers' attempt counts once more.",
+    ),
     attemptsLabel: t("Rerun attempts"),
     defAttempts: 2,
     defInterval: t("Fixed 3s"),

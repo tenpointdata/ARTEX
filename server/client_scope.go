@@ -73,6 +73,7 @@ var clientBinders = map[string]clientBinder{
 	"GET /api/tasks/{id}/coverage":               bindTaskPath,
 	"GET /api/me/companies":                      bindBound,
 	"GET /api/me/tasks":                          bindCompany,
+	"GET /api/events/stream":                     bindCompany,
 	"GET /api/exploration/findings":              bindFindingsList,
 	"GET /api/exploration/findings/groups":       bindCompany,
 	"GET /api/exploration/findings/asset-tree":   bindCompany,
