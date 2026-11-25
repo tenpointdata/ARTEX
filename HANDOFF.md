@@ -1,6 +1,6 @@
 # HANDOFF.md — ARTEX
 
-**Last updated:** 2026-11-24 19:31 MST, by claude-code: c-c89f5b (in review): RSI Loop C proposer. Earlier hand-offs are under Deltas and in `ej handoff log`.
+**Last updated:** 2026-11-24 20:10 MST, by claude-code: c-c2bdc8 (E2 follow-up) built, in review: signed GitHub/Jira webhooks push ticket changes to findings; 202 deferred path now tested. Earlier hand-offs are under Deltas and in `ej handoff log`.
 
 > Single entry point for whoever picks this up next (any agent or human), with no access to the
 > originating conversation. Read this first, then the sections of the code it points at.
@@ -58,6 +58,27 @@ See `docs/ARCHITECTURE.md` for the code-level map. Summary:
 - `docs/` — `ARCHITECTURE.md`, `OPS.md`, traffic docs, `RSI.md` (self-improvement governance contract).
 
 ## Current state
+
+**2026-11-24 — E2 push updates via signed webhooks (`c-c2bdc8`; in review on `ej/20261124-191156-37e38c`).**
+This branch also carries the c-da9198 commit (per-tracker advisory lock, capped sync cursor, background
+sync; cherry-picked from `ej/20261124-135159-6d9961`, which main did not have yet), because the webhook
+runs under that lock. `POST /api/hooks/trackers/{id}` (`server/ticket_webhook.go`) is exempt from
+`requireAuth` and authenticated by an HMAC-SHA256 of the body under the tracker's optional
+`webhook_secret` (sealed in the tracker config, masked, scrubbed; ≥16 chars). GitHub: `X-Hub-Signature-256`,
+`issues` events, repo must match. Jira Cloud: `X-Hub-Signature` (admin webhook with secret), project must
+match. The payload only names the ticket; `ticketSyncer.sync` reads the state from the tracker API under the
+lock (busy → 202 `deferred`). Uniform 401, 1 MiB, 4 in flight, 10-min delivery-id window, `ticket.webhook`
+audit entries. A destination change re-asks only the outbound credentials (`ticketing.OutboundSecretKeys`).
+The tracker sheet has a Webhook secret field and shows the URL. Docs: `docs/integrations.md`. No migration.
+Verified against a throwaway Postgres 18: `TestGitHubWebhookClosesFinding`, `TestGitHubWebhookRejectsBadSignature`,
+`TestWebhookNeedsConfiguredSecret`, `TestWebhookDeferredWhileTrackerLocked` (held lock → 202 `deferred`, finding
+unchanged, redelivery of the same id then processed), the ticketing webhook unit tests, all existing E2 ticket tests, web
+`test:integrations`. An independent security review found no bypass or leak; its slowloris, timing, dedup-order
+and id-length findings are fixed (10 s read deadline, every refusal hashes the body). `scripts/verify.sh`:
+only the two known environment failures (`TestConnectWithoutPasswordRealPG` on a trust-auth Postgres,
+`TestManagerSOCKS5UDPOptInAndAssetBlockRuleDropsDatagram` without 127.0.0.2), plus `TestSOCKS5RemoteScope`, which
+also fails on main (`traffic/` is identical to main; card `c-1a74a4`). Not verified: a live
+GitHub/Jira delivery (needs a publicly reachable instance), the sheet in a browser.
 
 **2026-11-24 — RSI proposer/critic (`c-c89f5b`, in review)** on `ej/20261124-192202-fbe9e3`.
 `cmd/artex-rsi-propose` (core `rsi/propose`: `Build` critic + pruner, `Slots` budget, `WriteArm`,
@@ -329,7 +350,8 @@ Card ids in brackets:
 - **E1** [`c-8f9cca`] Client-grade reporting & deliverables (scoring, remediation, framework mappings, branded export).
 - **E2** [`c-6def05`] Backend, UI (`c-597eb6`) and UI follow-ups (`c-2d91eb`) are done, in review on `ej/20261124-150516-d78c96` (see Current state). Follow-ups:
   [`c-119206`] role-gate the E2 UI controls; [`c-1198a2`] run `scripts/e2e/integrations.sh` in CI (after c-cc25b6);
-  [`c-da9198`] scheduled sync plus a per-tracker lock; [`c-ea60a0`] move agent `scan_ingest` onto
+  [`c-da9198`] scheduled sync plus a per-tracker lock (on `ej/20261124-135159-6d9961`, also carried by the
+  c-c2bdc8 branch); [`c-c2bdc8`] signed webhooks (in review on `ej/20261124-191156-37e38c`); [`c-ea60a0`] move agent `scan_ingest` onto
   `scanimport`, normalize default ports, and settle two dedup edge cases.
 - **E3** [`c-d25ff9`] — gate built (in review). Follow-ups: hardening `c-0d277f`, UI `c-936308`, first live run `c-772190`, proposer/critic `c-c89f5b` (in review; follow-ups `c-4bbf29` live run, `c-0aaa24` model drafter).
 - **E4** [`c-c0bb07`] Methodology-driven coverage: landed 2026-11-24 (see Current state). Follow-ups:
@@ -451,6 +473,12 @@ Card ids in brackets:
   which would lock the proposer out. Reverses the earlier "reject and rollback need only a session" line in `RSI.md`.
   The RSI page (c-936308, unmerged branch `ej/20261124-192153-48c72c`) must gate the Rollback button on
   `useCan("admin")` and keep reject on `useCan("operate")` (follow-up c-a842a0).
+- **2026-11-24 c-c2bdc8 (tracker webhooks):** a delivery is a hint, never state: it names a ticket and the
+  normal sync reads the tracker API, so forged or replayed payloads cannot set a finding status. Jira is
+  supported only through Jira Cloud's HMAC-signed admin webhooks (`X-Hub-Signature`); a secret in the URL was
+  rejected (it lands in proxy/access logs) and Connect JWT is out of scope. The webhook secret is not an
+  outbound credential, so a destination change keeps it. Every refusal is the same 401 so tracker ids are not
+  probeable.
 
 - **2026-11-24 c-f729e8 (approvals triage):** approval keys are A/D (separate verdict set from findings' C/F/D/A/I/P;
   the meaning of a key depends on the queue). They act only on an open pending request, never on a selection or with

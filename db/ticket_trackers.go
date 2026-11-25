@@ -162,9 +162,63 @@ func (d *DB) FindingTicketsByTracker(ctx context.Context, trackerID int64) ([]*F
 	return scanFindingTickets(rows)
 }
 
+// TicketSyncCursor walks a tracker's links in passes, oldest sync first. A
+// pass starts at PassStart (database time) and visits each link whose
+// synced_at is before it exactly once: a link synced during the pass moves
+// past PassStart and waits for the next one, and a link that keeps failing
+// (its synced_at does not move) is still passed over by After, so it cannot
+// starve the others. The zero value starts a new pass.
+type TicketSyncCursor struct {
+	PassStart time.Time `json:"pass_start"`
+	AfterAt   time.Time `json:"after_synced_at"`
+	AfterID   int64     `json:"after_id"`
+}
+
+// FindingTicketsPage returns up to limit links of the tracker after the
+// cursor, and the cursor for the next call. done reports that the pass ended
+// with this page (the returned cursor then starts a new pass).
+func (d *DB) FindingTicketsPage(ctx context.Context, trackerID int64, cur TicketSyncCursor, limit int) ([]*FindingTicket, TicketSyncCursor, bool, error) {
+	if cur.PassStart.IsZero() {
+		if err := d.QueryRowContext(ctx, `SELECT now()`).Scan(&cur.PassStart); err != nil {
+			return nil, cur, false, err
+		}
+		cur.AfterAt, cur.AfterID = time.Time{}, 0
+	}
+	rows, err := d.QueryContext(ctx, `SELECT `+findingTicketCols+` FROM finding_tickets
+WHERE tracker_id=$1 AND synced_at < $2 AND (synced_at, id) > ($3, $4)
+ORDER BY synced_at, id LIMIT $5`, trackerID, cur.PassStart, cur.AfterAt, cur.AfterID, limit+1)
+	if err != nil {
+		return nil, cur, false, err
+	}
+	out, err := scanFindingTickets(rows)
+	if err != nil {
+		return nil, cur, false, err
+	}
+	if len(out) <= limit {
+		return out, TicketSyncCursor{}, true, nil
+	}
+	out = out[:limit]
+	last := out[len(out)-1]
+	return out, TicketSyncCursor{PassStart: cur.PassStart, AfterAt: last.SyncedAt, AfterID: last.ID}, false, nil
+}
+
 // FindingTicket returns the link of one finding in one tracker, nil when none.
 func (d *DB) FindingTicket(ctx context.Context, trackerID, findingID int64) (*FindingTicket, error) {
 	rows, err := d.QueryContext(ctx, `SELECT `+findingTicketCols+` FROM finding_tickets WHERE tracker_id=$1 AND finding_id=$2`, trackerID, findingID)
+	if err != nil {
+		return nil, err
+	}
+	out, err := scanFindingTickets(rows)
+	if err != nil || len(out) == 0 {
+		return nil, err
+	}
+	return out[0], nil
+}
+
+// FindingTicketByExternal returns the link of one external ticket in one
+// tracker, nil when none (UNIQUE (tracker_id, external_id) makes it at most one).
+func (d *DB) FindingTicketByExternal(ctx context.Context, trackerID int64, externalID string) (*FindingTicket, error) {
+	rows, err := d.QueryContext(ctx, `SELECT `+findingTicketCols+` FROM finding_tickets WHERE tracker_id=$1 AND external_id=$2`, trackerID, externalID)
 	if err != nil {
 		return nil, err
 	}

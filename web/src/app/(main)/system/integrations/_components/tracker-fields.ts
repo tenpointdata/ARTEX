@@ -1,6 +1,6 @@
 import { t } from "@/i18n";
 import type { FieldDef } from "@/lib/config-form";
-import { INCLUDE_EVIDENCE } from "@/lib/integrations";
+import { INCLUDE_EVIDENCE, WEBHOOK_SECRET } from "@/lib/integrations";
 
 // Per-kind config fields for ticket trackers (see ticketing/*.go for what each adapter reads).
 // Layout and copy live here; which keys are credentials comes from the backend's secret_keys,
@@ -11,6 +11,17 @@ export const TRACKER_KIND_LABEL: Record<string, string> = {
   jira: "Jira",
   defectdojo: "DefectDojo",
 };
+
+// webhookSecretField is the optional push-update secret (ticketing.WebhookSecretKey): when set, the tracker's
+// signed webhook updates findings at once instead of waiting for the next sync.
+function webhookSecretField(where: string): FieldDef {
+  return {
+    key: WEBHOOK_SECRET,
+    label: t("Webhook secret"),
+    kind: "password",
+    help: `${t("Optional, at least 16 characters. Set the same secret on the")} ${where}; ${t("the URL is shown after saving")}`,
+  };
+}
 
 export const TRACKER_FIELDS: Record<string, FieldDef[]> = {
   github: [
@@ -35,6 +46,7 @@ export const TRACKER_FIELDS: Record<string, FieldDef[]> = {
       placeholder: "security, artex",
       help: t("Added to every issue"),
     },
+    webhookSecretField(t("repository webhook (Issues events, content type JSON)")),
   ],
   jira: [
     { key: "base_url", label: t("Jira URL"), kind: "text", placeholder: "https://your-org.atlassian.net" },
@@ -59,6 +71,7 @@ export const TRACKER_FIELDS: Record<string, FieldDef[]> = {
       kind: "text",
       help: t("Transition name used to reopen an issue"),
     },
+    webhookSecretField(t("Jira Cloud admin webhook (Issue updated)")),
   ],
   defectdojo: [
     { key: "base_url", label: t("DefectDojo URL"), kind: "text", placeholder: "https://defectdojo.example.com" },
