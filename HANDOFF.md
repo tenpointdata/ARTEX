@@ -133,60 +133,8 @@ switches between them and reads each one's findings and report; all 51 `/api` re
 
 **2026-11-24 — E5 web UI (`c-869050`, in review).** Detail moved to `docs/handoff/2026-11-24-e5-web-ui.md`.
 
-**2026-11-24** — **E2 integrations** (backend `c-6def05`, UI `c-597eb6`, follow-ups `c-2d91eb`, all in review)
-are on branch `ej/20261124-150516-d78c96`. It merges the UI branch `ej/20261124-132955-7aef3f`, which carries
-the backend `ej/20261124-055326-6bcfa9`, so landing it lands all of E2. See `docs/integrations.md`.
-- **Findings out:** package `ticketing` (GitHub Issues, Jira, DefectDojo) goes through `notify.Do` (the SSRF
-  guard and redaction). Tracker configs are sealed and masked, and a destination change needs the credentials again.
-  `/api/integrations/trackers` has CRUD, `push` and `sync`. Status round-trips, and the tracker wins a conflict.
-- **Scanner data in:** package `scanimport` reads Nmap, Nuclei, ZAP, Burp and SARIF. `POST /api/integrations/imports`
-  writes assets with provenance and unverified POE-0 findings (`finding_import_sources`), and never edits on re-import.
-  `GET /api/integrations/imports?limit=&offset=` returns `{imports, total}`.
-- **UI:** System → Integrations (the trackers table and a masked-credential sheet) and Scanner imports (format
-  detection, Past imports with a pager). Each import's New findings count links to
-  `/function/findings?import_id=N`. `import_id` is in the shared findings filter (`db.FindingFilter.ImportID`),
-  so it applies to the list, groups, asset tree and export, and the page shows a chip that clears it.
-  The findings bulk bar and the detail page have Push to tracker; the detail has a Tickets card.
-- **RBAC (with E5):** `GET /api/exploration/findings/{id}/integrations` needs `read`, not `client_read`.
-  Tracker create/edit/delete need `admin`, the same as notification channels. Push, sync and import need `operate`.
-  The E2 pages do not yet gate their controls by role (`c-119206`).
-- **Browser e2e:** `scripts/e2e/integrations.sh` sets up a throwaway Postgres, the backend, a Next production
-  build and Playwright, then runs `integrations-e2e.js` against `fake-github.js`. It passed 24 checks
-  locally on 2026-11-24. It is not a CI job yet (`c-1198a2`, after c-cc25b6).
-- Migration `0015_integrations.sql` is unreleased, and its checksum is enforced, so do not edit it. Fix forward.
-- Local `./server` failures that are environment, not code: `TestConnectWithoutPasswordRealPG` (trust-auth Postgres)
-  and the SOCKS5 test that needs a `127.0.0.2` alias.
-
-**2026-11-24 (c-d25ff9, E3)** — The `RSI.md` Loop C benchmark gate and Loop B lesson graduation are built,
-flag off (`ARTEX_RSI_LOOP`, default off, read per request). Pure core `rsi/` (search-space allowlist:
-`prompt_body` for goals/planner/worker and `lesson`; immutable and git-reviewed surfaces refused;
-annealed budget 4,2,1,1…; `Evaluate` recomputes per-gate and paired results from raw E8 arm records,
-binds them to the exact body sha / lesson set, refuses proposed-from targets, net regressions and
-gains on fewer than 2 targets). API `/api/rsi/*` (`server/rsi_loop.go`); migration **0020**
-(`rsi_proposals`, `rsi_proposal_evidence`, append-only `rsi_adoption_log`). Adoption = owner
-password + newest passing evidence id + evidence baseline equal to the live prompt; it appends an
-`agent_prompts` version; rollback is a pointer change (refused if an owner edited since, open
-with the flag off). `ARTEX_RSI_LESSONS` gains `adopted` (only graduated lessons) and `bench` (a
-pinned set, `PUT /api/rsi/bench-lessons`). This branch merges the unmerged E8 suite branch
-(`ej/20261124-084655-ccdab2`); harness gains lesson arms and `scripts/benchmark/rsi_submit.py`.
-An adversarial review (opus) found real-upload breakage (string task ids) and replay/forgery
-paths; fixed here: task ledger across proposals, `suite_run` invariant, 3 uploads per proposal,
-crashed candidate runs count as losses, rendered + normalized marker checks, ≤4 open proposals
-with forward-only rounds, split agent lock, lesson block sha and unedited-role shas re-checked at
-adoption. Remaining findings: `c-0d277f`. Verified: `go test ./rsi`, the RSI DB and server tests
-against Postgres 16, 65 benchmark Python tests, `scripts/verify.sh`. Not verified: any live suite run through the gate (`c-772190`); no UI
-(`c-936308`).
-
-**2026-11-24 (c-c0bb07, E4)** — Methodology-driven coverage: OWASP WSTG 4.2 (97 tests) and the OWASP
-API Security Top 10 2023 are typed checklists in `methodology/` (data in `methodology/data/*.json`,
-embedded and validated). A task's applicable checklists come from its goal and description (no
-column). `db/coverage_methodology.go` scores them from the coverage ledger, findings (vulnclass)
-and intents citing an item (`payload.methodology_item`). The planner gets a `[Methodology coverage]`
-block each round, and `add_intent` takes `methodology_item`, which is validated and stored as the
-canonical item id. `GET /api/tasks/{id}/coverage` returns `methodologies`, and the task overview's
-coverage card shows a filterable table of the items. Verified by the methodology, agent and
-db unit tests, a Postgres integration test (`TestMethodologyCoverage`), `tsc` and `scripts/verify.sh`.
-The UI was not checked in a browser.
+**2026-11-24 — E2 integrations, E3 RSI gate, E4 methodology coverage (all in review or on main).** Detail moved to
+`docs/handoff/2026-11-24-e2-e3-e4-state.md`.
 
 **2026-11-24 (c-75c593)** — The benchmark subject instance (`docker-compose.bench.yml`) now builds from a
 clean clone: production `Dockerfile`, a sibling Postgres, named volumes, committed `bench/.env.example`
@@ -255,10 +203,8 @@ body, through the versioned prompt API, and the starting bodies are restored aft
 ## Triage (next handful)
 
 **Agents' lane**
-0. *(unclaimed)* — **E7: worker nodes miss other runtime control-node state** (M), card `c-6bcdd3`: LLM profiles,
-   MCP servers, custom tools and similar are rebuilt only at start. Done = each one is followed or listed in
-   DISTRIBUTED.md Limits. Then `c-d4946f` (re-resolve the cluster egress deny, M) and `c-597b06` (stale
-   worker_nodes rows, S).
+0. E7 install follow-ups from c-8cfbfe: `c-6bcdd3` (other state workers read only at start) is claimed by
+   `h-a90a9e`; `c-d4946f` (re-resolve the egress deny) and `c-597b06` (stale node rows) are in review on their branches.
 1. *(unclaimed)* — **SEC: per-task uid follow-ups** (S each): `c-12df03` (single-uid start-up fails on a
    socket; MCP uid not egress-filtered), `c-e70e5c` (release ended tasks at start-up; per-key lock). The "Done when" is on each card.
 2. *(unclaimed)* — **E5 UI: hide role-lacking actions on existing pages** (M), card `c-92bb52`. Done = as
