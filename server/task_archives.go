@@ -75,6 +75,16 @@ func (s *Server) startTaskArchiveWorker() {
 	s.archiveWG.Add(1)
 	go func() {
 		defer s.archiveWG.Done()
+		if s.ctx.Err() != nil {
+			return
+		}
+		if _, err := s.backfillArchiveCostCells(); err != nil {
+			log.Printf("[task-archive] cost backfill: %v", err)
+		}
+	}()
+	s.archiveWG.Add(1)
+	go func() {
+		defer s.archiveWG.Done()
 		ticker := time.NewTicker(taskArchivePollInterval)
 		defer ticker.Stop()
 		for {

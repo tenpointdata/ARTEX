@@ -28,15 +28,22 @@ type archiveCostCell struct {
 
 // archiveCostCellsQuery builds aggregate_stats.cost_cells at archive time. It
 // matches the rows the other token aggregates match ($1 task id, $2 exploration).
-const archiveCostCellsQuery = `SELECT COALESCE(jsonb_agg(to_jsonb(x)),'[]'::jsonb) FROM (
+var archiveCostCellsQuery = archiveCostCellsOver(`llm_usage WHERE COALESCE(task_id,'')=$1 OR exploration_id=$2`)
+
+// archiveCostCellsOver is the cost_cells aggregate over any llm_usage-shaped
+// source, so archiving and the legacy backfill (llm_cost_archive_backfill.go)
+// produce identical cells.
+func archiveCostCellsOver(source string) string {
+	return `SELECT COALESCE(jsonb_agg(to_jsonb(x)),'[]'::jsonb) FROM (
 SELECT COALESCE(profile_name,'') profile_name, COALESCE(worker,'') worker, COALESCE(model,'') model,
        to_char(ts AT TIME ZONE 'UTC','YYYY-MM-DD') date, count(*) calls,
        count(*) FILTER (WHERE COALESCE(status,'ok') <> 'ok') errors,
        COALESCE(sum(input_tokens),0) input_tokens, COALESCE(sum(output_tokens),0) output_tokens,
        COALESCE(sum(cache_read),0) cache_read_tokens, COALESCE(sum(cache_write),0) cache_write_tokens,
        COALESCE(sum(latency_ms),0) latency_ms, min(ts - COALESCE(latency_ms,0) * interval '1 ms') first_ts, max(ts) last_ts
-FROM llm_usage WHERE COALESCE(task_id,'')=$1 OR exploration_id=$2
+FROM ` + source + `
 GROUP BY 1,2,3,4 ORDER BY 4,1,2,3) x`
+}
 
 // CostArchiveCoverage says how much of the archived tasks' usage a cost view
 // could include. Archives older than cost_cells keep only per-profile totals,

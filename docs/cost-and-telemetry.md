@@ -29,6 +29,13 @@ carries prompt or response content.
   time by task or profile, and are reported as `archived_omitted` (the page says how many) otherwise.
   Their rows have `first_ts`/`last_ts` null. The response also carries `archived_included` and
   `tasks`, the distinct task total (the rows' `tasks` overlap across profiles, workers and models).
+- Backfill of older archives (c-888292): on start, the archive worker's companion pass
+  (`server/task_archive_cost_backfill.go`) lists ready archives with per-profile usage but no
+  `cost_cells` (`db.ArchivesMissingCostCells`), reads only `manifest.json` → `tables.llm_usage` from
+  each package (checksum verified; S3 packages are downloaded to `archives/tasks/.backfill` and
+  removed), and writes the cells with the same aggregate archiving uses (`archiveCostCellsOver`), so
+  `archived_omitted` reaches 0. It is idempotent; an unreadable package is logged and retried on the
+  next start, and a package with no usage rows keeps its per-profile totals.
 
 ## OpenTelemetry export
 

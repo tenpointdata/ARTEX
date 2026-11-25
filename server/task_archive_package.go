@@ -705,17 +705,8 @@ func extractTaskArchivePackage(path, expectedSHA, destination string) error {
 		return err
 	}
 	defer file.Close()
-	if expectedSHA != "" {
-		hasher := sha256.New()
-		if _, err := io.Copy(hasher, file); err != nil {
-			return err
-		}
-		if hex.EncodeToString(hasher.Sum(nil)) != strings.ToLower(expectedSHA) {
-			return errors.New("task archive checksum mismatch")
-		}
-		if _, err := file.Seek(0, io.SeekStart); err != nil {
-			return err
-		}
+	if err := verifyTaskArchiveChecksum(file, expectedSHA); err != nil {
+		return err
 	}
 	decoder, err := zstd.NewReader(file)
 	if err != nil {
@@ -772,4 +763,21 @@ func extractTaskArchivePackage(path, expectedSHA, destination string) error {
 		}
 	}
 	return nil
+}
+
+// verifyTaskArchiveChecksum checks a package against its recorded SHA-256 (none
+// recorded skips the check) and rewinds it for reading.
+func verifyTaskArchiveChecksum(file io.ReadSeeker, expectedSHA string) error {
+	if expectedSHA == "" {
+		return nil
+	}
+	hasher := sha256.New()
+	if _, err := io.Copy(hasher, file); err != nil {
+		return err
+	}
+	if hex.EncodeToString(hasher.Sum(nil)) != strings.ToLower(expectedSHA) {
+		return errors.New("task archive checksum mismatch")
+	}
+	_, err := file.Seek(0, io.SeekStart)
+	return err
 }
