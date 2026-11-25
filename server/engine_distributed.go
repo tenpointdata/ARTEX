@@ -300,19 +300,3 @@ func (e *Engine) budgetWatch(t *Task) {
 		t.Notify()
 	}
 }
-
-// remoteDrainDeadline is when a delete or archive may assume worker nodes have
-// stopped writing for the task (zero time outside a distributed deployment).
-// BeginDelete set the 'deleting' fence and revoked the remote claims; a claim
-// that landed in between is revoked here. A worker node reads the fence every
-// distributedPoll and stops the task's runs, so the drain waits two polls and
-// a margin. A node cut off from the database cannot write either.
-func (s *Server) remoteDrainDeadline(taskID string) time.Time {
-	if !s.engine.distributed() {
-		return time.Time{}
-	}
-	if t, ok := s.m.Task(taskID); ok {
-		s.engine.revokeRemoteClaims(t)
-	}
-	return time.Now().Add(2*distributedPoll + time.Second)
-}

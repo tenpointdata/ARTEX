@@ -18,6 +18,13 @@ const InterceptRulesRevisionKey = "intercept_rules_revision"
 // agents from the same rows, reload and rebuild too.
 const AgentSettingsRevisionKey = "agent_settings_revision"
 
+// LLMConfigRevisionKey is the settings key of the LLM configuration revision:
+// bumped whenever an API change drops the LLM provider caches (an LLM profile
+// saved, activated or deleted, the active config replaced, the retry policy or
+// the failover switches changed, an agent's profile binding changed), so worker
+// nodes drop theirs and re-apply the active profile from the database.
+const LLMConfigRevisionKey = "llm_config_revision"
+
 // InterceptRulesRevision returns the current intercept rules revision; 0 when
 // it has never been bumped. A stored value that is not a decimal integer is an
 // error, never a revision: the caller must then treat its rule cache as unknown.

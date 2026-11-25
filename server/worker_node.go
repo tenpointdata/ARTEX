@@ -165,6 +165,7 @@ func (s *Server) workerDispatchOnce(ctx context.Context) {
 			w.mu.Unlock()
 		}
 	}
+	s.ackDrains()
 }
 
 // syncSharedEgress applies a capture-switch or global-proxy change made on the

@@ -139,8 +139,19 @@ func (d *DB) SetTaskDispatchClosed(taskID int64, reason string) error {
 	if reason != "" && reason != DispatchSettling && reason != DispatchDeleting {
 		return fmt.Errorf("unknown dispatch fence %q", reason)
 	}
-	_, err := d.Exec(`UPDATE tasks SET dispatch_closed=$2 WHERE id=$1`, taskID, reason)
-	return err
+	// The acks answer one fence: any change clears them (task_drain_acks).
+	tx, err := d.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback() // a no-op after Commit
+	if _, err := tx.Exec(`UPDATE tasks SET dispatch_closed=$2 WHERE id=$1`, taskID, reason); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`DELETE FROM task_drain_acks WHERE task_id=$1`, taskID); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 // DispatchableTaskIDs lists the tasks a worker node should serve: not
