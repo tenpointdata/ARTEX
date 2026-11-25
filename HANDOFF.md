@@ -59,6 +59,14 @@ See `docs/ARCHITECTURE.md` for the code-level map. Summary:
 
 ## Current state
 
+**2026-11-24 — SOCKS5 auth regression after #79 fixed (`c-831dfa`).** `checkCredential` looked up a
+scope-token password in the local registry only, so worker-minted tokens that the remote resolver holds got
+RFC 1929 0x01. It now uses `Traffic.resolveScope` (local, then remote). `TestSOCKS5RemoteScope` now expects
+#79's refusal stage: unknown or ended tokens get 0x01 at auth, and the bare pace marker passes open-mode auth
+and then gets 0x02 at CONNECT. `TestManagerSOCKS5UDP…` was failing only because 127.0.0.2 can't be bound on
+macOS. It now skips there and passes on Linux with real PG (golang:1.26.11-bookworm, private Docker network).
+`scripts/verify.sh` Go steps pass. Its web i18n step fails on #80's strings (`c-be8a4f`).
+
 **2026-11-24 — E2 push updates via signed webhooks (`c-c2bdc8`; in review on `ej/20261124-191156-37e38c`).**
 This branch also carries the c-da9198 commit (per-tracker advisory lock, capped sync cursor, background
 sync; cherry-picked from `ej/20261124-135159-6d9961`, which main did not have yet), because the webhook
