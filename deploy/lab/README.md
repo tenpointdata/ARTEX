@@ -35,3 +35,42 @@ Then set the admin password from the setup token (`kubectl -n artex logs deploy/
 | grep "Setup token"`), turn traffic capture on in Settings, and create a task whose goal names
 `http://juice.lab.svc.cluster.local:3000`. Check `GET /api/settings/nodes`, the intents' `owner`
 column (`<pod>/work#N` from both worker pods) and `GET /api/traffic` on the control node.
+
+## Real cluster (card c-620510)
+
+The kind record above shares one Docker host, a kindnet CNI, local-path storage and
+the stub. To record the same checks on a real cluster you need: at least three
+schedulable hosts (separate machines or VMs: control plus two workers), a CNI that
+enforces NetworkPolicy (Calico, or Cilium; see the egress note in
+`values-multihost.yaml`), a storage class with a real provisioner, an ingress
+controller plus a certificate source (cert-manager or a TLS Secret), DNS for the
+Ingress host, an image the cluster can pull, and an LLM key. Use an authorized target:
+Juice Shop in the `lab` namespace as above works.
+
+```sh
+docker build -t <registry>/artex:<tag> . && docker push <registry>/artex:<tag>
+kubectl create ns artex
+kubectl -n artex create secret generic artex-key --from-literal=secret-key="$(head -c32 /dev/urandom | base64)"
+kubectl -n artex create secret generic artex-llm --from-literal=ANTHROPIC_API_KEY=<key>
+# fill every CHANGE-ME in deploy/lab/values-multihost.yaml first
+helm install artex deploy/helm/artex -n artex -f deploy/lab/values-multihost.yaml
+kubectl -n artex get pods -o wide
+```
+
+Set the admin password from the setup token at `https://<host>/`, turn traffic capture
+on in Settings, and run a task against the authorized target. Then print the check
+table:
+
+```sh
+ARTEX_URL=https://<host> ARTEX_TOKEN=<jwt> ARTEX_TASK=<task id> \
+ARTEX_TARGET=juice.lab.svc.cluster.local:3000 LLM_SECRET=artex-llm \
+  scripts/k8s-install-checks.sh artex artex
+```
+
+`scripts/k8s-install-checks.sh` prints the rows of the "Recorded install" table in
+`docs/DISTRIBUTED.md` plus rows for the CNI and NetworkPolicy (a throwaway pod must be
+refused at the proxy port), storage, Ingress TLS (verified against the system roots),
+the LLM Secret and control-API TLS. It marks kind nodes, local-path volumes, plain HTTP
+and missing policies in bold. Paste the table into `docs/DISTRIBUTED.md` as a new
+"Recorded install" section, and record the rolling-upgrade check by hand
+(`kubectl -n artex rollout restart deploy/artex-worker`).
