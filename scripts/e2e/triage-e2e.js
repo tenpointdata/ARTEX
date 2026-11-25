@@ -29,7 +29,7 @@ const shots = process.env.ARTEX_E2E_SHOTS || "";
 if (!password) throw new Error("set ARTEX_E2E_PASSWORD");
 if (!dsn) throw new Error("set ARTEX_E2E_DSN (a throwaway database)");
 
-const sql = (q) => execFileSync("psql", [dsn, "-At", "-v", "ON_ERROR_STOP=1", "-c", q], { encoding: "utf8" }).trim();
+const sql = (q) => execFileSync("psql", [dsn, "-qAt", "-v", "ON_ERROR_STOP=1", "-c", q], { encoding: "utf8" }).trim();
 
 let failed = false;
 const check = (name, ok, detail) => {
@@ -131,7 +131,7 @@ async function waitFor(fn, timeout = 15000) {
     const rows = page.locator("tr[data-row-key]");
     await rows.first().waitFor({ timeout: 30000 });
     must("group page holds 10 findings", (await rows.count()) === 10, await rows.count());
-    await rows.first().click();
+    await rows.first().locator("td").nth(1).click(); // the chevron cell (the name links to the detail page)
     await page.getByRole("toolbar", { name: "Triage this finding" }).waitFor({ timeout: 10000 });
     const seen = [];
     for (let i = 0; i < 10; i++) {
@@ -158,7 +158,7 @@ async function waitFor(fn, timeout = 15000) {
     await rows.first().waitFor({ timeout: 30000 });
     const lastOnPage = rows.nth((await rows.count()) - 1);
     const lastName = ((await lastOnPage.innerText()).match(/E2E finding \d+/) || [""])[0];
-    await lastOnPage.click();
+    await lastOnPage.locator("td").nth(1).click();
     await page.getByRole("toolbar", { name: "Triage this finding" }).waitFor({ timeout: 10000 });
     await press("i");
     const next = await waitFor(async () => {
