@@ -4306,12 +4306,13 @@ func (s *Server) putSettings(w http.ResponseWriter, r *http.Request) {
 		}
 		changed = true
 	}
+	if changed || req.LLMRecord != nil {
+		// Worker nodes build their own agents from the same settings rows and
+		// keep the LLM recording switch in memory: the revision tells them to
+		// reload (followAgentSettings).
+		s.bumpAgentSettingsRevision()
+	}
 	if changed {
-		// Worker nodes build their own agents from the same settings rows: the
-		// revision tells them to reload and rebuild (followAgentSettings).
-		if _, err := s.m.pg.BumpSettingsRevision(db.AgentSettingsRevisionKey); err != nil {
-			log.Printf("[settings] agent settings revision not bumped; worker nodes keep their agents until restart: %v", err)
-		}
 		// rebuild agents so the new proxy/tools/prompt/web-search take hold (only if LLM configured).
 		s.cfgMu.Lock()
 		cfg, on := s.llmCfg, s.llmOn

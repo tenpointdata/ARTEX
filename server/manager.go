@@ -563,7 +563,6 @@ func newManager(dir, proxyAddr string, node NodeConfig) (*Manager, error) {
 	// Asset auto-completion engine (§5): HTTP probes routed through the recording
 	// proxy (via m.ProxyAddr, which honors the traffic-capture toggle).
 	// LLM recording switch (off by default). The recorder reads this flag on every call.
-	m.llmRecOn = pg.GetBool(settingLLMRecord, false)
 	m.loadAgentSettings()
 	if m.traffic != nil {
 		if err := m.traffic.SetUpstreamProxy(m.globalProxy); err != nil {
@@ -588,11 +587,14 @@ func newManager(dir, proxyAddr string, node NodeConfig) (*Manager, error) {
 // built: the traffic-capture switch, web search and the global egress proxy
 // (default: direct; with capture on it is the MITM's upstream, with capture off
 // ProxyAddr hands it to agents directly). It reports whether any of them
-// changed. A worker node calls it again when the agent settings revision moves
+// changed. It also reloads the LLM recording switch, which the recorder reads on
+// every call and which therefore never needs a rebuild (not counted in the
+// result). A worker node calls it again when the agent settings revision moves
 // (followAgentSettings), so it builds its agents from what the control node
 // saved.
 func (m *Manager) loadAgentSettings() bool {
 	pg := m.pg
+	llmRec := pg.GetBool(settingLLMRecord, false)
 	trafficOn := pg.GetBool(settingTrafficCapture, false)
 	webOn := pg.GetBool(settingWebSearchOn, false)
 	backend := defaultWebSearchBackend
@@ -614,6 +616,7 @@ func (m *Manager) loadAgentSettings() bool {
 	m.trafficOn, m.webSearchOn, m.webSearchBackend = trafficOn, webOn, backend
 	m.braveKey, m.tavilyKey, m.keenableKey, m.webSearchProxy = brave, tavily, keenable, webProxy
 	m.globalProxy = globalProxy
+	m.llmRecOn = llmRec
 	return changed
 }
 

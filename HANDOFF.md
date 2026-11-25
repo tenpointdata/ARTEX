@@ -59,6 +59,18 @@ See `docs/ARCHITECTURE.md` for the code-level map. Summary:
 
 ## Current state
 
+**2026-11-24 — E7 audit of worker start-up-only state (`c-6bcdd3`, in review)** on `ej/20261124-172031-c2bb7b`,
+which merges `ej/20261124-165722-c858f3` (c-1d3e0a and the E7 stack under it). Audited every `applyLLM` caller and
+every setting read only in `NewManager`. Two gaps fixed, both through `settings.agent_settings_revision` (helper
+`bumpAgentSettingsRevision`; workers never bump it): the LLM recording switch (it was in memory, so a worker never
+saw it change) and an agent's saved settings from `PUT /api/agents/{key}/config` (max turns, run seconds, web
+search: read when a task bundle is built). The follower now drops task bundles whenever the revision moves.
+Everything else is read per run or per call, or exists only on the control node. `docs/DISTRIBUTED.md` lists all of
+it, and Limits gains three entries: skills are files on each node's disk, env/config-file settings stay per node, and
+the lesson block is chosen when a bundle is built. **Verified** against a local Postgres 16:
+`TestWorkerNodeFollowsLLMRecordSwitch` and `TestWorkerNodeFollowsAgentConfigSave` fail with the bumps removed and
+pass with them, alongside the existing worker-node tests.
+
 **2026-11-24 — E7 drain ack + LLM profile reload on workers (`c-1d3e0a`, in review)** on
 `ej/20261124-165722-c858f3`. The branch merges the unmerged E7 branches `ej/20261124-164948-393f2a` (c-18f7a8 and
 its stack) and `ej/20261124-155353-b1c60a` (c-8cfbfe). It does **not** merge c-7ad4da's `ej/20261124-161438-32780e`:

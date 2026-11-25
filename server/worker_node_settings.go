@@ -20,7 +20,9 @@ type agentSettingsFollower struct {
 //     egress proxy and web search are baked into the agents when they are
 //     built, and a worker node builds its own. Without it, turning capture on
 //     would leave worker agents connecting directly, past the recording proxy
-//     and the scope it applies.
+//     and the scope it applies. The same revision carries the LLM recording
+//     switch (held in memory) and an agent's saved settings (max turns, run
+//     seconds, web search: read when a task bundle is built, c-6bcdd3).
 //   - LLM configuration (db.LLMConfigRevisionKey, c-1d3e0a): an LLM profile
 //     saved, activated or deleted, the retry policy, the failover switches or
 //     an agent's profile binding. The node drops its provider caches and
@@ -48,7 +50,14 @@ func (s *Server) followAgentSettings(f *agentSettingsFollower) {
 		return
 	}
 	f.rev, f.llmRev, f.seen = rev, llmRev, true
-	rebuild := settingsMoved && s.m.loadAgentSettings()
+	rebuild := false
+	if settingsMoved {
+		rebuild = s.m.loadAgentSettings()
+		// An agent's own settings (max turns, run seconds, web search) are
+		// read when a task bundle is built; drop the bundles so the next claim
+		// reads the saved row.
+		s.invalidateTaskAgents()
+	}
 	s.cfgMu.Lock()
 	cfg, on := s.llmCfg, s.llmOn
 	s.cfgMu.Unlock()
@@ -68,4 +77,16 @@ func (s *Server) followAgentSettings(f *agentSettingsFollower) {
 	}
 	log.Printf("[node %s] agent settings revision %d, LLM config revision %d applied (%s / %s, traffic capture %v)",
 		s.node.NodeID, rev, llmRev, cfg.Provider(), cfg.Model, s.m.TrafficEnabled())
+}
+
+// bumpAgentSettingsRevision tells worker nodes that a setting they bake into
+// agents or hold in memory changed (followAgentSettings). Callers write the
+// database first. A worker node never bumps it: it would follow its own bump.
+func (s *Server) bumpAgentSettingsRevision() {
+	if s.node.Role == RoleWorker || s.m == nil || s.m.pg == nil {
+		return
+	}
+	if _, err := s.m.pg.BumpSettingsRevision(db.AgentSettingsRevisionKey); err != nil {
+		log.Printf("[settings] agent settings revision not bumped; worker nodes keep their agents until restart: %v", err)
+	}
 }

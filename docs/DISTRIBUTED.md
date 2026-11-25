@@ -56,10 +56,23 @@ when that read fails.
 | Noise governor | one governor | each live node runs `egress.Share(profile, liveNodes)`; the profile follows `settings.noise_profile` | keep the current governor |
 | Capture switch, global proxy, web search | in memory, set by the API | re-read every poll; a change blocks claims for that poll and rebuilds the task agents on the new path | no claim |
 | LLM profiles and config (profile save/activate/delete, `/api/llm`, retry policy, failover switches, agent profile bindings) | in memory, rebuilt by the API handler | every change bumps `settings.llm_config_revision`; a worker node follows it every poll (with `settings.agent_settings_revision`), drops its provider caches and re-applies the active profile, so its next intent runs on the new config; a running intent keeps its bundle | keep the current agents |
+| LLM recording switch, an agent's saved settings (max turns, run seconds, web search flag: `PUT /api/agents/{key}/config`) | in memory / read when a task bundle is built | the save bumps `settings.agent_settings_revision`; a worker node follows it every poll, reloads the switch and drops its task bundles, so its next claim builds them from the saved rows (c-6bcdd3) | keep the current agents |
 | Claim lease | renewed every 15 s, lost on rejection | also cancelled after 60 s without a successful renewal, before another node may take it over at 90 s | run cancelled |
 | Control node alive | n/a | a worker claims only while a live `control` node is in `worker_nodes` (planner, deadline coordinator and settle run there) | no claim |
 | kill_work / steer_work / work pause and cancel | in-memory work map | `work_signals`, consumed by the node holding the claim (polled every 2 s); work pause/cancel waits until the intent leaves `running` | signal stays queued |
 | Settle drain | local in-flight count | plus live remote claims (`LiveRemoteRunningIntents`); when the grace expires, remote claims are revoked | counted as running |
+
+Everything else an agent is built from is read from Postgres per run or per
+call, on every node alike, so nothing has to be followed: agent prompts and
+wrap-up prompts, the tools table (bindings, enabled flags, descriptions),
+custom tools, MCP servers and their per-agent visibility, agent skill
+visibility, constraint injection switches, noa compaction, the LLM pool
+switches, the worker count, the task concurrency cap, the Python interpreter
+and the finding-traffic binding switch. Rewrite rules, tamper hooks and the
+browser MCP's proxy wiring belong to the recording proxy, which runs only on
+the control node. The audit behind this list (every `applyLLM` caller and
+every setting read only in `NewManager`) is card c-6bcdd3; what a worker node
+cannot follow is under Limits.
 
 Two signals flow from worker nodes back to the control node:
 
@@ -251,3 +264,18 @@ These are known and carded on the ARTEX board:
   (and is restarted) until it can read the control node's published CA
   certificate. It claims nothing until a control node has published its run
   budget.
+- **Skills are files on each node's disk.** A worker node loads the skills an
+  agent may see from its own skill directory; the database holds only which
+  skills each agent may see. A skill created or edited on the control node
+  does not exist on a worker node until the same files are there (a shared
+  volume, or the same image). A skill missing on the worker is left out of
+  the agent's tool list for that run; nothing fails.
+- **Configuration from the environment and the config file stays per
+  node.** An LLM provider from the environment (used only when no profile is
+  active), `task_user_agents` from the config file and the archive store are
+  read once at start; `ARTEX_RSI_LESSONS` is read from the environment on
+  each use. Each node reads its own. Set them alike on every node, and restart
+  a node after changing the ones read at start.
+- **The lesson block is chosen when a task's bundle is built.** A changed
+  bench lesson pin (`PUT /api/rsi/bench-lessons`) reaches a task when its
+  bundle is next rebuilt, on the control node as on a worker node.
