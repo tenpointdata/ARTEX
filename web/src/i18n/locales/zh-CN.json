@@ -2989,5 +2989,11 @@
   "Delete selected": "删除所选项",
   "Deleted {count} exchanges": "已删除 {count} 条流量交互",
   "Delete the {count} selected exchanges?": "删除所选的 {count} 条流量交互？",
-  "This will permanently delete exactly the {count} selected exchanges (including raw requests/responses). Other traffic for the same hosts is kept. This action cannot be undone.": "这将永久删除所选的 {count} 条流量交互（包括原始请求/响应），同一主机的其他流量将保留。此操作无法撤销。"
+  "This will permanently delete exactly the {count} selected exchanges (including raw requests/responses). Other traffic for the same hosts is kept. This action cannot be undone.": "这将永久删除所选的 {count} 条流量交互（包括原始请求/响应），同一主机的其他流量将保留。此操作无法撤销。",
+  "Webhook secret": "Webhook 密钥",
+  "Optional, at least 16 characters. Set the same secret on the": "可选，至少 16 个字符。请在以下位置设置相同的密钥：",
+  "the URL is shown after saving": "保存后将显示 URL",
+  "repository webhook (Issues events, content type JSON)": "仓库 webhook（Issues 事件，内容类型 JSON）",
+  "Jira Cloud admin webhook (Issue updated)": "Jira Cloud 管理员 webhook（Issue updated）",
+  "Webhook URL": "Webhook URL"
 }

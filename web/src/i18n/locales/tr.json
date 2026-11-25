@@ -2989,5 +2989,11 @@
   "Delete selected": "Seçilenleri sil",
   "Deleted {count} exchanges": "{count} değişim silindi",
   "Delete the {count} selected exchanges?": "Seçilen {count} değişim silinsin mi?",
-  "This will permanently delete exactly the {count} selected exchanges (including raw requests/responses). Other traffic for the same hosts is kept. This action cannot be undone.": "Bu işlem tam olarak seçilen {count} değişimi (ham istekler/yanıtlar dahil) kalıcı olarak siler. Aynı hostların diğer trafiği korunur. Bu işlem geri alınamaz."
+  "This will permanently delete exactly the {count} selected exchanges (including raw requests/responses). Other traffic for the same hosts is kept. This action cannot be undone.": "Bu işlem tam olarak seçilen {count} değişimi (ham istekler/yanıtlar dahil) kalıcı olarak siler. Aynı hostların diğer trafiği korunur. Bu işlem geri alınamaz.",
+  "Webhook secret": "Webhook gizli anahtarı",
+  "Optional, at least 16 characters. Set the same secret on the": "İsteğe bağlı, en az 16 karakter. Aynı gizli anahtarı şurada da ayarlayın:",
+  "the URL is shown after saving": "URL kaydettikten sonra gösterilir",
+  "repository webhook (Issues events, content type JSON)": "depo webhook'u (Issues olayları, içerik türü JSON)",
+  "Jira Cloud admin webhook (Issue updated)": "Jira Cloud yönetici webhook'u (Issue updated)",
+  "Webhook URL": "Webhook URL'si"
 }
