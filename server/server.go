@@ -50,6 +50,9 @@ type Server struct {
 	m      *Manager
 	engine *Engine
 	ctx    context.Context
+	node   NodeConfig // process role (node.go); zero value = RoleAll
+	// nodeRPC authenticates worker nodes' calls (node_rpc.go); control only.
+	nodeRPC *nodeRPCVerifier
 
 	skillDir string // root directory for skill subdirectories
 	jwtKey   []byte // HS256 signing key loaded from / generated into keyDir/jwt.key
@@ -207,6 +210,14 @@ func New(ctx context.Context, m *Manager, skillDir string, dataDir string, keyDi
 	for _, o := range opts {
 		o(s)
 	}
+	if s.node.Role == "" {
+		s.node = NodeConfig{Role: RoleAll, Workers: -1}
+	}
+	s.engine.node = s.node
+	worker := s.node.Role == RoleWorker
+	if s.node.Role == RoleControl {
+		s.nodeRPC = newNodeRPCVerifier(db.NodeRPCKey)
+	}
 	s.initSetupToken()
 	s.loadPasswordVersion()
 	s.initSideQuestions()
@@ -278,18 +289,22 @@ func New(ctx context.Context, m *Manager, skillDir string, dataDir string, keyDi
 		wireAgentAugment(m.pg, s.skillDir, s.hostTools, s.execPriv, m.scopeMCPProxy) // wire visible skills/MCP + traffic/orchestration host tools into the agent toolset
 		domainReg := buildDomainReg(m.Assets())
 		wireTools(m.pg, domainReg)   // built-in tools table: filter per agent + override description/schema + inject defaults
-		seedPrompts(m.pg)            // seed built-in agent default prompt bodies into agent_prompts (only when empty)
 		warnBrokenSkills(s.skillDir) // surface skills whose frontmatter silently failed to parse
-		s.seedOrchestrationTools()   // seed P2 cross-task orchestration tools into the tools table (bindable per agent)
-		if err := s.seedFindingRetester(); err != nil {
-			log.Printf("[retester] seed: %v", err)
+		// A worker node (E7) only executes intents: seeding, evidence GC, the
+		// trigger scheduler and the push notifier belong to the control node.
+		if !worker {
+			seedPrompts(m.pg)          // seed built-in agent default prompt bodies into agent_prompts (only when empty)
+			s.seedOrchestrationTools() // seed P2 cross-task orchestration tools into the tools table (bindable per agent)
+			if err := s.seedFindingRetester(); err != nil {
+				log.Printf("[retester] seed: %v", err)
+			}
+			go s.evidenceStore().RunGC(s.ctx)
+			s.seedPythonInterpreter()     // custom script tool: detect the python interpreter at boot and store it (only when empty)
+			go newScheduler(s).Run(s.ctx) // P3 trigger scheduling (scheduled/finding/goal events), custom agents only
+			// Vulnerability IM push delivery engine. Sits beside the Scheduler but independent: push latency demands (3s)
+			// differ from the triggers' business cadence, and neither's failures drag the other down — a stuck push must not affect agent triggers.
+			go newNotifier(s).Run(s.ctx)
 		}
-		go s.evidenceStore().RunGC(s.ctx)
-		s.seedPythonInterpreter()     // custom script tool: detect the python interpreter at boot and store it (only when empty)
-		go newScheduler(s).Run(s.ctx) // P3 trigger scheduling (scheduled/finding/goal events), custom agents only
-		// Vulnerability IM push delivery engine. Sits beside the Scheduler but independent: push latency demands (3s)
-		// differ from the triggers' business cadence, and neither's failures drag the other down — a stuck push must not affect agent triggers.
-		go newNotifier(s).Run(s.ctx)
 		logSink.SetDB(ctx, m.pg) // restore last 100 log rows and enable async persistence
 	}
 	// precedence: persisted DB config > env.
@@ -320,10 +335,22 @@ func New(ctx context.Context, m *Manager, skillDir string, dataDir string, keyDi
 	// Fill the tool cache for any enabled MCP that has none yet (notably the
 	// seeded browser MCP on first run). Async so it never blocks startup.
 	go s.discoverEmptyMCPsOnStartup()
+	s.wireInterceptReviewer() // LLM fallback approval: commands that hit no interception rule go to the model for judgment
+	if m.pg != nil && ctx.Err() == nil {
+		go s.runNodeHeartbeat(ctx)
+	}
+	if worker {
+		s.startWorkerNode() // claims intents of every running task (worker_node.go)
+		return s
+	}
+	if s.node.Role == RoleControl && m.pg != nil {
+		if err := publishBudgets(m.pg); err != nil {
+			log.Printf("[node] publish run budgets: %v (worker nodes claim nothing until they can read them)", err)
+		}
+	}
 	s.restoreTaskRuntimes()
 	go s.reconcileConcurrency()
 	s.startTaskArchiveWorker()
-	s.wireInterceptReviewer() // LLM fallback approval: commands that hit no interception rule go to the model for judgment
 	return s
 }
 
@@ -778,6 +805,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/auth/change-password", s.authChangePassword)
 
 	mux.HandleFunc("GET /api/health", s.health)
+	if s.nodeRPC != nil {
+		mux.HandleFunc("POST "+nodeRPCPrefix+"{op}", s.handleNodeRPC)
+	}
 	mux.HandleFunc("GET /api/ready", s.ready)
 	mux.HandleFunc("GET /api/stats", s.stats)
 	mux.HandleFunc("GET /api/logs", s.getLogs)
@@ -946,6 +976,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/settings", s.getSettings)
 	mux.HandleFunc("PUT /api/settings", s.putSettings)
 	mux.HandleFunc("GET /api/settings/noise", s.noiseStatus) // current noise profile + per-host counters (no reset)
+	mux.HandleFunc("GET /api/settings/nodes", s.listNodes)   // control and worker nodes sharing this database (E7)
 	// Vulnerability IM push. Channels are "multi-instance + per-instance filter rules" resources, so they get their own group of
 	// REST endpoints instead of being stuffed into the flat /api/settings key-value store.
 	mux.HandleFunc("GET /api/notify/meta", s.notifyMeta)

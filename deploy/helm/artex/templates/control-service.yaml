@@ -1,0 +1,38 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "artex.fullname" . }}-control
+  labels:
+    {{- include "artex.labels" . | nindent 4 }}
+  {{- with .Values.control.service.annotations }}
+  annotations: {{ toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  type: {{ .Values.control.service.type }}
+  ports:
+    - name: http
+      port: {{ .Values.control.service.port }}
+      targetPort: http
+      {{- if .Values.controlTLS.enabled }}
+      appProtocol: https
+      {{- end }}
+  selector:
+    {{- include "artex.selector" (dict "ctx" . "component" "control") | nindent 4 }}
+---
+# The recording proxy, for worker nodes only. ClusterIP; the proxy refuses a
+# non-loopback client that presents no task scope token, and the optional
+# NetworkPolicy admits only worker pods to this port.
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "artex.fullname" . }}-control-proxy
+  labels:
+    {{- include "artex.labels" . | nindent 4 }}
+spec:
+  type: ClusterIP
+  ports:
+    - name: proxy
+      port: 8788
+      targetPort: 8788
+  selector:
+    {{- include "artex.selector" (dict "ctx" . "component" "control") | nindent 4 }}
