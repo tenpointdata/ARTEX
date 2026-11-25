@@ -333,12 +333,19 @@ func TestSOCKS5RemoteScope(t *testing.T) {
 	if got := spy.take(); len(got) != 1 || got[0].run != "11" {
 		t.Fatalf("SOCKS5 remote dials %v, want one on 11", got)
 	}
-	for _, pass := range []string{"", "not-a-token", workerToken(8)} {
-		if c, rep := socks5DialUserPass(t, addr, egress.PaceUser, pass, host, port); rep != socks5RepNotAllowed {
-			if c != nil {
-				_ = c.Close()
-			}
-			t.Fatalf("remote client with password %q: rep 0x%02x, want 0x02", pass, rep)
+	// The bare pace marker passes the loopback listener's open-mode auth, then
+	// the remote-client gate refuses its CONNECT (0x02).
+	if c, rep := socks5DialUserPass(t, addr, egress.PaceUser, "", host, port); rep != socks5RepNotAllowed {
+		_ = c.Close()
+		t.Fatalf("remote client with the bare pace marker: rep 0x%02x, want 0x02", rep)
+	}
+	// A credential that is no live scope token, and a token-shaped one the
+	// resolver does not hold, are refused at authentication (RFC 1929 0x01).
+	for _, pass := range []string{"not-a-token", workerToken(8)} {
+		c, status := socks5UserPassAuth(t, addr, egress.PaceUser, pass)
+		_ = c.Close()
+		if status != socks5UserPassFail {
+			t.Fatalf("remote client with password %q: auth status 0x%02x, want 0x01", pass, status)
 		}
 	}
 	if got := spy.take(); len(got) != 0 {

@@ -61,4 +61,6 @@ export const SORT_STORAGE_KEY = "traffic-sort";
 // which the backend reads as either an exact code or an "Nxx" class band.
 export const STATUS_BUCKETS = ["2xx", "3xx", "4xx", "5xx"];
 
-export type DeleteMode = "filter" | "selected" | "all";
+// "exchanges" deletes exactly the checked rows; "selected" every exchange of the
+// picked hosts; "filter" the host filter's matches; "all" everything.
+export type DeleteMode = "filter" | "selected" | "exchanges" | "all";

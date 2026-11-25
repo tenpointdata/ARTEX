@@ -359,6 +359,9 @@ func Open(dir, addr string) (*Traffic, error) {
 		// opts out; go-mitmproxy exposes only a global switch, not per-host.
 		SslInsecure: InsecureUpstream(),
 		CaRootPath:  filepath.Join(dir, "_ca"),
+		// ARTEX's own CA (ca.go): ECDSA P-256, one year, short-lived leaves.
+		// An existing CA file is loaded unchanged.
+		NewCaFunc: NewCAFunc(filepath.Join(dir, "_ca"), CAConfigFromEnv()),
 	})
 	if err != nil {
 		db.Close()
@@ -1366,6 +1369,7 @@ const (
 type PageQuery struct {
 	Host      string   // host substring
 	Hosts     []string // exact host allowlist (company scope); empty = no filter
+	IDs       []string // exact exchange ids (a row selection); empty = no filter
 	MatchNone bool     // force an empty result (a company that owns no host yet)
 	Method    string   // exact method (case-insensitive)
 	Query     string   // broad search box: metadata columns OR captured text
@@ -1441,6 +1445,10 @@ func (t *Traffic) pageWhere(f PageQuery) (where string, args []any) {
 			args2[i] = h
 		}
 		add("host IN ("+strings.Join(placeholders, ",")+")", args2...)
+	}
+	if len(f.IDs) > 0 {
+		cond, idArgs := idsCondition(f.IDs)
+		add(cond, idArgs...)
 	}
 	if m := strings.TrimSpace(f.Method); m != "" {
 		add("method=?", strings.ToUpper(m))
