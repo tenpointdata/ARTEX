@@ -89,7 +89,8 @@ type Finding struct {
 	Title    string `json:"title"`            // UNTRUSTED
 	Detail   string `json:"detail,omitempty"` // UNTRUSTED compact JSON, <= MaxDetailBytes
 	CWE      []int  `json:"cwe,omitempty"`
-	Key      string `json:"key"` // stable dedup key
+	Lane     Lane   `json:"lane"` // runtime | sast | sca
+	Key      string `json:"key"`  // stable dedup key
 	Record   string `json:"record"`
 }
 
