@@ -155,3 +155,41 @@ capabilities:
     - {{ . }}
     {{- end }}
 {{- end }}
+
+{{/* ---- Control API TLS (controlTLS.*, docs/DISTRIBUTED.md "Transport") ---- */}}
+{{- define "artex.controlTLSSecret" -}}
+{{- if eq .Values.controlTLS.source "secret" -}}
+{{ required "controlTLS.existingSecret is required when controlTLS.source=secret" .Values.controlTLS.existingSecret }}
+{{- else -}}
+{{ include "artex.fullname" . }}-control-tls
+{{- end -}}
+{{- end }}
+
+{{/* Key of the CA certificate in the TLS Secret. */}}
+{{- define "artex.controlTLSCAKey" -}}
+{{ if eq .Values.controlTLS.source "secret" }}{{ .Values.controlTLS.caKey }}{{ else }}ca.crt{{ end }}
+{{- end }}
+
+{{/* DNS names the control API certificate covers: the Service as workers and pods address it, plus extras. */}}
+{{- define "artex.controlTLSDNSNames" -}}
+{{- $svc := printf "%s-control" (include "artex.fullname" .) -}}
+{{- $ns := .Release.Namespace -}}
+{{- $names := list $svc (printf "%s.%s" $svc $ns) (printf "%s.%s.svc" $svc $ns) (printf "%s.%s.svc.cluster.local" $svc $ns) "localhost" -}}
+{{- toJson (concat $names .Values.controlTLS.extraDnsNames) -}}
+{{- end }}
+
+{{/* URL scheme of the control API. */}}
+{{- define "artex.controlScheme" -}}
+{{ ternary "https" "http" .Values.controlTLS.enabled }}
+{{- end }}
+
+{{- define "artex.validateControlTLS" -}}
+{{- if .Values.controlTLS.enabled }}
+{{- if not (has .Values.controlTLS.source (list "generate" "secret" "certManager")) }}
+{{- fail (printf "controlTLS.source %q: want generate, secret or certManager" .Values.controlTLS.source) }}
+{{- end }}
+{{- if and (eq .Values.controlTLS.source "certManager") (not .Values.controlTLS.certManager.issuerRef.name) }}
+{{- fail "controlTLS.certManager.issuerRef.name is required when controlTLS.source=certManager" }}
+{{- end }}
+{{- end }}
+{{- end }}

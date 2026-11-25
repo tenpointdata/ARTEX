@@ -86,6 +86,11 @@ var rbacPolicy = []policyRule{
 	{methodMutate, "/api/visibility", true, permAdmin},
 	{methodMutate, "/api/llm", true, permAdmin},
 	{methodMutate, "/api/notify/channels", true, permAdmin},
+	// Ticket trackers (E2) are sinks like notification channels: sealed
+	// credentials and a destination findings leave to. Push and sync stay operate.
+	{http.MethodPost, "/api/integrations/trackers", false, permAdmin},
+	{http.MethodPatch, "/api/integrations/trackers/{id}", false, permAdmin},
+	{http.MethodDelete, "/api/integrations/trackers/{id}", false, permAdmin},
 	{methodMutate, "/api/sync/scopesentry/datasource", true, permAdmin},
 	// Bulk destruction of evidence.
 	{http.MethodDelete, "/api/traffic/all", false, permAdmin},
@@ -118,6 +123,9 @@ var rbacPolicy = []policyRule{
 
 	// --- read: live retests across every client ---
 	{http.MethodGet, "/api/exploration/findings/retests/active", false, permRead},
+	// A finding's tracker tickets and raw scanner record are operator data, not
+	// the client summary: kept out of the client_read findings prefix below.
+	{http.MethodGet, "/api/exploration/findings/{id}/integrations", false, permRead},
 
 	// --- client_read: the allowlist for the client-facing role. Each route
 	// must also have a binder in clientBinders (client_scope.go), which

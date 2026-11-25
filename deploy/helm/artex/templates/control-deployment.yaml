@@ -36,18 +36,23 @@ spec:
           envFrom:
             {{- include "artex.envFrom" . | nindent 12 }}
           env:
-            {{- include "artex.sharedEnv" (dict "ctx" . "extra" (merge (dict "ARTEX_ROLE" "control" "ARTEX_LOCAL_WORKERS" (toString .Values.control.localWorkers) "ARTEX_PROXY_ALLOW_NONLOOPBACK" "1") .Values.control.extraEnv)) | nindent 12 }}
+            {{- $tlsEnv := dict }}
+            {{- if .Values.controlTLS.enabled }}
+            {{- $tlsEnv = dict "ARTEX_TLS_CERT" "/app/tls/tls.crt" "ARTEX_TLS_KEY" "/app/tls/tls.key" }}
+            {{- end }}
+            {{- include "artex.sharedEnv" (dict "ctx" . "extra" (merge (dict "ARTEX_ROLE" "control" "ARTEX_LOCAL_WORKERS" (toString .Values.control.localWorkers) "ARTEX_PROXY_ALLOW_NONLOOPBACK" "1") $tlsEnv .Values.control.extraEnv)) | nindent 12 }}
           ports:
             - {name: http, containerPort: 8787}
+          {{- $scheme := include "artex.controlScheme" . | upper }}
           startupProbe:
-            httpGet: {path: /api/health, port: http}
+            httpGet: {path: /api/health, port: http, scheme: {{ $scheme }}}
             periodSeconds: 5
             failureThreshold: 60
           readinessProbe:
-            httpGet: {path: /api/health, port: http}
+            httpGet: {path: /api/health, port: http, scheme: {{ $scheme }}}
             periodSeconds: 10
           livenessProbe:
-            httpGet: {path: /api/health, port: http}
+            httpGet: {path: /api/health, port: http, scheme: {{ $scheme }}}
             periodSeconds: 20
             failureThreshold: 6
           resources: {{ toYaml .Values.control.resources | nindent 12 }}
@@ -56,7 +61,18 @@ spec:
           volumeMounts:
             - {name: data, mountPath: /app/data}
             - {name: keys, mountPath: /app/keys}
+            {{- if .Values.controlTLS.enabled }}
+            - {name: tls, mountPath: /app/tls, readOnly: true}
+            {{- end }}
       volumes:
+        {{- if .Values.controlTLS.enabled }}
+        - name: tls
+          secret:
+            secretName: {{ include "artex.controlTLSSecret" . }}
+            items:
+              - {key: tls.crt, path: tls.crt}
+              - {key: tls.key, path: tls.key}
+        {{- end }}
         - name: data
           {{- if .Values.control.persistence.data.enabled }}
           persistentVolumeClaim:

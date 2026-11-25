@@ -83,7 +83,9 @@ var (
 	colMCPEnv      = secretColumn{"mcp_servers", "env", true, ""}
 	colCredPass    = secretColumn{"task_credentials", "password", false, ""}
 	colNotifConfig = secretColumn{"notification_channels", "config", true, ""}
-	colToolExec    = secretColumn{"tools", "exec", true, ""} // system=false rows: headers, proxy, body, code, command
+	// Ticket tracker configs carry API tokens (GitHub, Jira, DefectDojo).
+	colTrackerConfig = secretColumn{"ticket_trackers", "config", true, ""}
+	colToolExec      = secretColumn{"tools", "exec", true, ""} // system=false rows: headers, proxy, body, code, command
 	// Evidence head blocks carry the captured Cookie and Authorization headers.
 	colEvReqHead  = secretColumn{"traffic_evidence_snapshots", "req_head", false, ""}
 	colEvRespHead = secretColumn{"traffic_evidence_snapshots", "resp_head", false, ""}
@@ -96,7 +98,7 @@ var (
 	colHookSource      = secretColumn{"traffic_tamper_hooks", "source", false, ""}
 	colHookVerMatchers = secretColumn{"traffic_tamper_hook_versions", "matchers", true, ""}
 	colHookVerSource   = secretColumn{"traffic_tamper_hook_versions", "source", false, ""}
-	secretColumns      = append([]secretColumn{colLLMKey, colLLMProxy, colLLMHeaders, colMCPEnv, colCredPass, colNotifConfig, colToolExec, colEvReqHead, colEvRespHead, colRewriteMatchers, colRewriteActions, colHookMatchers, colHookSource, colHookVerMatchers, colHookVerSource}, secretSettingColumns()...)
+	secretColumns      = append([]secretColumn{colLLMKey, colLLMProxy, colLLMHeaders, colMCPEnv, colCredPass, colNotifConfig, colTrackerConfig, colToolExec, colEvReqHead, colEvRespHead, colRewriteMatchers, colRewriteActions, colHookMatchers, colHookSource, colHookVerMatchers, colHookVerSource}, secretSettingColumns()...)
 )
 
 // secretSettingKeys are the settings stored encrypted, AAD "settings.<key>".
@@ -138,6 +140,24 @@ var trafficTraceKey atomic.Pointer[[]byte]
 // never written to the database, the trace or an archive.
 func TrafficTraceKey() []byte {
 	if k := trafficTraceKey.Load(); k != nil {
+		return *k
+	}
+	return nil
+}
+
+// nodeRPCDomain derives the key that signs calls between the nodes of one
+// deployment (E7 worker node → control node, server/node_rpc.go).
+const nodeRPCDomain = "artex-node-rpc"
+
+var nodeRPCKey atomic.Pointer[[]byte]
+
+// NodeRPCKey returns the instance sub-key that authenticates node-to-node
+// calls: HMAC-SHA256 of the domain under the secret key, which every node of a
+// deployment shares (InitSecrets refuses a key that does not open the shared
+// data) and which agent processes never see (server/env_scrub.go). Nil until
+// InitSecrets ran. Memory only, never stored.
+func NodeRPCKey() []byte {
+	if k := nodeRPCKey.Load(); k != nil {
 		return *k
 	}
 	return nil
@@ -310,6 +330,8 @@ func (d *DB) InitSecrets(keyDir string) error {
 		activeSecretBox.Store(box)
 		sub := deriveSubKey(key, trafficTraceDomain)
 		trafficTraceKey.Store(&sub)
+		rpc := deriveSubKey(key, nodeRPCDomain)
+		nodeRPCKey.Store(&rpc)
 		return nil
 	})
 }

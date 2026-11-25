@@ -39,6 +39,8 @@ numbered migrations from `db/migrations/*.sql`, recording name + SHA-256 in
 | `llmpool` / `llmrec` | Provider pool / recorder | Rotation, health, usage + raw wire capture |
 | `mcphttp` | MCP client | HTTP/SSE transport for configured MCP servers |
 | `notify` | Outbound notifications | Email, webhook, Telegram, Feishu, DingTalk with masking and SSRF guards |
+| `ticketing` | Findings out to trackers | GitHub Issues, Jira, DefectDojo adapters over `notify.Do`; stable dedup key; status read-back ([integrations](integrations.md)) |
+| `scanimport` | Scanner data in | Nmap XML, Nuclei JSONL, ZAP JSON, Burp XML, SARIF parsers to assets + candidate findings with provenance ([integrations](integrations.md)) |
 | `report` | Deliverables | Markdown, CSV and JSON rendering of findings |
 | `sidequestion` | Operator Q&A | Asks a human mid-run and suspends intent until answered |
 | `skills/` | Skill definitions | One `SKILL.md` per subdirectory, loaded from `SkillDir()` |
