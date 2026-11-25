@@ -251,6 +251,9 @@ control-plane node and two worker nodes) with the fixtures in `deploy/lab/`
 (an LLM stub instead of a model, Juice Shop as the lab target). It ran the E7
 branch as it stood before the control-API TLS work merged into `main` (#46), so
 `controlTLS` was not part of it; re-run the checks with TLS on (card `c-620510`).
+The real-cluster run (separate hosts, real CNI, storage, LLM key and Ingress
+TLS) is still to do: `deploy/lab/README.md` "Real cluster" has the values
+file and `scripts/k8s-install-checks.sh`, which prints this table.
 
 | Check | Result |
 |---|---|
