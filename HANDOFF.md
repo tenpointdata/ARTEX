@@ -59,6 +59,15 @@ See `docs/ARCHITECTURE.md` for the code-level map. Summary:
 
 ## Current state
 
+**2026-11-24 — `TestSOCKS5RemoteScope` fixed (`c-1a74a4`) on `ej/20261124-202436-d76924`.** The SOCKS5
+operator-auth change (#79) checked a scope-token password against the local registry only, so a
+distributed worker's token (minted elsewhere, resolved by `SetRemoteScopeResolver`) got RFC 1929 status 0x01.
+`checkCredential` (`traffic/socks5_auth.go`) now uses `Traffic.resolveScope` (local, then remote). A token
+neither holds is still refused at auth, never downgraded to the global rules. The test's negative loop now
+accepts a refusal at auth (0x01) or at CONNECT (0x02), and it asserts that an unresolvable worker token fails auth.
+`go test ./traffic` passes; the Go steps of `scripts/verify.sh` pass. The web i18n step fails on main because the
+tracker-webhook strings from #80 are missing from the locale files (card `c-430ba2`, unrelated).
+
 **2026-11-24 — E2 push updates via signed webhooks (`c-c2bdc8`; in review on `ej/20261124-191156-37e38c`).**
 This branch also carries the c-da9198 commit (per-tracker advisory lock, capped sync cursor, background
 sync; cherry-picked from `ej/20261124-135159-6d9961`, which main did not have yet), because the webhook
@@ -76,8 +85,8 @@ unchanged, redelivery of the same id then processed), the ticketing webhook unit
 `test:integrations`. An independent security review found no bypass or leak; its slowloris, timing, dedup-order
 and id-length findings are fixed (10 s read deadline, every refusal hashes the body). `scripts/verify.sh`:
 only the two known environment failures (`TestConnectWithoutPasswordRealPG` on a trust-auth Postgres,
-`TestManagerSOCKS5UDPOptInAndAssetBlockRuleDropsDatagram` without 127.0.0.2), plus `TestSOCKS5RemoteScope`, which
-also fails on main (`traffic/` is identical to main; card `c-1a74a4`). Not verified: a live
+`TestManagerSOCKS5UDPOptInAndAssetBlockRuleDropsDatagram` without 127.0.0.2) (`TestSOCKS5RemoteScope`, then
+also failing on main, is fixed by `c-1a74a4`). Not verified: a live
 GitHub/Jira delivery (needs a publicly reachable instance), the sheet in a browser.
 
 **2026-11-24 — RSI proposer/critic (`c-c89f5b`, in review)** on `ej/20261124-192202-fbe9e3`.
