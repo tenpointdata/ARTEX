@@ -252,6 +252,9 @@ the full Docker image, the E8 suite) are in `docs/handoff/2026-11-24-current-sta
 ## Triage (next handful)
 
 **Agents' lane**
+0. *(unclaimed)* — **`go test ./traffic` fails on main** (S), card `c-81b834`: `TestSOCKS5RemoteScope`
+   gets auth reply 0x01 since #79's SOCKS5 auth; it stops `scripts/verify.sh` before the web steps. Done = cause found
+   (without loosening auth), verify.sh green.
 1. *(unclaimed)* — **E7: worker nodes miss other runtime control-node state** (M), card `c-6bcdd3`: LLM profiles,
    MCP servers, custom tools and similar are rebuilt only at start. Done = each one is followed or listed in
    DISTRIBUTED.md Limits.
