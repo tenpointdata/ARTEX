@@ -82,6 +82,12 @@ Plan a short maintenance window for either rotation.
 - `GET /api/health` — liveness, build version and provider health.
 - `GET /api/logs`, `GET /api/logs/stream` — live backend log sink; the UI shows it under
   **System → Logs**. The startup snapshot line is here too.
+- `GET /api/events/stream` — the dashboard's live push (task status, findings, approval
+  queue). Triggers on `findings`, `intercept_pending` and `tasks` (migration 0023) `NOTIFY
+  artex_changes` at commit; the server holds one pooled connection `LISTEN`ing on it once a
+  console is open (visible as `LISTEN artex_changes` in `pg_stat_activity`). Frames carry ids
+  only; client_read sessions get only their company's findings and tasks. When the stream is
+  down the dashboard falls back to polling every 5s.
 - `scripts/verify.sh` — reproduces the CI checks locally (gofmt, build, vet, tests,
   web type-check and unit tests, shellcheck, python checks). `--full` adds `-race` and
   the web static build; `--go-only` / `--web-only` narrow the run.

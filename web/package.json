@@ -22,7 +22,7 @@
     "test:bash": "node --test src/lib/bash-exit-status.test.mjs",
     "test:governance": "node --test src/lib/governance.test.mjs",
     "test:integrations": "node --test src/lib/integrations.test.mjs",
-    "test:sse": "node --test src/lib/sse.test.mjs",
+    "test:sse": "node --test src/lib/sse.test.mjs src/lib/live-events.test.mjs",
     "test:triage": "node --test src/lib/triage.test.mjs"
   },
   "lint-staged": {

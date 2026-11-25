@@ -137,6 +137,8 @@ var rbacPolicy = []policyRule{
 	// The console's pickers: the companies and tasks the caller may see.
 	{http.MethodGet, "/api/me/companies", false, permClientRead},
 	{http.MethodGet, "/api/me/tasks", false, permClientRead},
+	// The live push: each event is filtered to what the caller may see (events_stream.go).
+	{http.MethodGet, "/api/events/stream", false, permClientRead},
 }
 
 // defaultPermission applies when no rule matches: reads need read, anything

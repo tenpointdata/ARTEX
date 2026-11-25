@@ -51,6 +51,8 @@ type Server struct {
 	engine *Engine
 	ctx    context.Context
 
+	changes changeHub // row-change fan-out for GET /api/events/stream (events_hub.go)
+
 	skillDir string // root directory for skill subdirectories
 	jwtKey   []byte // HS256 signing key loaded from / generated into keyDir/jwt.key
 
@@ -783,6 +785,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/logs", s.getLogs)
 	mux.HandleFunc("GET /api/logs/history", s.getLogsHistory)
 	mux.HandleFunc("GET /api/logs/stream", s.streamLogs)
+	mux.HandleFunc("GET /api/events/stream", s.streamEvents)
 
 	mux.HandleFunc("GET /api/tasks", s.listTasks)
 	mux.HandleFunc("GET /api/me/companies", s.myCompanies)
