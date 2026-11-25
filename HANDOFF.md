@@ -59,6 +59,16 @@ See `docs/ARCHITECTURE.md` for the code-level map. Summary:
 
 ## Current state
 
+**2026-11-24 — E7: one worker settings follower (`c-20c400`, in review)** on `ej/20261124-173106-51fdcc`, which
+merges the c-1d3e0a branch `ej/20261124-165722-c858f3` (so it carries the whole unmerged E7 stack). `syncSharedEgress`
+/ `Manager.reloadSharedEgress` and the `agent_settings_revision` key are gone. `followAgentSettings`
+(`server/worker_node_settings.go`) runs first in every `workerDispatchOnce` poll and returns a claim-block reason:
+it compares the capture/global-proxy/web-search values (brave/tavily/keenable keys included) every poll via
+`Manager.loadAgentSettings` (now error-returning), follows `llm_config_revision` for LLM profiles, blocks claims
+while either read fails, and on a settings change drops the task agents and holds claims for that poll. c-7ad4da's
+`TestWorkerNodeFollowsTrafficCaptureSwitch` and `startTestNodeOn` are ported here; **its branch
+`ej/20261124-161438-32780e` must not land** (it would add a third copy and conflicts in `workerDispatchOnce`).
+
 **2026-11-24 — E7 drain ack + LLM profile reload on workers (`c-1d3e0a`, in review)** on
 `ej/20261124-165722-c858f3`. The branch merges the unmerged E7 branches `ej/20261124-164948-393f2a` (c-18f7a8 and
 its stack) and `ej/20261124-155353-b1c60a` (c-8cfbfe). It does **not** merge c-7ad4da's `ej/20261124-161438-32780e`:
@@ -140,7 +150,7 @@ worker→control recording-proxy hop (plain-HTTP targets and the scope token), c
 **2026-11-24 — Worker-node findings carry their captured proof (`c-3b781a`, E7; in review).** A
 worker-node finding binds the control capture through a signed node RPC (`POST /api/node/rpc/{op}`,
 `server/node_rpc.go`, HMAC under `db.NodeRPCKey`); design in `docs/DISTRIBUTED.md` "Evidence on worker
-nodes", verification in Deltas. Gap: `c-7ad4da` (capture switch read at start-up).
+nodes", verification in Deltas. The `c-7ad4da` gap (capture switch read only at start-up) is closed by `c-20c400`.
 **Landed:** this c-548e8b branch (carrying E7 c-d60149 and c-3b781a) is on main as #46 (`41cda010`, squash).
 
 **2026-11-24 — E10 code-security lane + its UI and exports (`c-72dd9d`, `c-d059ae`; in review)** on
@@ -322,8 +332,6 @@ body, through the versioned prompt API, and the starting bodies are restored aft
 
 - *(unclaimed)* — **DB: renumber colliding migrations as branches land** (S), card `c-c18f43`. Done = unique
   versions on main, `go test ./db` green.
-- *(unclaimed)* — **E7: one worker settings follower** (S), card `c-20c400`. Done = one reload path, tests green,
-  claims still blocked while the settings are unreadable.
 - *(unclaimed)* — **E7: TLS on the worker→control proxy hop** (M), card `c-677166`. Done = a plain-HTTP
   target request from a worker crosses the network inside TLS; Helm/compose default to it.
 
@@ -401,7 +409,7 @@ Card ids in brackets:
 - **E7** [`c-d60149`] Distributed workers + Helm: built, in review (see Current state). Follow-ups:
   `c-3b781a` (evidence on workers), `c-29ff19` (transcripts across hosts), `c-8cfbfe` (live two-host
   install), `c-18f7a8` (browser MCP relay, finding wake-ups, proxy scope default, rule-revision tx; in review),
-  `c-548e8b` (TLS to the control API, landed on main as #46), `c-1d3e0a` (worker drain ack, LLM profile reload; in review), `c-20c400` (one settings follower),
+  `c-548e8b` (TLS to the control API, landed on main as #46), `c-1d3e0a` (worker drain ack, LLM profile reload; in review), `c-20c400` (one settings follower; in review),
   `c-677166` (proxy-hop TLS).
 - **E8** [`c-5487e8`] Planner/worker evaluation suite (regression targets, prompt-version A/B via the benchmark gate).
 - **E9** [`c-73af97`] Frontend/UX pass (tables over cards, fewer-clicks triage workflow, live engagement dashboard).
@@ -492,6 +500,14 @@ Card ids in brackets:
   `ARTEX_SECRET_KEY`) loses stored secrets.
 
 ## Decisions
+
+- **2026-11-24** — c-20c400: the one worker settings follower compares the agent-baked settings **by value every
+  poll**, not by `agent_settings_revision` (removed). The revision bump in `putSettings` was best-effort (a failure
+  only logged), and a lost bump left a worker's agents on the old egress path, past the recording proxy and its
+  scope. Any direct write (c-7ad4da's test flips `SetTrafficEnabled` with no bump) was missed too. Comparing the
+  values costs 8 single-row reads per poll per worker (syncSharedEgress already read 5). The LLM config keeps its
+  revision because the profiles are many rows. An `applyLLM` failure after a change does not block claims: task
+  agents are built per task from the Manager's already-updated settings, so dropping them fixes the egress path.
 
 - **2026-11-24** — c-18c9c6: bbot's `portscan` (masscan) stays **unsupported** for the executor
   (option a); masscan does not get `cap_net_raw` (option b rejected). Two reasons. (1) It would not

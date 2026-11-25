@@ -46,7 +46,6 @@ type workerNodeState struct {
 	budgetKnown   bool
 	budgetTask    agent.Budget
 	budgetIntent  agent.Budget
-	sharedEgress  string                // fingerprint of the shared egress settings last applied
 	agentSettings agentSettingsFollower // touched by the dispatch loop only
 }
 
@@ -113,7 +112,7 @@ func (s *Server) workerDispatchOnce(ctx context.Context) {
 	_, _, budgetKnown := w.publishedBudgets()
 	allNode, errAll := pg.LiveNodeWithRole(string(RoleAll), s.node.NodeID)
 	control, errCtl := pg.LiveNodeWithRole(string(RoleControl), s.node.NodeID)
-	egressChanged := s.syncSharedEgress()
+	settingsBlock := s.followAgentSettings(&w.agentSettings)
 	switch {
 	case errAll != nil || errCtl != nil:
 		w.setBlocked(s.node.NodeID, "node registry unreadable")
@@ -124,12 +123,11 @@ func (s *Server) workerDispatchOnce(ctx context.Context) {
 		w.setBlocked(s.node.NodeID, "no live control node")
 	case !budgetKnown:
 		w.setBlocked(s.node.NodeID, "no run budget published by a control node yet")
-	case egressChanged:
-		w.setBlocked(s.node.NodeID, "shared capture/proxy settings changed: rebuilding agents")
+	case settingsBlock != "":
+		w.setBlocked(s.node.NodeID, settingsBlock)
 	default:
 		w.setBlocked(s.node.NodeID, "")
 	}
-	s.followAgentSettings(&w.agentSettings)
 	ids, err := pg.DispatchableTaskIDs()
 	if err != nil {
 		log.Printf("[node %s] list tasks: %v", s.node.NodeID, err)
@@ -166,30 +164,6 @@ func (s *Server) workerDispatchOnce(ctx context.Context) {
 		}
 	}
 	s.ackDrains()
-}
-
-// syncSharedEgress applies a capture-switch or global-proxy change made on the
-// control node (its API changes only the control process's memory and the
-// settings rows). The task agents are dropped so the next claim builds them on
-// the new proxy path. Reports whether anything changed this poll.
-func (s *Server) syncSharedEgress() bool {
-	fp, err := s.m.reloadSharedEgress()
-	w := s.engine.wnode
-	if err != nil {
-		log.Printf("[node %s] read shared egress settings: %v", s.node.NodeID, err)
-		return true // block claims this poll: the path is unknown
-	}
-	if w.sharedEgress == fp {
-		return false
-	}
-	first := w.sharedEgress == ""
-	w.sharedEgress = fp
-	if first {
-		return false
-	}
-	log.Printf("[node %s] capture/proxy settings changed on the control node; rebuilding task agents", s.node.NodeID)
-	s.invalidateTaskAgents()
-	return true
 }
 
 // syncServedTask mirrors one served task's control state into this process
