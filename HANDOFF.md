@@ -59,6 +59,17 @@ See `docs/ARCHITECTURE.md` for the code-level map. Summary:
 
 ## Current state
 
+**2026-11-24 — SOCKS5 remote-worker tokens authenticate again (`c-81b834`, also closes `c-1a74a4`).**
+#79 (ad3e5b24) made SOCKS5 RFC 1929 verify credentials, but `checkCredential` (`traffic/socks5_auth.go`) looked a
+scope token up only in the local registry. A distributed worker's token (E7, resolved through
+`SetRemoteScopeResolver`) got status 0x01 before the remote resolver ran. That was a real regression, not a test
+problem. It now calls `resolveScope` (local registry first, then the remote resolver, with its TTL cache and ended-scope
+checks), so a remote token is admitted only while its scope is live. Junk and unresolvable tokens are still refused at
+auth; the rest of the policy is unchanged. `TestSOCKS5RemoteScope` now expects those refusals at auth (0x01) instead of at
+CONNECT (0x02). The six #80 webhook strings, which the go failure had hidden from verify.sh's i18n step, are now in
+`tr.json`/`zh-CN.json` (machine-quality translations). `go test ./traffic` and `scripts/verify.sh` pass on macOS.
+Not verified: a real two-node worker setup.
+
 **2026-11-24 — E2 push updates via signed webhooks (`c-c2bdc8`; in review on `ej/20261124-191156-37e38c`).**
 This branch also carries the c-da9198 commit (per-tracker advisory lock, capped sync cursor, background
 sync; cherry-picked from `ej/20261124-135159-6d9961`, which main did not have yet), because the webhook
@@ -77,7 +88,7 @@ unchanged, redelivery of the same id then processed), the ticketing webhook unit
 and id-length findings are fixed (10 s read deadline, every refusal hashes the body). `scripts/verify.sh`:
 only the two known environment failures (`TestConnectWithoutPasswordRealPG` on a trust-auth Postgres,
 `TestManagerSOCKS5UDPOptInAndAssetBlockRuleDropsDatagram` without 127.0.0.2), plus `TestSOCKS5RemoteScope`, which
-also fails on main (`traffic/` is identical to main; card `c-1a74a4`). Not verified: a live
+also failed on main (card `c-1a74a4`; fixed 2026-11-24 by `c-81b834`, see below). Not verified: a live
 GitHub/Jira delivery (needs a publicly reachable instance), the sheet in a browser.
 
 **2026-11-24 — RSI proposer/critic (`c-c89f5b`, in review)** on `ej/20261124-192202-fbe9e3`.
@@ -465,6 +476,7 @@ Card ids in brackets:
 
 ## Decisions
 
+- 2026-11-24 (`c-81b834`): SOCKS5 auth resolves a token-shaped password through `resolveScope`, the same path as CONNECT and the HTTP proxy, instead of the local registry only. The auth step must accept every token the scope gate would accept, or remote workers break; the remote resolver remains the authority, and SOCKS5 auth is otherwise unchanged.
 - **2026-11-24 c-c2bdc8 (tracker webhooks):** a delivery is a hint, never state: it names a ticket and the
   normal sync reads the tracker API, so forged or replayed payloads cannot set a finding status. Jira is
   supported only through Jira Cloud's HMAC-signed admin webhooks (`X-Hub-Signature`); a secret in the URL was
