@@ -1,5 +1,7 @@
 import type {
   ConfigValues,
+  FindingLane,
+  FindingSource,
   ScanImportFormat,
   TicketPushResult,
   TicketSyncAction,
@@ -131,4 +133,34 @@ export function importIdParam(raw: string | null | undefined): string {
 // importFindingsHref links to the findings one scanner import created.
 export function importFindingsHref(importId: number | string): string {
   return `/function/findings?import_id=${encodeURIComponent(String(importId))}`;
+}
+
+export const FINDING_LANES: FindingLane[] = ["runtime", "sast", "sca"];
+
+// laneParam normalizes a lane query value: a known lane, or "" (every lane).
+export function laneParam(raw: string | null | undefined): FindingLane | "" {
+  const v = (raw ?? "").trim();
+  return FINDING_LANES.find((lane) => lane === v) ?? "";
+}
+
+// codeLocation renders a code finding's "path:line"; "" when there is no path.
+export function codeLocation(source: Pick<FindingSource, "location" | "line"> | null | undefined): string {
+  const path = source?.location?.trim();
+  if (!path) return "";
+  return source?.line && source.line > 0 ? `${path}:${source.line}` : path;
+}
+
+// laneCountEntries lists an import's non-zero per-lane finding counts in lane order.
+export function laneCountEntries(
+  counts: Partial<Record<FindingLane, number>> | null | undefined,
+): { lane: FindingLane; count: number }[] {
+  return FINDING_LANES.flatMap((lane) => {
+    const count = counts?.[lane] ?? 0;
+    return count > 0 ? [{ lane, count }] : [];
+  });
+}
+
+// anchorAssetIdsParam is the `asset_ids` upload query value, or "" when none are picked.
+export function anchorAssetIdsParam(ids: readonly number[]): string {
+  return [...new Set(ids.filter((id) => Number.isSafeInteger(id) && id > 0))].join(",");
 }
