@@ -1,6 +1,6 @@
 # HANDOFF.md — ARTEX
 
-**Last updated:** 2026-11-24 18:23 MST, by claude-code: c-d73308 (E8 follow-up) built, in review: an optional per-profile LLM sampling pin. Earlier hand-offs are under Deltas and in `ej handoff log`.
+**Last updated:** 2026-11-24 18:55 MST, by claude-code: c-d73308 (E8 follow-up) landed on main via #69 and verified on a real PostgreSQL; an HTTP-level test was added. Earlier hand-offs are under Deltas and in `ej handoff log`.
 
 > Single entry point for whoever picks this up next (any agent or human), with no access to the
 > originating conversation. Read this first, then the sections of the code it points at.
