@@ -135,12 +135,30 @@ jobs:
       # shellcheck is preinstalled on the ubuntu runners. -S warning: the scripts
       # currently have only info-level notes (intentional A && B || C chains in
       # update.sh, an unquoted glob in backup.sh's prune), so fail on warnings.
-      - run: shellcheck -S warning install.sh update.sh start.sh scripts/backup.sh scripts/verify.sh reset-password.sh scripts/extract-changelog-section.sh scripts/test-extract-changelog-section.sh .github/scripts/bot.sh scripts/test-bot-context.sh
+      - run: shellcheck -S warning install.sh update.sh start.sh scripts/backup.sh scripts/verify.sh reset-password.sh scripts/extract-changelog-section.sh scripts/test-extract-changelog-section.sh .github/scripts/bot.sh scripts/test-bot-context.sh scripts/check-migration-versions.sh scripts/test-check-migration-versions.sh
       - run: bash scripts/test-extract-changelog-section.sh
       # The triage bot's repository summary must expose every top-level
       # directory; a truncated file list once made it deny that docs/ and
       # scripts/benchmark/ exist.
       - run: bash scripts/test-bot-context.sh
+      - run: bash scripts/test-check-migration-versions.sh
+
+  # Two branches that each add db/migrations/NNNN_*.sql with the same number
+  # cannot both land (db/migrate.go refuses a duplicate), and the runner refuses
+  # a pending version below the newest applied one. Fail the PR while its
+  # migration is still unpublished and can be renumbered.
+  migration-versions:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - env:
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          git fetch --no-tags origin "$BASE_REF"
+          bash scripts/check-migration-versions.sh "origin/$BASE_REF"
 
   web:
     runs-on: ubuntu-latest

@@ -354,6 +354,7 @@ Card ids in brackets:
   is on main (origin/main's has no `github-actions` entry).
 - **E8 follow-ups** [`c-f1518c`] first live run, [`c-75c593`] bench
   image from a clean clone, [`c-d73308`] optional provider sampling seed per LLM profile.
+- **DB** [`c-c18f43`] Renumber each pending branch migration above main's newest as it lands (list under Known issues; `scripts/check-migration-versions.sh --branches` regenerates it).
 - **E10** [`c-72dd9d`] Code-security testing lane (SAST/dependency ingest) feeding the same dual-graph + evidence model.
 
 ## Known issues and gotchas
@@ -364,9 +365,19 @@ Card ids in brackets:
   `compress: false` in the dev branch of `web/next.config.mjs` and the `: open` comment in `openSSE`, or
   streams buffer or stay unopened in the browser.
 
-- **Migration 0020 (RSI) vs other branches' 0015–0019:** the runner refuses a pending migration older
-  than the newest applied one, so merge 0015–0019 (E2, E5, E1, c-ba9f64, c-5b5421) before this branch
-  reaches a database, or renumber 0020 forward at merge. `db/migrate_test.go` lists 0020 explicitly.
+- **Migration numbers collide across unmerged branches** (card `c-c18f43`). `db/migrate.go` refuses a
+  duplicated version, and the runner refuses a pending version below the newest applied one, so a
+  branch's new migration must be numbered **above main's newest** when it lands (renumber it then;
+  it is unpublished until applied on a database). `scripts/check-migration-versions.sh [BASE]` checks the
+  working tree (run by `scripts/verify.sh` and the `migration-versions` CI job on PRs) and names the next
+  free number; `--branches` reports every local `ej/*` branch. `db/migrate_test.go` now derives its
+  expected rows from the embedded files, so adding a migration needs no test edit. As of 2026-11-24 17:40
+  main's newest is **0023** (`0023_distributed_workers`); still to renumber when they land:
+  `0017_finding_classification` (E1, 083744-02fa3c), `0021_lesson_scope_scrub` (131958/140001/144555),
+  `0023_finding_import_links` (150542-76d507), `0023_change_notify` (170157-3aeba5), and one of the two
+  `0026`s (`0026_task_drain_acks` on 164948/165722 vs `0026_rsi_arm_ledger` on 165538). `0024_code_security_lane`
+  and `0025_session_transcripts` are fine if they land in order. `0023_integrations` (150533-1ba29e) is
+  the E2 file already on main as 0015: drop it, do not land it.
 - The RSI gate trusts the judge verdicts inside uploaded arm records (it checks shape, binding, task
   freshness and uniqueness, not the grading); the owner reads `report.md` before adopting. The generic
   prompt editor stays an owner path outside the gate and is what the bench harness uses to switch arms.
@@ -408,6 +419,12 @@ Card ids in brackets:
   `ARTEX_SECRET_KEY`) loses stored secrets.
 
 ## Decisions
+
+- **2026-11-24 — migration versions are checked, not reserved** (c-c18f43). A reservation ledger would
+  itself conflict across branches and cannot stop a stale branch; instead a PR check fails a migration
+  not numbered above the base's newest, judged against the base tip, while edits/deletions are judged
+  against the merge-base so a branch that is merely behind passes with a note. The migrate test reads the
+  expected list from `loadMigrations`, removing the line every migration branch used to conflict on.
 
 - **2026-11-24** — c-548e8b: the worker pins the control API's CA (`ARTEX_CONTROL_CA`) rather than
   trusting system roots, so a publicly valid certificate for the same name cannot impersonate the

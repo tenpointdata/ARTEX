@@ -133,28 +133,25 @@ func assertEmbeddedApplied(t *testing.T, d *DB) []appliedMigration {
 		}
 	}
 	applied := readApplied(t, d)
-	want := []struct {
-		version int
-		name    string
-	}{{1, llmRecordsMigration}, {2, llmUsageMigration}, {3, "0003_task_scope_icp_index.sql"}, {4, "0004_llm_usage_ts_index.sql"},
-		{5, "0005_traffic_rewrite_rules.sql"}, {6, "0006_activity_outbox.sql"}, {7, "0007_finding_report_state.sql"},
-		{8, "0008_traffic_evidence_rewrite_flag.sql"}, {9, "0009_llm_context.sql"}, {10, "0010_dashboard_usage_indexes.sql"},
-		{11, "0011_traffic_tamper_hooks.sql"}, {12, "0012_lesson_withdrawn.sql"},
-		{13, "0013_lesson_evidence_history.sql"}, {14, "0014_bedrock_gateway_profiles.sql"}, {15, "0015_integrations.sql"},
-		{16, "0016_engagement_governance.sql"}, {18, "0018_audit_chain_deferred.sql"},
-		{19, "0019_user_company_bindings.sql"}, {20, "0020_rsi_proposals.sql"}, {22, "0022_task_methodologies.sql"}, {23, "0023_distributed_workers.sql"}}
+	// The expected rows come from the embedded files themselves, so a new
+	// migration needs no edit here (a shared hand-kept list made every branch
+	// that added one conflict on this line). loadMigrations already rejects a
+	// duplicated version; scripts/check-migration-versions.sh rejects a version
+	// that is not above the base branch's newest.
+	want, err := loadMigrations(migrationsFS())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(want) < 2 || want[0].name != llmRecordsMigration || want[1].name != llmUsageMigration {
+		t.Fatalf("embedded migrations must start with %s and %s: %+v", llmRecordsMigration, llmUsageMigration, want)
+	}
 	if len(applied) != len(want) {
-		t.Fatalf("schema_migrations = %+v, want versions 1 to 16, 18, 19, 20, 22 and 23", applied)
+		t.Fatalf("schema_migrations has %d rows, want %d (one per embedded migration): %+v", len(applied), len(want), applied)
 	}
 	for i, w := range want {
-		content, err := fs.ReadFile(migrationsFS(), w.name)
-		if err != nil {
-			t.Fatal(err)
-		}
-		sum := sha256.Sum256(content)
 		got := applied[i]
-		if got.version != w.version || got.name != w.name || got.checksum != hex.EncodeToString(sum[:]) {
-			t.Errorf("schema_migrations row %d = %+v, want version %d name %s checksum %x", i, got, w.version, w.name, sum)
+		if got.version != w.version || got.name != w.name || got.checksum != w.checksum {
+			t.Errorf("schema_migrations row %d = %+v, want version %d name %s checksum %s", i, got, w.version, w.name, w.checksum)
 		}
 	}
 	return applied
