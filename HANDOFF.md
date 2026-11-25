@@ -59,6 +59,23 @@ See `docs/ARCHITECTURE.md` for the code-level map. Summary:
 
 ## Current state
 
+**2026-11-24 — E7 drain ack + LLM profile reload on workers (`c-1d3e0a`, in review)** on
+`ej/20261124-165722-c858f3`. The branch merges the unmerged E7 branches `ej/20261124-164948-393f2a` (c-18f7a8 and
+its stack) and `ej/20261124-155353-b1c60a` (c-8cfbfe). It does **not** merge c-7ad4da's `ej/20261124-161438-32780e`:
+that branch's `syncTrafficCapture` conflicts with, and is covered by, `syncSharedEgress` (consolidation card `c-20c400`).
+(1) **Drain ack:** a worker node writes a `task_drain_acks` row (migration **0026**) once a task under the 'deleting'
+fence is no longer served there and its routines are joined (`server/engine_drain.go` `ackDrains`, `db/drain_acks.go`).
+The insert is conditional on the fence, and any fence change clears the rows. `waitTaskQuiescent` (delete and
+archive) waits for every live worker node's ack, up to `remoteDrainAckBound` (8 s), and no longer assumes
+2 polls + 1 s. (2) **LLM reload:** `invalidateProfileAgents` (profile save/activate/delete, `/api/llm`, retry policy,
+failover switches, agent binding) bumps `settings.llm_config_revision`. The worker's `followAgentSettings` drops its
+provider caches and re-applies the retry policy and the active profile. **Verified** against a local Postgres 17:
+`TestDeleteWaitsForWorkerNodeDrainAck` (fails with the ack disabled: the drain hits the bound),
+`TestDeleteDrainWaitsForTheBoundWhenAWorkerNodeIsGone`, `TestWorkerNodeFollowsLLMProfileChange` and the existing E7
+tests. `scripts/verify.sh` is clean except two environment-only failures here (`TestConnectWithoutPasswordRealPG`:
+the local PG uses trust auth; SOCKS5 UDP: macOS has no 127.0.0.2). **Not verified:** a real two-host delete.
+**Merge risk:** migration numbers collide across unmerged branches (`c-c18f43`).
+
 **2026-11-24 — E7 smaller gaps (`c-18f7a8`, in review)** on `ej/20261124-161440-11cbc4`, which merges the
 unmerged E7 branch `ej/20261124-150525-1a95b3`. (1) Browser MCP on worker nodes: `traffic.StartCredentialRelay`
 (`traffic/credential_relay.go`) is a loopback relay that adds the run's scope token as `Proxy-Authorization` and
@@ -188,8 +205,10 @@ image, E8 eval suite) moved to `docs/handoff/2026-11-24-current-state-archive.md
   pre-registration, adopted-lesson retire sync. Done = Postgres tests for each.
 - *(unclaimed)* — **RSI gate web UI** (M), card `c-936308`. Done = adopt/rollback from a proposals table in ≤2 clicks + password.
 
-- *(unclaimed)* — **E7: worker drain ack + LLM profile reload** (M), card `c-1d3e0a`. Done = a two-manager
-  test for each.
+- *(unclaimed)* — **DB: renumber colliding migrations as branches land** (S), card `c-c18f43`. Done = unique
+  versions on main, `go test ./db` green.
+- *(unclaimed)* — **E7: one worker settings follower** (S), card `c-20c400`. Done = one reload path, tests green,
+  claims still blocked while the settings are unreadable.
 
 **Human lane**
 - **E7 live install on two hosts** (card `c-8cfbfe`): `helm install` on a ≥2-node cluster, a task whose
@@ -259,12 +278,14 @@ Card ids in brackets:
 - **E5** [`c-669406`] Engagement governance. The backend is done on `ej/20261124-055929-bd2253`. Follow-ups:
   `c-5b5421` (client binding), `c-869050` (UI, in review), `c-f4115c` (lifecycle gaps), `c-92bb52`
   (role-aware controls on existing pages), `c-7c4715` (client_read console, in review), `c-601ec6` (chain paging).
+- **DB** [`c-c18f43`] Migration version collisions across unmerged branches (0023 x3, 0024, 0025; c-1d3e0a uses 0026).
 - **TEST** [`c-3157b4`] `TestGateOffTaskIsUnchanged` fails on main with Postgres (also fails before E5).
 - **E6** [`c-cb0093`] Cost/observability dashboard + OpenTelemetry export, building on existing context telemetry.
 - **E7** [`c-d60149`] Distributed workers + Helm: built, in review (see Current state). Follow-ups:
   `c-3b781a` (evidence on workers), `c-29ff19` (transcripts across hosts), `c-8cfbfe` (live two-host
   install), `c-18f7a8` (browser MCP relay, finding wake-ups, proxy scope default, rule-revision tx; in review),
-  `c-1d3e0a` (worker drain ack, LLM profile reload), `c-677166` (proxy-hop TLS).
+  `c-1d3e0a` (worker drain ack, LLM profile reload; in review), `c-20c400` (one settings follower),
+  `c-677166` (proxy-hop TLS).
 - **E8** [`c-5487e8`] Planner/worker evaluation suite (regression targets, prompt-version A/B via the benchmark gate).
 - **E9** [`c-73af97`] Frontend/UX pass (tables over cards, fewer-clicks triage workflow, live engagement dashboard).
 - **SEC** [`c-517c2d`] Live Playwright task check of the scope relay (human/bench: needs an LLM key and an authorized target).
@@ -343,6 +364,15 @@ Card ids in brackets:
   `ARTEX_SECRET_KEY`) loses stored secrets.
 
 ## Decisions
+
+- **2026-11-24** — c-1d3e0a: (a) An ack means "fence up, and no runs of this task here". The worker writes it
+  only from its dispatch loop (the only place a task starts being served), only after StopTask joined the
+  routines, and only while the fence stands. No run starts under the fence, so no fence epoch is needed. A fence
+  change clears the acks. (b) After the bound (8 s, inside the 10 s drain timeout) the delete **goes on** and logs
+  the silent nodes, as the card asked. A stale registry row (NodeTTL 45 s) is not waited for. (c) The LLM reload
+  reuses the c-8cfbfe revision follower with its own key, `llm_config_revision`. The bump lives in
+  `invalidateProfileAgents`, so binding and pool changes are covered too. Workers never bump, which would loop.
+  (d) Migration numbered 0026 to step past the 0023–0025 already taken on other unmerged branches.
 
 - **2026-11-24** — c-18f7a8: (a) The capture proxy refuses token-less non-loopback clients in **every** role,
   not only on a control node. `ARTEX_PROXY_ALLOW_NONLOOPBACK=1` was meant to expose the proxy, not to make it an
