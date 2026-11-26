@@ -181,3 +181,32 @@ func TestBrandingNormalize(t *testing.T) {
 		}
 	}
 }
+
+// The branded HTML export carries the proof cues the Markdown export prints:
+// imported-scanner provenance, PoE, bound traffic, attestations and the
+// stale-report warning (worded by the same helper), all escaped.
+func TestFindingsHTMLCarriesProofCues(t *testing.T) {
+	fs := exportFindings(t)
+	f := fs[0]
+	f.PoELevel = 3
+	f.ConfidenceRationale = "Time-based payload delayed 5s <b>twice</b>"
+	f.Counterevidence = "UNION payloads were filtered"
+	f.Report, f.EvidenceVersion, f.ReportEvidenceVersion = "old report", 2, 1
+	f.TrafficBindings = []db.FindingTrafficBinding{{ID: 11, Role: "proof", Note: "delay", Snapshot: db.TrafficEvidenceSnapshot{Method: "GET", URL: "https://t.example/q?id=1'", Status: 200}}}
+	imp := int64(9)
+	fs[1].ImportSource = &db.FindingImportSource{FindingID: 2, ImportID: &imp, Tool: "semgrep", RuleID: "py.sqli", Lane: "sast", Location: "app/views.py", Line: 42}
+	out, err := FindingsHTML(fs, time.Date(2026, 11, 24, 9, 0, 0, 0, time.UTC), Branding{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc := string(out)
+	assertContains(t, "html", doc,
+		"<tr><th>PoE level</th><td>3</td></tr>", "1 bound traffic exchange(s)", "no bound traffic evidence",
+		"Confidence rationale", "Time-based payload delayed 5s &lt;b&gt;twice&lt;/b&gt;", "UNION payloads were filtered",
+		strings.TrimSpace(staleReportNotice(true)), "Related traffic evidence", "GET https://t.example/q?id=1&#39;",
+		"code scan (SAST), imported from semgrep rule py.sqli at app/views.py:42 (import #9); a scanner claim until reproduced",
+		"(scanner claim, unverified)", "3 finding(s), 2 confirmed by testing and 1 imported scanner claim(s) not yet reproduced")
+	if strings.Contains(doc, "<b>twice") {
+		t.Fatal("attestation text was not escaped")
+	}
+}

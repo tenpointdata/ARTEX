@@ -25,6 +25,7 @@
   pre, .prose { white-space: pre-wrap; word-break: break-word; }
   pre { background: #f6f8fa; border: 1px solid var(--line); padding: 10px; font-size: 12px; }
   .gap { color: var(--muted); font-style: italic; }
+  .stale { border-left: 4px solid #b9770e; background: #fdf6e3; padding: 6px 10px; }
   code { font-size: 12px; word-break: break-all; }
   footer { color: var(--muted); border-top: 1px solid var(--line); margin-top: 48px; padding-top: 8px; font-size: 12px; }
   section.finding { page-break-inside: avoid; }
@@ -57,7 +58,7 @@
 <h3>Most urgent</h3>
 <table>
   <tr><th>#</th><th>Severity</th><th>Finding</th><th>CVSS v4.0</th></tr>
-  {{range $i, $t := .Summary.Top}}<tr><td>{{inc $i}}</td><td class="sev sev-{{$t.Severity}}">{{sevLabel $t.Severity}}</td><td>{{$t.Title}}</td><td>{{with $t.Classification.CVSS}}{{cvss .}}{{else}}<span class="gap">not scored</span>{{end}}</td></tr>{{end}}
+  {{range $i, $t := .Summary.Top}}<tr><td>{{inc $i}}</td><td class="sev sev-{{$t.Severity}}">{{sevLabel $t.Severity}}</td><td>{{$t.Title}}{{if $t.Imported}} <span class="gap">(scanner claim, unverified)</span>{{end}}</td><td>{{with $t.Classification.CVSS}}{{cvss .}}{{else}}<span class="gap">not scored</span>{{end}}</td></tr>{{end}}
 </table>
 {{if .Summary.Frameworks}}
 <h3>Framework mapping</h3>
@@ -80,6 +81,10 @@
   <table>
     {{with .VulnClass}}<tr><th>Class</th><td>{{.}}</td></tr>{{end}}
     <tr><th>Status</th><td>{{.Status}}</td></tr>
+    {{with .Source}}<tr><th>Source</th><td>{{.}}</td></tr>{{end}}
+    <tr><th>Finding record</th><td>#{{.ID}}</td></tr>
+    <tr><th>PoE level</th><td>{{.Q.PoE}}</td></tr>
+    <tr><th>Proof</th><td>{{with .TrafficBindings}}{{len .}} bound traffic exchange(s){{else}}<span class="gap">no bound traffic evidence</span>{{end}}</td></tr>
     <tr><th>Verification</th><td>{{verify .VerificationStatus}}{{with trim .VerificationNote}} — {{.}}{{end}}</td></tr>
     <tr><th>CVSS v4.0</th><td>{{with .Classification.CVSS}}{{cvss .}} {{title .Rating}}<br><code>{{.Vector}}</code>{{else}}<span class="gap">not scored</span>{{end}}</td></tr>
     {{with .Classification.EPSS}}<tr><th>EPSS</th><td>{{epss .}}</td></tr>{{end}}
@@ -91,7 +96,16 @@
   {{with trim .Evidence}}<h4>Evidence</h4><pre>{{.}}</pre>{{end}}
   <h4>Remediation</h4>
   {{with trim .Classification.Remediation}}<div class="prose">{{.}}</div>{{else}}<p class="gap">No remediation guidance recorded yet.</p>{{end}}
+  {{with trim .Q.ConfidenceRationale}}<h4>Confidence rationale</h4><div class="prose">{{.}}</div>{{end}}
+  {{with trim .Q.Counterevidence}}<h4>Counterevidence</h4><div class="prose">{{.}}</div>{{end}}
+  {{with .StaleNotice}}<p class="stale">{{.}}</p>{{end}}
   {{with trim .Report}}<h4>Detailed report</h4><div class="prose">{{.}}</div>{{end}}
+  {{if .TrafficBindings}}<h4>Related traffic evidence</h4>
+  <p class="meta">Evidence version {{.EvidenceVersion}}; bindings: {{len .TrafficBindings}}.</p>
+  <table>
+    <tr><th>#</th><th>Evidence</th><th>Role</th><th>Request</th><th>Status</th><th>Note</th></tr>
+    {{range $i, $b := .TrafficBindings}}<tr><td>{{inc $i}}</td><td>#{{$b.ID}}</td><td>{{$b.Role}}</td><td><code>{{$b.Snapshot.Method}} {{$b.Snapshot.URL}}</code></td><td>{{$b.Snapshot.Status}}</td><td>{{$b.Note}}</td></tr>{{end}}
+  </table>{{end}}
 </section>
 {{end}}
 {{end}}

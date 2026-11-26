@@ -83,10 +83,16 @@ var findingsHTMLTemplate = template.Must(template.New("findings").Funcs(template
 	"inc":       func(i int) int { return i + 1 },
 }).Parse(findingsHTMLSource))
 
+// htmlFinding carries the same proof cues as the Markdown export (source,
+// PoE, bound evidence, attestations, stale-report warning), computed by the
+// same helpers so the two deliverables cannot disagree about one finding.
 type htmlFinding struct {
 	*db.DBFinding
-	Index int
-	Title string
+	Index       int
+	Title       string
+	Source      string  // provenance of an imported scanner claim; "" for a worker's finding
+	Q           Quality // proof strength
+	StaleNotice string  // staleReportNotice wording; "" when the report is current
 }
 
 type htmlReport struct {
@@ -113,7 +119,9 @@ func FindingsHTML(fs []*db.DBFinding, generatedAt time.Time, brand Branding) ([]
 	r := htmlReport{Brand: brand, Accent: template.CSS(accent), Title: nz(brand.Title, defaultBrandTitle),
 		GeneratedAt: generatedAt, Summary: Summarize(summaryItemsFromDB(items))}
 	for i, f := range items {
-		r.Findings = append(r.Findings, htmlFinding{DBFinding: f, Index: i + 1, Title: findingTitle(f)})
+		r.Findings = append(r.Findings, htmlFinding{DBFinding: f, Index: i + 1, Title: findingTitle(f),
+			Source: SourceOf(f).Describe(), Q: qualityFromDBFinding(f),
+			StaleNotice: strings.TrimSpace(staleReportNotice(reportStale(f.Report, f.EvidenceVersion, f.ReportEvidenceVersion)))})
 	}
 	var buf bytes.Buffer
 	if err := findingsHTMLTemplate.Execute(&buf, r); err != nil {

@@ -70,7 +70,8 @@ remediation, framework tags CWE / OWASP ASVS / WSTG / MITRE ATT&CK) with a `Patc
 an executive summary (overall risk, severity table, verified/scored counts, remediation gap, most urgent,
 framework mapping), CSV columns (before E10's lane columns), and a branded self-contained HTML export
 (`export?format=html&client=&title=`, branding in `GET|PUT /api/settings/report-branding`, admin). The
-executive summary keeps E10 imported scanner claims out of "confirmed". **No web UI yet:** card `c-fd4abc`.
+executive summary keeps E10 imported scanner claims out of "confirmed", and the branded HTML carries the same
+proof cues as the Markdown export (source, PoE, bound traffic, attestations, stale-report warning). **No web UI yet:** card `c-fd4abc`.
 Codex fork `h-fa8762` stalled mid-cherry-pick of the same commits in worktree `ej-20261126-000744-c98c03`
 (untouched since 00:08); this branch supersedes it — discard that worktree, do not land it.
 
