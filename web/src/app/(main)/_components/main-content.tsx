@@ -122,7 +122,9 @@ export function MainContent({ children }: { children: ReactNode }) {
           </div>
           <div className="flex items-center gap-2">
             {version && (
-              <span className="font-medium text-muted-foreground text-xs tabular-nums">{t("Version · {version}", { version })}</span>
+              <span className="font-medium text-muted-foreground text-xs tabular-nums">
+                {t("Version · {version}", { version })}
+              </span>
             )}
             <LayoutControls />
             <ThemeSwitcher />

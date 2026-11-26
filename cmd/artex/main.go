@@ -80,6 +80,10 @@ func main() {
 	// Started as the Bash shim or as an MCP drop command: drop the identity and exec
 	// the real program. It returns only for an ordinary start.
 	server.RunExecShimIfRequested(os.Args)
+	// A one-shot helper, not a server start: make the node TLS files and exit.
+	if len(os.Args) > 1 && os.Args[1] == nodeTLSCommand {
+		os.Exit(runNodeTLS(os.Args[2:], os.Stdout))
+	}
 	// Before any listener or child exists: keep the secrets out of /proc/<pid>/environ.
 	server.SealProcessEnv()
 	os.Exit(run())
@@ -111,6 +115,9 @@ func run() int {
 		// single -exec-uid for every agent process.
 		execUIDRange = flag.String("exec-uid-range", "", "uid range LO-HI to give each task and chat session a uid of its own (e.g. 20000-29999); empty: every agent process runs as -exec-uid")
 		// Development escape of the isolation self-test, off by default.
+		// Process role (E7, docs/DISTRIBUTED.md): all (one process), control or worker.
+		roleFlag       = flag.String("role", os.Getenv("ARTEX_ROLE"), "process role: all (default: API, planners and workers in one process), control (API and planners; ARTEX_LOCAL_WORKERS workers) or worker (claims intents from the database, serves no API) (env ARTEX_ROLE)")
+		healthAddr     = flag.String("health-addr", envOr("ARTEX_HEALTH_ADDR", ":8790"), "worker role only: plaintext GET /healthz listen address (env ARTEX_HEALTH_ADDR)")
 		devNoIsolation = flag.Bool(server.DevNoIsolationFlag, false, "DEVELOPMENT ONLY: on Linux as root, start even when the agent isolation self-test fails; agent processes and file tools may then read the server's keys, config and database credentials")
 	)
 	flag.Parse()
@@ -119,10 +126,24 @@ func run() int {
 	// to the frontend top bar.
 	server.BuildVersion = version
 
-	useTLS, bindWarn, err := checkListenSecurity(*addr, *tlsCert, *tlsKey, os.Getenv(envAllowInsecure) == "1")
+	role, err := server.ParseNodeRole(*roleFlag)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "artex:", err)
 		return 2
+	}
+	node, err := server.NodeConfigFromEnv(role)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "artex:", err)
+		return 2
+	}
+	// A worker node serves no API, so the API listener checks do not apply.
+	useTLS, bindWarn := false, ""
+	if role != server.RoleWorker {
+		useTLS, bindWarn, err = checkListenSecurity(*addr, *tlsCert, *tlsKey, os.Getenv(envAllowInsecure) == "1")
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "artex:", err)
+			return 2
+		}
 	}
 
 	printBanner(*addr)
@@ -231,32 +252,42 @@ func run() int {
 	ctx, shutdown := shutdownContext(sigCtx)
 	defer shutdown(agent.AbortShutdown)
 
-	mgr, err := server.NewManager(*dataDir, *proxy)
+	mgr, err := server.NewManagerForNode(*dataDir, *proxy, node)
 	if err != nil {
 		log.Fatalf("open stores: %v", err)
 	}
 	defer mgr.Close()
 
-	srv := server.New(ctx, mgr, skillDir, *dataDir, keyDir, server.WithSecretScrub(), server.WithTrustedProxies(trusted), server.WithExecPrivilege(priv), server.WithIsolationStatus(isolation))
+	srv := server.New(ctx, mgr, skillDir, *dataDir, keyDir, server.WithSecretScrub(), server.WithNodeConfig(node), server.WithTrustedProxies(trusted), server.WithExecPrivilege(priv), server.WithIsolationStatus(isolation))
 	// ReadTimeout bounds how long the request headers and body may take to arrive.
 	// It does not limit how long a handler runs, so an event stream stays open.
 	// WriteTimeout is left unset: a write deadline would cut that stream.
+	listenAddr, handler := *addr, srv.Handler()
+	if role == server.RoleWorker {
+		listenAddr, handler, useTLS = *healthAddr, srv.WorkerHealthHandler(), false
+	}
 	httpSrv := &http.Server{
-		Addr:              *addr,
-		Handler:           srv.Handler(),
+		Addr:              listenAddr,
+		Handler:           handler,
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       30 * time.Minute,
 		IdleTimeout:       2 * time.Minute,
 	}
 	if useTLS {
+		reloader, err := newCertReloader(*tlsCert, *tlsKey, 30*time.Second)
+		if err != nil {
+			log.Printf("[tls] %v", err)
+			return 1
+		}
 		httpSrv.TLSConfig = serverTLSConfig()
+		httpSrv.TLSConfig.GetCertificate = reloader.GetCertificate
 	}
 
 	go func() {
-		log.Printf("ARTEX %s backend listening on %s (data=%s, workers=%d)", version, *addr, *dataDir, mgr.Workers())
+		log.Printf("ARTEX %s %s node %s listening on %s (data=%s)", version, role, node.NodeID, listenAddr, *dataDir)
 		var err error
 		if useTLS {
-			err = httpSrv.ListenAndServeTLS(*tlsCert, *tlsKey)
+			err = httpSrv.ListenAndServeTLS("", "") // certificates from TLSConfig.GetCertificate
 		} else {
 			err = httpSrv.ListenAndServe()
 		}
@@ -306,4 +337,12 @@ func shutdownContext(signalCtx context.Context) (context.Context, context.Cancel
 		}
 	}()
 	return ctx, shutdown
+}
+
+// envOr returns the environment variable key, or def when it is unset or empty.
+func envOr(key, def string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return def
 }

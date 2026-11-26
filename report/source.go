@@ -1,0 +1,159 @@
+package report
+
+import (
+	"encoding/json"
+	"fmt"
+	"strings"
+
+	"github.com/Autumn-27/artex/db"
+)
+
+// Source is where a finding came from: the runtime lane (ARTEX's own workers,
+// or an imported runtime scanner) or the code lanes (SAST, SCA) fed by
+// scanner imports (E10). Code and runtime findings share the exploration graph,
+// so one report lists both; Source says which lane each one came from.
+type Source struct {
+	Imported bool
+	Lane     string // runtime | sast | sca; "" for a worker's finding
+	Tool     string
+	RuleID   string
+	Location string // repo-relative path, code lanes only
+	Line     int
+	ImportID int64
+}
+
+// sourceFromPayload reads the import provenance an import-written finding
+// node carries (db.importedFindingNodeTx); a worker's node has none.
+func sourceFromPayload(raw json.RawMessage) Source {
+	var p struct {
+		Source   string `json:"source"`
+		Lane     string `json:"lane"`
+		Tool     string `json:"tool"`
+		RuleID   string `json:"rule_id"`
+		Location string `json:"location"`
+		Line     int    `json:"line"`
+		ImportID int64  `json:"import_id"`
+	}
+	_ = json.Unmarshal(raw, &p)
+	if p.Source != db.ImportSourceOrigin {
+		return Source{}
+	}
+	return Source{Imported: true, Lane: p.Lane, Tool: p.Tool, RuleID: p.RuleID, Location: p.Location, Line: p.Line, ImportID: p.ImportID}
+}
+
+// SourceOf is the Source of a findings-table row: its import provenance, or
+// a worker's runtime finding when it has none.
+func SourceOf(f *db.DBFinding) Source {
+	is := f.ImportSource
+	if is == nil {
+		return Source{}
+	}
+	out := Source{Imported: true, Lane: is.Lane, Tool: is.Tool, RuleID: is.RuleID, Location: is.Location, Line: is.Line}
+	if is.ImportID != nil {
+		out.ImportID = *is.ImportID
+	}
+	return out
+}
+
+// codeLocation is path:line (or just the path when the line is unknown).
+func (s Source) codeLocation() string {
+	if s.Location == "" || s.Line <= 0 {
+		return s.Location
+	}
+	return fmt.Sprintf("%s:%d", s.Location, s.Line)
+}
+
+// LaneKey is the lane a finding is counted under.
+func (s Source) LaneKey() string {
+	if s.Lane == "" {
+		return "runtime"
+	}
+	return s.Lane
+}
+
+// laneNames are the report's names for each lane, in report order.
+var laneNames = []struct{ key, name string }{
+	{"runtime", "runtime testing"},
+	{"sast", "code scan (SAST)"},
+	{"sca", "dependency scan (SCA)"},
+}
+
+func laneName(key string) string {
+	for _, l := range laneNames {
+		if l.key == key {
+			return l.name
+		}
+	}
+	return key
+}
+
+// codeSpan renders s as Markdown inline code; a backtick in it cannot close
+// the span.
+func codeSpan(s string) string {
+	return "`" + strings.ReplaceAll(oneLine(s), "`", "'") + "`"
+}
+
+// bullet is the Source line of a finding in the report; "" for a worker's
+// finding, which the proof bullets already describe.
+func (s Source) bullet() string {
+	if !s.Imported {
+		return ""
+	}
+	return "- **Source**: " + s.describe(codeSpan) + "\n"
+}
+
+// Describe is the plain-text Source statement (the branded HTML export
+// escapes it); "" for a worker's finding.
+func (s Source) Describe() string {
+	if !s.Imported {
+		return ""
+	}
+	return s.describe(oneLine)
+}
+
+// describe words the provenance; code formats rule ids and locations.
+func (s Source) describe(code func(string) string) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "%s, imported from %s", laneName(s.LaneKey()), nz(s.Tool, "a scanner"))
+	if s.RuleID != "" {
+		fmt.Fprintf(&b, " rule %s", code(s.RuleID))
+	}
+	if loc := s.codeLocation(); loc != "" {
+		fmt.Fprintf(&b, " at %s", code(loc))
+	}
+	if s.ImportID > 0 {
+		fmt.Fprintf(&b, " (import #%d)", s.ImportID)
+	}
+	b.WriteString("; a scanner claim until reproduced")
+	return b.String()
+}
+
+// importedCount counts the findings a scanner import wrote.
+func importedCount(nodes []*db.Node) int {
+	n := 0
+	for _, node := range nodes {
+		if sourceFromPayload(node.Payload).Imported {
+			n++
+		}
+	}
+	return n
+}
+
+// laneSummary is the summary's imported-findings line with its per-lane
+// breakdown; "" when nothing was imported.
+func laneSummary(nodes []*db.Node, imported int) string {
+	if imported == 0 {
+		return ""
+	}
+	counts := map[string]int{}
+	for _, n := range nodes {
+		counts[sourceFromPayload(n.Payload).LaneKey()]++
+	}
+	parts := make([]string, 0, len(laneNames))
+	for _, l := range laneNames {
+		if counts[l.key] > 0 {
+			parts = append(parts, fmt.Sprintf("%s %d", l.name, counts[l.key]))
+		}
+	}
+	return fmt.Sprintf("- Imported scanner findings, unverified until reproduced: **%d**\n- By lane: %s\n", imported, strings.Join(parts, ", "))
+}

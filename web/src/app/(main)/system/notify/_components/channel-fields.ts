@@ -1,4 +1,8 @@
 import { t } from "@/i18n";
+import type { FieldDef } from "@/lib/config-form";
+
+export type { FieldDef, FieldKind } from "@/lib/config-form";
+export { parseKV } from "@/lib/config-form";
 
 // Channel field table and config-value parsing helpers.
 //
@@ -23,15 +27,6 @@ export const KIND_LABEL: Record<string, string> = {
 // because only the channel implementation knows which values are credentials (WeCom's entire Webhook is the credential,
 // whereas DingTalk's is just one secret). A missing entry here for a new channel only blanks the form;
 // it does not fail silently (hasFields below surfaces it).
-export type FieldKind = "text" | "password" | "number" | "select" | "textarea" | "switch" | "kv" | "list";
-export interface FieldDef {
-  key: string;
-  label: string;
-  kind: FieldKind;
-  placeholder?: string;
-  help?: string;
-  options?: { value: string; label: string }[];
-}
 export const CHANNEL_FIELDS: Record<string, FieldDef[]> = {
   dingtalk: [
     {
@@ -44,7 +39,9 @@ export const CHANNEL_FIELDS: Record<string, FieldDef[]> = {
       key: "secret",
       label: t("Signing secret"),
       kind: "password",
-      help: t("Fill in when the robot's security settings use 'Sign'; leave empty for 'Custom keywords' or when no security setting is enabled"),
+      help: t(
+        "Fill in when the robot's security settings use 'Sign'; leave empty for 'Custom keywords' or when no security setting is enabled",
+      ),
     },
   ],
   feishu: [
@@ -54,7 +51,12 @@ export const CHANNEL_FIELDS: Record<string, FieldDef[]> = {
       kind: "text",
       placeholder: "https://open.feishu.cn/open-apis/bot/v2/hook/...",
     },
-    { key: "secret", label: t("Signature verification secret"), kind: "password", help: t("Fill in when the robot enables 'Signature verification'; otherwise leave empty") },
+    {
+      key: "secret",
+      label: t("Signature verification secret"),
+      kind: "password",
+      help: t("Fill in when the robot enables 'Signature verification'; otherwise leave empty"),
+    },
   ],
   wecom: [
     {
@@ -77,7 +79,12 @@ export const CHANNEL_FIELDS: Record<string, FieldDef[]> = {
         { value: "GET", label: t("GET (no body)") },
       ],
     },
-    { key: "headers", label: t("Custom headers"), kind: "kv", help: t("One KEY=VALUE per line, e.g. Authorization=Bearer xxx") },
+    {
+      key: "headers",
+      label: t("Custom headers"),
+      kind: "kv",
+      help: t("One KEY=VALUE per line, e.g. Authorization=Bearer xxx"),
+    },
     {
       key: "body_template",
       label: t("Body template"),
@@ -111,7 +118,12 @@ export const CHANNEL_FIELDS: Record<string, FieldDef[]> = {
     { key: "password", label: t("Password / auth code"), kind: "password" },
     { key: "from", label: t("From"), kind: "text", placeholder: "artex@example.com" },
     { key: "to", label: t("Recipients"), kind: "list", help: t("Separate multiple addresses with commas") },
-    { key: "tls", label: t("Implicit TLS"), kind: "switch", help: t("On for port 465; keep off for 587 (STARTTLS is automatic)") },
+    {
+      key: "tls",
+      label: t("Implicit TLS"),
+      kind: "switch",
+      help: t("On for port 465; keep off for 587 (STARTTLS is automatic)"),
+    },
   ],
 };
 
@@ -153,17 +165,6 @@ export const emptyForm = (kind: string): ChannelForm => ({
   onStatusChange: false,
 });
 
-// parseKV parses a "KEY=VALUE per line" textarea.
-export function parseKV(text: string): Record<string, string> {
-  const out: Record<string, string> = {};
-  for (const line of text.split("\n")) {
-    const ln = line.trim();
-    if (!ln) continue;
-    const i = ln.indexOf("=");
-    if (i > 0) out[ln.slice(0, i).trim()] = ln.slice(i + 1).trim();
-  }
-  return out;
-}
 // parseIDs parses a comma/whitespace-separated id list.
 export function parseIDs(text: string): number[] {
   return text

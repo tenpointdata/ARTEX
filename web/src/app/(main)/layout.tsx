@@ -5,8 +5,10 @@ import * as React from "react";
 
 import { AppSidebar } from "@/app/(main)/_components/sidebar/app-sidebar";
 import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
+import { SessionProvider } from "@/hooks/use-session";
 import { auth } from "@/lib/auth";
 import { getClientCookie } from "@/lib/cookie.client";
+import type { SessionInfo } from "@/lib/governance-types";
 import {
   SIDEBAR_COLLAPSIBLE_VALUES,
   SIDEBAR_VARIANT_VALUES,
@@ -16,7 +18,9 @@ import {
 import { PREFERENCE_DEFAULTS } from "@/lib/preferences/preferences-config";
 import { cn } from "@/lib/utils";
 
+import { ClientCompanyGate } from "./_components/client-company-gate";
 import { MainContent } from "./_components/main-content";
+import { RouteGuard } from "./_components/route-guard";
 
 // Reads a layout-critical preference from the browser cookie (falls back to the
 // default during static-export prerender where document is unavailable). Kept
@@ -32,13 +36,13 @@ export default function Layout({ children }: Readonly<{ children: ReactNode }>) 
   // Client-side auth gate — replaces the Next proxy/middleware that static export
   // disables. No token → bounce to /login; render nothing until confirmed so no
   // protected UI (or its API calls) flashes for a logged-out visitor.
-  const [authed, setAuthed] = React.useState(false);
+  const [session, setSession] = React.useState<SessionInfo | null>(null);
   React.useEffect(() => {
     let cancelled = false;
-    void auth.isAuthenticated().then(async (ok) => {
+    void auth.session().then(async (s) => {
       if (cancelled) return;
-      if (ok) {
-        setAuthed(true);
+      if (s.authenticated) {
+        setSession(s);
       } else {
         // Clear a stale cookie server-side too: otherwise proxy.ts, going by "cookie exists"
         // alone, would bounce us from /login back to the main UI in an infinite redirect.
@@ -63,30 +67,36 @@ export default function Layout({ children }: Readonly<{ children: ReactNode }>) 
     PREFERENCE_DEFAULTS.sidebar_collapsible,
   );
 
-  if (!authed) return null;
+  if (!session) return null;
 
   return (
-    <SidebarProvider
-      defaultOpen={defaultOpen}
-      style={
-        {
-          "--sidebar-width": "calc(var(--spacing) * 68)",
-        } as React.CSSProperties
-      }
-    >
-      <AppSidebar variant={variant} collapsible={collapsible} />
-      <SidebarInset
-        className={cn(
-          "[html[data-content-layout=centered]_&>*]:mx-auto",
-          "[html[data-content-layout=centered]_&>*]:w-full",
-          "[html[data-content-layout=centered]_&>*]:max-w-screen-2xl",
-          "peer-data-[variant=inset]:border",
-          "[--dashboard-header-height:--spacing(12)]",
-          "min-w-0 overflow-x-hidden",
-        )}
+    <SessionProvider value={session}>
+      <SidebarProvider
+        defaultOpen={defaultOpen}
+        style={
+          {
+            "--sidebar-width": "calc(var(--spacing) * 68)",
+          } as React.CSSProperties
+        }
       >
-        <MainContent>{children}</MainContent>
-      </SidebarInset>
-    </SidebarProvider>
+        <AppSidebar variant={variant} collapsible={collapsible} />
+        <SidebarInset
+          className={cn(
+            "[html[data-content-layout=centered]_&>*]:mx-auto",
+            "[html[data-content-layout=centered]_&>*]:w-full",
+            "[html[data-content-layout=centered]_&>*]:max-w-screen-2xl",
+            "peer-data-[variant=inset]:border",
+            "[--dashboard-header-height:--spacing(12)]",
+            "min-w-0 overflow-x-hidden",
+          )}
+        >
+          <MainContent>
+            <RouteGuard>
+              <ClientCompanyGate>{children}</ClientCompanyGate>
+            </RouteGuard>
+          </MainContent>
+        </SidebarInset>
+      </SidebarProvider>
+    </SessionProvider>
   );
 }

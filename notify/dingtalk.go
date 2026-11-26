@@ -166,8 +166,8 @@ func validateHTTPURL(raw string) error {
 	if u.Host == "" {
 		return errors.New("missing host name")
 	}
-	if ip := net.ParseIP(u.Hostname()); ip != nil && isBlockedDialIP(ip) && !allowLocalTargets() {
-		return fmt.Errorf("refusing to deliver to loopback/link-local address %s (if you really need to deliver to a local service, set %s=1)", ip, AllowLocalTargetsEnv)
+	if ip := net.ParseIP(u.Hostname()); ip != nil && isBlockedDialIP(ip) {
+		return fmt.Errorf("refusing to deliver to non-public address %s (if you really need to deliver to a private or local service, set %s=1)", ip, AllowLocalTargetsEnv)
 	}
 	return nil
 }

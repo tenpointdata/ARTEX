@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+
 import {
   DownloadIcon,
   FileIcon,
@@ -16,34 +17,16 @@ import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { Sheet, SheetContent, SheetFooter, SheetHeader, SheetTitle } from "@/components/ui/sheet";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
-import {
-  Sheet,
-  SheetContent,
-  SheetFooter,
-  SheetHeader,
-  SheetTitle,
-} from "@/components/ui/sheet";
-import {
-  Dialog,
-  DialogContent,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
-import { cn } from "@/lib/utils";
+import { useCan } from "@/hooks/use-session";
+import { intlLocale, t } from "@/i18n";
 import { api } from "@/lib/api";
 import type { WorkspaceEntry, WorkspaceFile } from "@/lib/types";
-import { intlLocale, t } from "@/i18n";
+import { cn } from "@/lib/utils";
 
 function fmtSize(n: number): string {
   if (n < 1024) return `${n} B`;
@@ -69,6 +52,8 @@ type EditState = {
 };
 
 export default function WorkspacePage() {
+  // Reading/downloading files and every write need `operate`; the listing needs only `read`.
+  const canOperate = useCan("operate");
   const [path, setPath] = React.useState("");
   const [entries, setEntries] = React.useState<WorkspaceEntry[]>([]);
   const [loading, setLoading] = React.useState(true);
@@ -77,20 +62,17 @@ export default function WorkspacePage() {
   const [mkdirName, setMkdirName] = React.useState("");
   const uploadRef = React.useRef<HTMLInputElement>(null);
 
-  const load = React.useCallback(
-    (p: string) => {
-      setLoading(true);
-      api
-        .workspaceList(p)
-        .then((r) => {
-          setEntries(r.entries);
-          setPath(r.path);
-        })
-        .catch((e) => toast.error(t("Failed to read directory: {error}", { error: (e as Error).message })))
-        .finally(() => setLoading(false));
-    },
-    [],
-  );
+  const load = React.useCallback((p: string) => {
+    setLoading(true);
+    api
+      .workspaceList(p)
+      .then((r) => {
+        setEntries(r.entries);
+        setPath(r.path);
+      })
+      .catch((e) => toast.error(t("Failed to read directory: {error}", { error: (e as Error).message })))
+      .finally(() => setLoading(false));
+  }, []);
 
   React.useEffect(() => {
     load("");
@@ -196,22 +178,20 @@ export default function WorkspacePage() {
           ))}
         </div>
         <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm" onClick={() => setMkdirOpen(true)}>
-            <FolderPlusIcon /> {t("New folder")}
-          </Button>
-          <Button variant="outline" size="sm" onClick={() => uploadRef.current?.click()}>
-            <UploadIcon /> {t("Upload")}
-          </Button>
+          {canOperate && (
+            <>
+              <Button variant="outline" size="sm" onClick={() => setMkdirOpen(true)}>
+                <FolderPlusIcon /> {t("New folder")}
+              </Button>
+              <Button variant="outline" size="sm" onClick={() => uploadRef.current?.click()}>
+                <UploadIcon /> {t("Upload")}
+              </Button>
+            </>
+          )}
           <Button variant="ghost" size="icon" className="size-8" onClick={() => load(path)} title={t("Refresh")}>
             <RefreshCwIcon className={cn("size-4", loading && "animate-spin")} />
           </Button>
-          <input
-            ref={uploadRef}
-            type="file"
-            multiple
-            className="hidden"
-            onChange={(e) => doUpload(e.target.files)}
-          />
+          <input ref={uploadRef} type="file" multiple className="hidden" onChange={(e) => doUpload(e.target.files)} />
         </div>
       </div>
 
@@ -239,8 +219,9 @@ export default function WorkspacePage() {
                   <TableCell>
                     <button
                       type="button"
+                      disabled={!e.dir && !canOperate}
                       onClick={() => (e.dir ? load(e.path) : openFile(e))}
-                      className="flex items-center gap-2 text-left hover:underline"
+                      className="flex items-center gap-2 text-left enabled:hover:underline"
                     >
                       {e.dir ? (
                         <FolderIcon className="size-4 shrink-0 text-blue-500" />
@@ -256,7 +237,7 @@ export default function WorkspacePage() {
                   <TableCell className="text-muted-foreground text-xs">{fmtTime(e.mtime)}</TableCell>
                   <TableCell>
                     <div className="flex items-center justify-end gap-1">
-                      {!e.dir && (
+                      {canOperate && !e.dir && (
                         <Button
                           variant="ghost"
                           size="icon"
@@ -273,15 +254,17 @@ export default function WorkspacePage() {
                           <DownloadIcon className="size-3.5" />
                         </Button>
                       )}
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="text-destructive size-7"
-                        title={t("Delete")}
-                        onClick={() => del(e)}
-                      >
-                        <Trash2Icon className="size-3.5" />
-                      </Button>
+                      {canOperate && (
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="text-destructive size-7"
+                          title={t("Delete")}
+                          onClick={() => del(e)}
+                        >
+                          <Trash2Icon className="size-3.5" />
+                        </Button>
+                      )}
                     </div>
                   </TableCell>
                 </TableRow>
@@ -332,10 +315,7 @@ export default function WorkspacePage() {
                       {edit.dirty ? t("Unsaved changes") : t("In sync")}
                     </span>
                     <div className="flex gap-2">
-                      <Button
-                        variant="outline"
-                        onClick={() => api.workspaceDownload(edit.file.path)}
-                      >
+                      <Button variant="outline" onClick={() => api.workspaceDownload(edit.file.path)}>
                         <DownloadIcon /> {t("Download")}
                       </Button>
                       <Button onClick={saveFile} disabled={!edit.dirty || edit.saving}>

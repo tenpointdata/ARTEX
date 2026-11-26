@@ -12,7 +12,7 @@ ARTEX keeps two linked graphs, both in PostgreSQL (`db/schema.sql`):
 | Graph | Answers | Main tables | Code |
 | --- | --- | --- | --- |
 | **Asset graph** | *What exists?* | `companies`, `company_scope`, `assets`, `task_scope` | `db/assets.go`, `db/companies.go`, `db/company_scope.go`, `db/task_assets.go` |
-| **Exploration graph** | *What was tried, with what result and why?* | `explorations`, `exploration_nodes`, `activity`, `intent_*`, `coverage_*` | `db/exploration.go`, `db/coverage_ledger.go`, `db/finding_assets.go` |
+| **Exploration graph** | *What was tried, with what result and why?* | `explorations`, `exploration_nodes`, `activity`, `intent_*`, `coverage_*` | `db/exploration.go`, `db/coverage_ledger.go`, `db/coverage_methodology.go` (checklist scoring over the `methodology/` package; per-task choice in `tasks.methodologies`, empty = derived from the goal), `db/finding_assets.go` |
 
 Anchors tie a finding to the assets that justify it (`db/finding_assets.go`). Traffic
 snapshots are archived separately and referenced from findings
@@ -39,6 +39,8 @@ numbered migrations from `db/migrations/*.sql`, recording name + SHA-256 in
 | `llmpool` / `llmrec` | Provider pool / recorder | Rotation, health, usage + raw wire capture |
 | `mcphttp` | MCP client | HTTP/SSE transport for configured MCP servers |
 | `notify` | Outbound notifications | Email, webhook, Telegram, Feishu, DingTalk with masking and SSRF guards |
+| `ticketing` | Findings out to trackers | GitHub Issues, Jira, DefectDojo adapters over `notify.Do`; stable dedup key; status read-back ([integrations](integrations.md)) |
+| `scanimport` | Scanner data in | Nmap XML, Nuclei JSONL, ZAP JSON, Burp XML, SARIF parsers to assets + candidate findings with provenance ([integrations](integrations.md)) |
 | `report` | Deliverables | Markdown, CSV and JSON rendering of findings |
 | `sidequestion` | Operator Q&A | Asks a human mid-run and suspends intent until answered |
 | `skills/` | Skill definitions | One `SKILL.md` per subdirectory, loaded from `SkillDir()` |

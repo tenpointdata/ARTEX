@@ -1,0 +1,37 @@
+{{- if .Values.control.ingress.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "artex.fullname" . }}
+  labels:
+    {{- include "artex.labels" . | nindent 4 }}
+  {{- $ann := .Values.control.ingress.annotations | default dict }}
+  {{- if .Values.controlTLS.enabled }}
+  {{- $ann = merge (dict) $ann (dict "nginx.ingress.kubernetes.io/backend-protocol" "HTTPS") }}
+  {{- end }}
+  {{- with $ann }}
+  annotations: {{ toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  {{- with .Values.control.ingress.className }}
+  ingressClassName: {{ . }}
+  {{- end }}
+  {{- with .Values.control.ingress.tls }}
+  tls: {{ toYaml . | nindent 4 }}
+  {{- end }}
+  rules:
+    {{- range .Values.control.ingress.hosts }}
+    - host: {{ .host | quote }}
+      http:
+        paths:
+          {{- range .paths }}
+          - path: {{ .path }}
+            pathType: {{ .pathType | default "Prefix" }}
+            backend:
+              service:
+                name: {{ include "artex.fullname" $ }}-control
+                port:
+                  name: http
+          {{- end }}
+    {{- end }}
+{{- end }}

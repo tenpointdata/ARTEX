@@ -1,0 +1,53 @@
+# Values for the E7 install on a real multi-machine cluster (card c-620510): separate
+# physical or VM hosts, a real CNI with NetworkPolicy, a real storage class, a real LLM
+# key and an Ingress with TLS. Replace every CHANGE-ME. Runbook: deploy/lab/README.md
+# "Real cluster". Point ARTEX only at systems you are authorized to test.
+image:
+  repository: CHANGE-ME/artex          # an image the cluster can pull (built from this commit)
+  tag: CHANGE-ME
+  pullPolicy: IfNotPresent
+secretKey: {existingSecret: artex-key}
+
+# kubectl -n artex create secret generic artex-llm --from-literal=ANTHROPIC_API_KEY=...
+llm:
+  existingSecret: artex-llm
+  provider: anthropic
+  model: CHANGE-ME                      # a current model id
+
+control:
+  persistence:
+    data: {storageClass: CHANGE-ME, size: 20Gi}   # a real provisioner, not local-path
+    keys: {storageClass: CHANGE-ME}
+  ingress:
+    enabled: true
+    className: nginx                    # controlTLS adds the nginx backend-protocol HTTPS annotation
+    annotations:
+      cert-manager.io/cluster-issuer: CHANGE-ME   # e.g. letsencrypt-prod; or drop it and supply the Secret
+    hosts:
+      - host: CHANGE-ME.example.com
+        paths: [{path: /, pathType: Prefix}]
+    tls:
+      - secretName: artex-ingress-tls
+        hosts: [CHANGE-ME.example.com]
+
+settings:
+  trustedProxies: CHANGE-ME             # the ingress controller's pod CIDR, for client IPs
+
+worker:
+  replicas: 2                           # hard anti-affinity: needs at least 2 schedulable hosts
+
+networkPolicy:
+  enabled: true
+  healthSourceCIDRs: []                 # set to the node CIDR(s) to restrict kubelet probes
+
+# Calico, or Cilium with kube-proxy: keep the defaults. Cilium with kube-proxy
+# replacement rewrites Services at connect(), so the uid filter sees backend pod IPs and
+# denying the control pod IP would also refuse the proxy (docs/handoff/2026-11-24-e7-
+# kind-install-egress.md). There, set denyClusterServices: false and list the PostgreSQL
+# host in denyHosts, then check with scripts/k8s-egress-probe.sh.
+egress:
+  denyClusterServices: true
+
+postgresql:
+  bundled:
+    persistence: {storageClass: CHANGE-ME, size: 20Gi}

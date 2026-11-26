@@ -1,6 +1,6 @@
-import packageJson from "../../package.json";
-
 import { t } from "@/i18n";
+
+import packageJson from "../../package.json";
 
 const currentYear = new Date().getFullYear();
 

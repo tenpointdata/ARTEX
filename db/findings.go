@@ -10,6 +10,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/Autumn-27/artex/vulnmeta"
 )
 
 // DBFinding is a row in the standalone findings table. It persists across task
@@ -19,6 +21,10 @@ type DBFinding struct {
 	EvidenceVersion       int64
 	ReportEvidenceVersion int64
 	TrafficBindings       []FindingTrafficBinding // populated only for export
+	// ImportSource is the provenance of a scanner-imported finding (E2/E10:
+	// lane, tool, rule, code location); nil for a finding from ARTEX's workers.
+	// Filled by the list, export and detail queries (attachImportSources).
+	ImportSource *FindingImportSource
 
 	ID                 int64
 	TaskID             *int64
@@ -41,6 +47,10 @@ type DBFinding struct {
 
 	Counterevidence     string // what was tested and did not work; optional, "" = not given
 	ConfidenceRationale string // why the conclusion holds; optional, "" = not given
+
+	// Classification is the client-facing CVSS v4 / EPSS / remediation /
+	// framework-tag block (migration 0029); the zero value = not classified.
+	Classification vulnmeta.Classification
 }
 
 // Finding triage states (findings.status).
@@ -130,12 +140,39 @@ func (d *DB) AddFinding(taskID, nodeID int64, vulnclass, name, severity, summary
 
 // findingSelectCols is the column list (with task_description join) every finding
 // list query selects, so scanFinding stays in sync across callers.
-const findingSelectCols = `f.id, f.task_id, f.node_id, f.vulnclass, COALESCE(f.name, ''), f.severity, f.summary,
+var findingSelectCols = `f.id, f.task_id, f.node_id, f.vulnclass, COALESCE(f.name, ''), f.severity, f.summary,
 	       f.evidence, f.worker, f.asset_ids, COALESCE(f.status, 'pending'), COALESCE(f.report_state, 'none'), f.created_at,
 	       COALESCE(t.description, '') AS task_description, f.evidence_version, f.report_evidence_version,
 	       f.poe_level, COALESCE(f.verification_status, 'unverified'), COALESCE(f.verification_note, ''),
-	       f.counterevidence, f.confidence_rationale,
+	       f.counterevidence, f.confidence_rationale, ` + classificationCols("f") + `,
  (SELECT count(*) FROM finding_traffic_bindings b WHERE b.finding_id=f.id)`
+
+// findingScan holds the columns of findingSelectCols that need decoding after
+// the scan (asset ids, classification), so every query scans one list.
+type findingScan struct {
+	aidsJSON string
+	cls      classificationScan
+}
+
+// dest is the Scan destination list for findingSelectCols, plus the report
+// body when the query appends the report column after them.
+func (sc *findingScan) dest(f *DBFinding, withReport bool) []any {
+	out := []any{&f.ID, &f.TaskID, &f.NodeID, &f.VulnClass, &f.Name, &f.Severity,
+		&f.Summary, &f.Evidence, &f.Worker, &sc.aidsJSON, &f.Status, &f.ReportState, &f.CreatedAt,
+		&f.TaskDescription, &f.EvidenceVersion, &f.ReportEvidenceVersion, &f.PoELevel, &f.VerificationStatus,
+		&f.VerificationNote, &f.Counterevidence, &f.ConfidenceRationale}
+	out = append(out, sc.cls.dest()...)
+	out = append(out, &f.TrafficCount)
+	if withReport {
+		out = append(out, &f.Report)
+	}
+	return out
+}
+
+func (sc *findingScan) finish(f *DBFinding) {
+	_ = json.Unmarshal([]byte(sc.aidsJSON), &f.AssetIDs)
+	f.Classification = sc.cls.value()
+}
 
 // scanFindings materializes rows selected via findingSelectCols.
 func scanFindings(rows interface {
@@ -145,13 +182,11 @@ func scanFindings(rows interface {
 }) ([]*DBFinding, error) {
 	var out []*DBFinding
 	for rows.Next() {
-		f := &DBFinding{}
-		var aidsJSON string
-		if err := rows.Scan(&f.ID, &f.TaskID, &f.NodeID, &f.VulnClass, &f.Name, &f.Severity,
-			&f.Summary, &f.Evidence, &f.Worker, &aidsJSON, &f.Status, &f.ReportState, &f.CreatedAt, &f.TaskDescription, &f.EvidenceVersion, &f.ReportEvidenceVersion, &f.PoELevel, &f.VerificationStatus, &f.VerificationNote, &f.Counterevidence, &f.ConfidenceRationale, &f.TrafficCount); err != nil {
+		f, sc := &DBFinding{}, &findingScan{}
+		if err := rows.Scan(sc.dest(f, false)...); err != nil {
 			return nil, err
 		}
-		_ = json.Unmarshal([]byte(aidsJSON), &f.AssetIDs)
+		sc.finish(f)
 		out = append(out, f)
 	}
 	return out, rows.Err()
@@ -186,8 +221,16 @@ type FindingFilter struct {
 	VerificationStatus string // verified | unverified | blocked | not_assessed | false_positive
 	VulnClass          string
 	TaskID             string // task id (in string form; empty/invalid = do not filter by task)
-	Query              string // fuzzy search keyword over name/class/summary/evidence/report body
-	Sort               string // "severity" | "time"
+	// ImportID narrows to the findings a scanner import created (finding_import_sources).
+	// A finding an import only matched by dedup key belongs to the import that created it.
+	// Empty/invalid = do not filter by import.
+	ImportID string
+	// Lane narrows to a testing lane (E10): runtime = ARTEX's own findings and
+	// runtime-scanner imports; sast / sca = the code-scanner imports of that
+	// lane. Any other value matches nothing. Empty = do not filter by lane.
+	Lane  string
+	Query string // fuzzy search keyword over name/class/summary/evidence/report body
+	Sort  string // "severity" | "time"
 	// AssetScope is a node key of the asset tree (a:<id> / c:<id> / r:<domain> /
 	// __none__); selecting a node means selecting its whole subtree.
 	// Empty = do not filter by asset.
@@ -200,6 +243,10 @@ type FindingFilter struct {
 	// A company id that does not exist, or is not a number, matches nothing.
 	// Empty = do not filter by company. An AssetScope of c:<id> means the same.
 	Company string
+	// StrictCompany drops the task-scope fallback of Company for scope rows an
+	// agent added (task_scope.source = 'agent'), so agent output cannot widen
+	// what a client-bound user sees. Set for client_read users only.
+	StrictCompany bool
 
 	// The three below are resolved from AssetScope by applyAssetScope; callers
 	// do not set them.
@@ -244,6 +291,23 @@ func (f FindingFilter) where() (string, []any) {
 		args = append(args, tid)
 		conds = append(conds, fmt.Sprintf("f.task_id = $%d", len(args)))
 	}
+	// Import filter: finding_import_sources is keyed by finding_id, so the
+	// per-row probe is a primary-key lookup.
+	if iid, err := strconv.ParseInt(f.ImportID, 10, 64); err == nil && iid > 0 {
+		args = append(args, iid)
+		conds = append(conds, fmt.Sprintf(
+			"EXISTS (SELECT 1 FROM finding_import_sources fis WHERE fis.finding_id = f.id AND fis.import_id = $%d)", len(args)))
+	}
+	// Lane filter: a finding with no import source is a runtime finding.
+	switch f.Lane {
+	case "":
+	case "runtime":
+		conds = append(conds, "NOT EXISTS (SELECT 1 FROM finding_import_sources fis WHERE fis.finding_id = f.id AND fis.lane IN ('sast','sca'))")
+	default:
+		args = append(args, f.Lane)
+		conds = append(conds, fmt.Sprintf(
+			"EXISTS (SELECT 1 FROM finding_import_sources fis WHERE fis.finding_id = f.id AND fis.lane = $%d)", len(args)))
+	}
 	// Asset filter: asset_ids is a jsonb array; @> ANY(...) can use
 	// idx_findings_asset_ids.
 	switch {
@@ -276,6 +340,10 @@ func (f FindingFilter) where() (string, []any) {
 			args = append(args, assetIDContainments(f.companyAssetIDs))
 			anchored = fmt.Sprintf("f.asset_ids @> ANY($%d::jsonb[])", len(args))
 		}
+		strictSource := ""
+		if f.StrictCompany {
+			strictSource = " AND ts.source <> 'agent'"
+		}
 		// No live asset: attributed through the task's company scope only.
 		args = append(args, f.companyID)
 		conds = append(conds, fmt.Sprintf(`(%s
@@ -287,8 +355,8 @@ func (f FindingFilter) where() (string, []any) {
 				)
 			) AND EXISTS (
 				SELECT 1 FROM task_scope ts
-				WHERE ts.task_id = f.task_id AND ts.kind = 'company' AND ts.company_id = $%d
-			)))`, anchored, len(args)))
+				WHERE ts.task_id = f.task_id AND ts.kind = 'company' AND ts.company_id = $%d%s
+			)))`, anchored, len(args), strictSource))
 	}
 	if query := strings.TrimSpace(f.Query); query != "" {
 		escaped := strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`).Replace(query)
@@ -347,7 +415,10 @@ func (d *DB) ListFindingsPage(f FindingFilter, page, pageSize int) ([]*DBFinding
 	}
 	defer rows.Close()
 	out, err := scanFindings(rows)
-	return out, total, err
+	if err != nil {
+		return nil, 0, err
+	}
+	return out, total, d.attachImportSources(out)
 }
 
 // ListFindingsFiltered returns up to limit findings matching f, newest first,
@@ -372,7 +443,11 @@ func (d *DB) ListFindingsFiltered(f FindingFilter, limit int) ([]*DBFinding, err
 		return nil, err
 	}
 	defer rows.Close()
-	return scanFindings(rows)
+	out, err := scanFindings(rows)
+	if err != nil {
+		return nil, err
+	}
+	return out, d.attachImportSources(out)
 }
 
 // orderBy is the list order: severity first when asked, newest first otherwise.
@@ -616,17 +691,17 @@ func (d *DB) ListFindingsForExport(f FindingFilter, ids []int64) ([]*DBFinding, 
 
 	var out []*DBFinding
 	for rows.Next() {
-		f := &DBFinding{}
-		var aidsJSON string
-		if err := rows.Scan(&f.ID, &f.TaskID, &f.NodeID, &f.VulnClass, &f.Name, &f.Severity,
-			&f.Summary, &f.Evidence, &f.Worker, &aidsJSON, &f.Status, &f.ReportState, &f.CreatedAt,
-			&f.TaskDescription, &f.EvidenceVersion, &f.ReportEvidenceVersion, &f.PoELevel, &f.VerificationStatus, &f.VerificationNote, &f.Counterevidence, &f.ConfidenceRationale, &f.TrafficCount, &f.Report); err != nil {
+		f, sc := &DBFinding{}, &findingScan{}
+		if err := rows.Scan(sc.dest(f, true)...); err != nil {
 			return nil, err
 		}
-		_ = json.Unmarshal([]byte(aidsJSON), &f.AssetIDs)
+		sc.finish(f)
 		out = append(out, f)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return out, d.attachImportSources(out)
 }
 
 // FindingStats is the whole-table aggregate powering the findings page's stat
@@ -667,8 +742,14 @@ func (d *DB) FindingStats() (*FindingStats, error) {
 // company = whole table. A company view leaves out archived (cold) tasks: their
 // aggregates carry no asset or company attribution.
 func (d *DB) FindingStatsForCompany(company string) (*FindingStats, error) {
+	return d.FindingStatsFor(FindingFilter{Company: company})
+}
+
+// FindingStatsFor is FindingStatsForCompany taking the company fields
+// (Company, StrictCompany) of f; its other fields are ignored.
+func (d *DB) FindingStatsFor(cf FindingFilter) (*FindingStats, error) {
 	st := &FindingStats{VulnClasses: []string{}, Tasks: []FindingTaskOption{}}
-	f, err := d.resolveCompany(FindingFilter{Company: company})
+	f, err := d.resolveCompany(FindingFilter{Company: cf.Company, StrictCompany: cf.StrictCompany})
 	if err != nil {
 		return nil, err
 	}
@@ -726,7 +807,7 @@ func (d *DB) FindingStatsForCompany(company string) (*FindingStats, error) {
 	if err := trows.Err(); err != nil {
 		return nil, err
 	}
-	if strings.TrimSpace(company) != "" {
+	if strings.TrimSpace(cf.Company) != "" {
 		return st, nil
 	}
 	archived, err := d.archivedTaskAggregates()
@@ -765,23 +846,19 @@ func (d *DB) FindingStatsForCompany(company string) (*FindingStats, error) {
 // full Markdown report), or nil when no row has that id. Unlike the list queries
 // it also selects `report` — that column is only needed on the detail page.
 func (d *DB) GetFinding(id int64) (*DBFinding, error) {
-	f := &DBFinding{}
-	var aidsJSON string
+	f, sc := &DBFinding{}, &findingScan{}
 	err := d.QueryRow(`SELECT `+findingSelectCols+`, COALESCE(f.report, '')
 		FROM findings f
 		LEFT JOIN tasks t ON f.task_id = t.id
-		WHERE f.id = $1`, id).Scan(
-		&f.ID, &f.TaskID, &f.NodeID, &f.VulnClass, &f.Name, &f.Severity,
-		&f.Summary, &f.Evidence, &f.Worker, &aidsJSON, &f.Status, &f.ReportState, &f.CreatedAt,
-		&f.TaskDescription, &f.EvidenceVersion, &f.ReportEvidenceVersion, &f.PoELevel, &f.VerificationStatus, &f.VerificationNote, &f.Counterevidence, &f.ConfidenceRationale, &f.TrafficCount, &f.Report)
+		WHERE f.id = $1`, id).Scan(sc.dest(f, true)...)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
 	if err != nil {
 		return nil, err
 	}
-	_ = json.Unmarshal([]byte(aidsJSON), &f.AssetIDs)
-	return f, nil
+	sc.finish(f)
+	return f, d.attachImportSources([]*DBFinding{f})
 }
 
 // DeleteFinding removes a finding entirely: the standalone findings row and its
@@ -1012,6 +1089,7 @@ type FindingQuality struct {
 	Report                string
 	EvidenceVersion       int64
 	ReportEvidenceVersion int64
+	Classification        vulnmeta.Classification
 }
 
 // ReportStale reports whether the stored report predates the evidence it
@@ -1077,7 +1155,7 @@ func (d *DB) FindingQualityByNodeID(taskID int64) (map[int64]FindingQuality, err
 	}
 	rows, err := d.Query(`SELECT node_id, id, COALESCE(status,'pending'), asset_ids, `+findingTrafficCountCol+`,
 			COALESCE(poe_level,0), COALESCE(verification_status,'unverified'), COALESCE(verification_note,''), COALESCE(counterevidence,''), COALESCE(confidence_rationale,''),
-			evidence_version, report_evidence_version, COALESCE(report,'')
+			evidence_version, report_evidence_version, COALESCE(report,''), `+classificationCols("findings")+`
 		FROM findings
 		WHERE task_id=$1 AND node_id IS NOT NULL`, taskID)
 	if err != nil {
@@ -1088,11 +1166,13 @@ func (d *DB) FindingQualityByNodeID(taskID int64) (map[int64]FindingQuality, err
 		var nid int64
 		var q FindingQuality
 		var aidsJSON string
-		if err := rows.Scan(&nid, &q.ID, &q.Status, &aidsJSON, &q.TrafficCount,
+		var cls classificationScan
+		if err := rows.Scan(append([]any{&nid, &q.ID, &q.Status, &aidsJSON, &q.TrafficCount,
 			&q.PoeLevel, &q.VerificationStatus, &q.VerificationNote, &q.Counterevidence, &q.ConfidenceRationale,
-			&q.EvidenceVersion, &q.ReportEvidenceVersion, &q.Report); err != nil {
+			&q.EvidenceVersion, &q.ReportEvidenceVersion, &q.Report}, cls.dest()...)...); err != nil {
 			return out, err
 		}
+		q.Classification = cls.value()
 		_ = json.Unmarshal([]byte(aidsJSON), &q.AssetIDs)
 		out[nid] = q
 	}

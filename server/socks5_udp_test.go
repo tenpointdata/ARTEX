@@ -14,6 +14,13 @@ import (
 )
 
 func TestManagerSOCKS5UDPOptInAndAssetBlockRuleDropsDatagram(t *testing.T) {
+	// The blocked destination is 127.0.0.2. Linux routes all of 127/8 to lo;
+	// macOS has only 127.0.0.1 unless lo0 is aliased (sudo ifconfig lo0 alias 127.0.0.2).
+	if probe, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 2)}); err != nil {
+		t.Skipf("127.0.0.2 is not bindable on this host (%v); alias it on lo0 to run this test", err)
+	} else {
+		_ = probe.Close()
+	}
 	// 1. Both flags off: NO SOCKS5 listener and UDP disabled.
 	t.Setenv(traffic.SOCKS5EnabledEnv, "")
 	t.Setenv(traffic.SOCKS5AddrEnv, "")

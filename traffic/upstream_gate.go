@@ -245,19 +245,28 @@ func (t *Traffic) SetUpstreamDialer(dial DialFunc) {
 // proxy on this host would reach what this host reaches, metadata included,
 // so OPS.md tells operators to run it with its own deny (decision recorded in
 // HANDOFF.md).
+//
+// A non-loopback client is checked first, while RequireScopeForRemoteClients is
+// on (scope_remote.go): without an active scope its dial is refused, on either
+// path, so the proxy is no open relay for the network it listens on.
 func (t *Traffic) upstreamFor(req *http.Request) (*url.URL, error) {
+	tok := ""
+	if t.sink != nil {
+		tok = t.sink.scopeOf(req)
+	}
+	if err := t.remoteClientRefusal(req, tok); err != nil {
+		return nil, err
+	}
 	if u := t.upstream.Load(); u != nil {
 		return u, nil
 	}
 	if t.gate == nil {
 		return nil, errors.New("the upstream gate is not running; refusing a direct dial")
 	}
-	if t.sink != nil {
-		if tok := t.sink.scopeOf(req); tok != "" {
-			u := *t.gate.url
-			u.User = url.UserPassword(tok, t.gate.secret)
-			return &u, nil
-		}
+	if tok != "" {
+		u := *t.gate.url
+		u.User = url.UserPassword(tok, t.gate.secret)
+		return &u, nil
 	}
 	return t.gate.url, nil
 }
