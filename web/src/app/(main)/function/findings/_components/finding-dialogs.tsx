@@ -113,7 +113,7 @@ export function DeepenDialog({ finding, onClose, onDone }: DeepenDialogProps) {
 }
 
 type ExportScope = "filtered" | "all" | "selected";
-type ExportFormat = "md-single" | "md-zip" | "csv" | "json";
+type ExportFormat = "md-single" | "md-zip" | "csv" | "json" | "html";
 
 interface ExportDialogProps {
   open: boolean;
@@ -128,7 +128,7 @@ interface ExportDialogProps {
   filteredTotal: number;
 }
 
-// ExportDialog exports findings: scope (current filter / all / selected) × format (single md / per-finding md zip / csv / json).
+// ExportDialog exports findings in the selected scope and format.
 // The scope defaults to "Selected" when rows are checked, else "Current filter".
 export function ExportDialog({
   open,
@@ -216,6 +216,9 @@ export function ExportDialog({
               </label>
               <label htmlFor="export-format-json" className="flex items-center gap-2 text-sm">
                 <RadioGroupItem id="export-format-json" value="json" /> JSON (.json)
+              </label>
+              <label htmlFor="export-format-html" className="flex items-center gap-2 text-sm">
+                <RadioGroupItem id="export-format-html" value="html" /> {t("Branded HTML report (.html)")}
               </label>
             </RadioGroup>
           </div>
