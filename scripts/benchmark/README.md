@@ -102,6 +102,7 @@ Environment contract:
 | `--llm-profiles` | comma-separated profile ids for the task chain, head first (e.g. `3,2`); stamped into the result |
 | `--target-host` | host the task should target, as reachable from ARTEX (use `172.17.0.1` when ARTEX runs in a container and the corpus runs on the host) |
 | `--image` / `--port` / `--corpus-url` | corpus container image, local port, or an existing deployment |
+| `--image-env NAME=VALUE` | environment for an image target; repeat for multiple variables. Suite image targets can declare an `env` object. |
 | `--task-timeout` | task `timeout_seconds` (default 5400) |
 | `--keep` | keep the corpus container after the run |
 

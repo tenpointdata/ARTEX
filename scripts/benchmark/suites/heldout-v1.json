@@ -23,7 +23,8 @@
       "ground_truth": "dvga",
       "image": "dolevf/dvga:2.2.0",
       "port": 13101,
-      "container_port": 5013
+      "container_port": 5013,
+      "env": {"WEB_HOST": "0.0.0.0"}
     },
     {
       "id": "DBEN-v1-005",

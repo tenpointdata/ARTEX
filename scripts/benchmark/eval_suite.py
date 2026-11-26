@@ -54,6 +54,9 @@ def load_suite(path: str) -> dict:
             for key in ("ground_truth", "image", "port", "container_port"):
                 if key not in t:
                     raise SystemExit(f"{path}: image target {t['id']} needs {key!r}")
+            env = t.get("env", {})
+            if not isinstance(env, dict) or not all(isinstance(k, str) and re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", k) and isinstance(v, str) for k, v in env.items()):
+                raise SystemExit(f"{path}: image target {t['id']} env must map environment names to strings")
         elif t.get("type") == "drost":
             drost.validate_challenge(t["id"])
         else:
@@ -83,8 +86,11 @@ def run_argv(target: dict, opts, run_id: str, out_root: pathlib.Path, gt_version
         argv.append("--allow-self-judge")
     if target["type"] == "drost":
         return argv + ["--corpus-type", "drost", "--drost-repo", opts.drost_repo, "--drost-id", target["id"]]
-    return argv + ["--corpus", target["ground_truth"], "--image", target["image"], "--port", str(target["port"]),
-                   "--container-port", str(target["container_port"]), "--gt-version", gt_version]
+    argv += ["--corpus", target["ground_truth"], "--image", target["image"], "--port", str(target["port"]),
+             "--container-port", str(target["container_port"]), "--gt-version", gt_version]
+    for key, value in sorted(target.get("env", {}).items()):
+        argv += ["--image-env", f"{key}={value}"]
+    return argv
 
 
 def schedule(target_ids: list[str], arm_names: list[str], replicates: int, seed: int) -> list[tuple[int, str, str]]:
