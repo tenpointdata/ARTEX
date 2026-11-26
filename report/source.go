@@ -99,18 +99,32 @@ func (s Source) bullet() string {
 	if !s.Imported {
 		return ""
 	}
+	return "- **Source**: " + s.describe(codeSpan) + "\n"
+}
+
+// Describe is the plain-text Source statement (the branded HTML export
+// escapes it); "" for a worker's finding.
+func (s Source) Describe() string {
+	if !s.Imported {
+		return ""
+	}
+	return s.describe(oneLine)
+}
+
+// describe words the provenance; code formats rule ids and locations.
+func (s Source) describe(code func(string) string) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "- **Source**: %s, imported from %s", laneName(s.LaneKey()), nz(s.Tool, "a scanner"))
+	fmt.Fprintf(&b, "%s, imported from %s", laneName(s.LaneKey()), nz(s.Tool, "a scanner"))
 	if s.RuleID != "" {
-		fmt.Fprintf(&b, " rule %s", codeSpan(s.RuleID))
+		fmt.Fprintf(&b, " rule %s", code(s.RuleID))
 	}
 	if loc := s.codeLocation(); loc != "" {
-		fmt.Fprintf(&b, " at %s", codeSpan(loc))
+		fmt.Fprintf(&b, " at %s", code(loc))
 	}
 	if s.ImportID > 0 {
 		fmt.Fprintf(&b, " (import #%d)", s.ImportID)
 	}
-	b.WriteString("; a scanner claim until reproduced\n")
+	b.WriteString("; a scanner claim until reproduced")
 	return b.String()
 }
 

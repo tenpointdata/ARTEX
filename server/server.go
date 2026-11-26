@@ -34,6 +34,7 @@ import (
 	"github.com/Autumn-27/artex/llmrec"
 	"github.com/Autumn-27/artex/report"
 	"github.com/Autumn-27/artex/traffic"
+	"github.com/Autumn-27/artex/vulnmeta"
 	"github.com/Autumn-27/norma/llm"
 	actool "github.com/Autumn-27/norma/tool"
 	"github.com/Autumn-27/norma/transcript"
@@ -990,6 +991,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/llm/records/{id}", s.pgGetLLMRecord)
 	mux.HandleFunc("GET /api/settings", s.getSettings)
 	mux.HandleFunc("PUT /api/settings", s.putSettings)
+	mux.HandleFunc("GET /api/settings/report-branding", s.getReportBranding)
+	mux.HandleFunc("PUT /api/settings/report-branding", s.putReportBranding)
 	mux.HandleFunc("GET /api/settings/noise", s.noiseStatus) // current noise profile + per-host counters (no reset)
 	mux.HandleFunc("GET /api/settings/nodes", s.listNodes)   // control and worker nodes sharing this database (E7)
 	// Vulnerability IM push. Channels are "multi-instance + per-instance filter rules" resources, so they get their own group of
@@ -2568,7 +2571,8 @@ func (s *Server) getFinding(w http.ResponseWriter, r *http.Request) {
 //
 //	scope   = filtered (keep the page filters) | all (everything) | selected (checked ids)
 //	format  = md-single (one combined .md) | md-zip (one .md per vulnerability, zipped)
-//	          | csv | json
+//	          | csv | json | html (branded, self-contained; see report.FindingsHTML)
+//	client, title = optional per-export branding overrides (html only)
 //	ids     = comma-separated finding ids (required when scope=selected)
 //	Filter params severity/status/report_state/vulnclass/task_id/q/sort match the list endpoint (used when scope=filtered).
 func (s *Server) findingsExport(w http.ResponseWriter, r *http.Request) {
@@ -2650,6 +2654,23 @@ func (s *Server) findingsExport(w http.ResponseWriter, r *http.Request) {
 	case "csv":
 		setDownload("text/csv; charset=utf-8", "findings-"+stamp+".csv")
 		_, _ = w.Write(report.FindingsCSV(fs))
+	case "html":
+		brand, err := s.exportBranding(r)
+		if errors.Is(err, report.ErrInvalidBranding) {
+			writeErr(w, 400, err.Error())
+			return
+		}
+		if err != nil {
+			writeErr(w, 500, err.Error())
+			return
+		}
+		doc, err := report.FindingsHTML(fs, now, brand)
+		if err != nil {
+			writeErr(w, 500, err.Error())
+			return
+		}
+		setDownload("text/html; charset=utf-8", "findings-"+stamp+".html")
+		_, _ = w.Write(doc)
 	case "json":
 		assets := s.resolveFindingAssets(fs)
 		out := make([]FindingDTO, 0, len(fs))
@@ -2741,14 +2762,24 @@ func (s *Server) patchFinding(w http.ResponseWriter, r *http.Request) {
 		Severity    *string `json:"severity"`
 		Name        *string `json:"name"`
 		VulnClass   *string `json:"vulnclass"`
+		// cvss_vector / epss / remediation / framework_tags; an empty value clears.
+		vulnmeta.Patch
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeErr(w, 400, "bad json: "+err.Error())
 		return
 	}
-	if body.Status == nil && body.ReportState == nil && body.Severity == nil && body.Name == nil && body.VulnClass == nil {
-		writeErr(w, 400, "nothing to update: provide status/severity/name/vulnclass/report_state")
+	if body.Status == nil && body.ReportState == nil && body.Severity == nil && body.Name == nil && body.VulnClass == nil && body.Patch.IsEmpty() {
+		writeErr(w, 400, "nothing to update: provide status/severity/name/vulnclass/report_state/cvss_vector/epss/remediation/framework_tags")
 		return
+	}
+	// The classification is validated before any other field is written, so a
+	// malformed vector or tag rejects the whole request instead of applying half.
+	if !body.Patch.IsEmpty() {
+		if _, err := body.Patch.Apply(vulnmeta.Classification{}); err != nil {
+			writeErr(w, 400, err.Error())
+			return
+		}
 	}
 	if body.Status != nil {
 		if !db.ValidFindingStatus(*body.Status) {
@@ -2819,6 +2850,21 @@ func (s *Server) patchFinding(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if n == 0 {
+			writeErr(w, 404, "finding not found")
+			return
+		}
+	}
+	if !body.Patch.IsEmpty() {
+		_, found, err := s.m.pg.SetFindingClassification(r.Context(), id, body.Patch)
+		if errors.Is(err, vulnmeta.ErrInvalid) {
+			writeErr(w, 400, err.Error())
+			return
+		}
+		if err != nil {
+			writeErr(w, 500, err.Error())
+			return
+		}
+		if !found {
 			writeErr(w, 404, "finding not found")
 			return
 		}

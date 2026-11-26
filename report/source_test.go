@@ -37,7 +37,10 @@ func TestReportMixesRuntimeAndCodeFindings(t *testing.T) {
 			t.Errorf("report lacks %q:\n%s", want, md)
 		}
 	}
-	if strings.Index(md, "app/views/orders.py") > strings.Index(md, "Runtime SQLi") {
+	// Compare positions within the findings section: the executive summary
+	// above it names the most urgent findings too.
+	body := md[strings.Index(md, "## Findings"):]
+	if strings.Index(body, "app/views/orders.py") > strings.Index(body, "Runtime SQLi") {
 		t.Error("findings must still sort by severity across lanes (critical SAST before high runtime)")
 	}
 }
@@ -46,5 +49,25 @@ func TestReportWithoutImportsIsUnchanged(t *testing.T) {
 	md := Markdown(Input{Title: "t", GeneratedAt: time.Unix(0, 0), Quality: map[int64]db.FindingQuality{}, Findings: []*db.Node{reportNode(1, "high", "x")}})
 	if strings.Contains(md, "By lane") || strings.Contains(md, "**Source**") {
 		t.Fatalf("worker-only report gained lane lines:\n%s", md)
+	}
+}
+
+// TestExecutiveSummaryKeepsScannerClaimsUnconfirmed: the executive summary
+// (E1) must not call imported scanner claims (E10) confirmed.
+func TestExecutiveSummaryKeepsScannerClaimsUnconfirmed(t *testing.T) {
+	md := Markdown(Input{Title: "t", GeneratedAt: time.Unix(0, 0), Quality: map[int64]db.FindingQuality{}, Findings: []*db.Node{
+		reportNode(1, "high", "Runtime SQLi"),
+		importedNode(2, "critical", "sast", "app/views/orders.py", 42),
+	}})
+	for _, want := range []string{
+		"2 finding(s), 1 confirmed by testing and 1 imported scanner claim(s) not yet reproduced",
+		"**[CRITICAL]** rule.sast (scanner claim, unverified)",
+	} {
+		if !strings.Contains(md, want) {
+			t.Errorf("executive summary lacks %q:\n%s", want, md)
+		}
+	}
+	if strings.Contains(md, "2 finding(s) confirmed") {
+		t.Errorf("executive summary counts a scanner claim as confirmed:\n%s", md)
 	}
 }

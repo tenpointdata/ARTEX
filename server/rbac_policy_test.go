@@ -151,6 +151,10 @@ func TestRBACPolicyByRole(t *testing.T) {
 		{"PUT", "/api/intercept/judge", permAdmin},
 		{"PUT", "/api/intercept/tool-config", permAdmin},
 		{"PUT", "/api/settings", permAdmin},
+		{"PUT", "/api/settings/report-branding", permAdmin}, // E1: deliverable branding
+		{"GET", "/api/settings/report-branding", permRead},
+		{"PATCH", "/api/exploration/findings/7", permReview}, // also sets the E1 classification
+		{"GET", "/api/exploration/findings/export", permClientRead},
 		{"POST", "/api/tasks/t1/intercept-rules", permAdmin},
 		{"PUT", "/api/tasks/t1/intercept-rules/2", permAdmin},
 		{"POST", "/api/intercept/pending/9/always-allow", permAdmin},

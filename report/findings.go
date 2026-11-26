@@ -47,19 +47,7 @@ func FindingsMarkdown(fs []*db.DBFinding, generatedAt time.Time) string {
 	fmt.Fprintf(&b, "- **Generated at**: %s\n", generatedAt.Format("2006-01-02 15:04:05"))
 	fmt.Fprintf(&b, "- **Total findings**: %d\n\n", len(items))
 
-	// Summary: counts per severity.
-	counts := map[string]int{}
-	for _, f := range items {
-		counts[f.Severity]++
-	}
-	b.WriteString("## Summary\n\n")
-	b.WriteString("| Severity | Count |\n| --- | --- |\n")
-	for _, s := range []struct{ key, label string }{
-		{"critical", "Critical"}, {"high", "High"}, {"medium", "Medium"}, {"low", "Low"},
-	} {
-		fmt.Fprintf(&b, "| %s | %d |\n", s.label, counts[s.key])
-	}
-	b.WriteString("\n")
+	b.WriteString(Summarize(summaryItemsFromDB(items)).Markdown())
 
 	if len(items) == 0 {
 		b.WriteString("_No matching vulnerabilities._\n")
@@ -81,12 +69,14 @@ func FindingsMarkdown(fs []*db.DBFinding, generatedAt time.Time) string {
 		b.WriteString(SourceOf(f).bullet())
 		q := qualityFromDBFinding(f)
 		b.WriteString(qualityBullets(q, false))
+		b.WriteString(classificationBullets(f.Classification))
 		if s := strings.TrimSpace(f.Summary); s != "" {
 			fmt.Fprintf(&b, "%s\n\n", s)
 		}
 		if e := strings.TrimSpace(f.Evidence); e != "" {
 			fmt.Fprintf(&b, "**Evidence:**\n\n```\n%s\n```\n\n", e)
 		}
+		b.WriteString(remediationSection(f.Classification, "**Remediation:**"))
 		b.WriteString(qualityNarrative(q))
 		b.WriteString(detailedReportFull(f.Report, "**Detailed report:**"))
 		b.WriteString(findingTrafficMarkdown(f, false))
@@ -113,12 +103,14 @@ func SingleFindingMarkdown(f *db.DBFinding, generatedAt time.Time) string {
 	b.WriteString(SourceOf(f).bullet())
 	q := qualityFromDBFinding(f)
 	b.WriteString(qualityBullets(q, false))
+	b.WriteString(classificationBullets(f.Classification))
 	if s := strings.TrimSpace(f.Summary); s != "" {
 		fmt.Fprintf(&b, "## Summary\n\n%s\n\n", s)
 	}
 	if e := strings.TrimSpace(f.Evidence); e != "" {
 		fmt.Fprintf(&b, "## Evidence\n\n```\n%s\n```\n\n", e)
 	}
+	b.WriteString(remediationSection(f.Classification, "## Remediation"))
 	b.WriteString(qualityNarrative(q))
 	b.WriteString(detailedReportFull(f.Report, "## Detailed Report"))
 	b.WriteString(findingTrafficMarkdown(f, true))
@@ -210,6 +202,7 @@ func FindingsCSV(fs []*db.DBFinding) []byte {
 	buf.WriteString("\xEF\xBB\xBF") // UTF-8 BOM
 	w := csv.NewWriter(&buf)
 	_ = w.Write([]string{"ID", "Name", "Class", "Severity", "Status", "Report Stage", "Task", "Found At", "Summary", "Traffic Evidence Count", "Traffic Evidence IDs",
+		"CVSS v4 Score", "CVSS v4 Vector", "EPSS Probability", "Framework Tags", "Remediation",
 		"Lane", "Source Tool", "Source Rule", "Source Location", "Import ID"})
 	for _, f := range items {
 		src := SourceOf(f)
@@ -229,6 +222,11 @@ func FindingsCSV(fs []*db.DBFinding) []byte {
 			csvCell(strings.TrimSpace(f.Summary)),
 			fmt.Sprint(len(f.TrafficBindings)),
 			csvCell(findingTrafficIDs(f)),
+			csvCVSSScore(f),
+			csvCell(cvssVector(f)),
+			csvEPSS(f),
+			csvCell(csvTags(f.Classification)),
+			csvCell(strings.TrimSpace(f.Classification.Remediation)),
 			src.LaneKey(),
 			csvCell(src.Tool),
 			csvCell(src.RuleID),
@@ -282,4 +280,25 @@ func findingTrafficMarkdown(f *db.DBFinding, attachments bool) string {
 	}
 	out.WriteString("\n")
 	return out.String()
+}
+
+func cvssVector(f *db.DBFinding) string {
+	if c := f.Classification.CVSS; c != nil {
+		return c.Vector
+	}
+	return ""
+}
+
+func csvCVSSScore(f *db.DBFinding) string {
+	if c := f.Classification.CVSS; c != nil {
+		return fmt.Sprintf("%.1f", c.Score)
+	}
+	return ""
+}
+
+func csvEPSS(f *db.DBFinding) string {
+	if e := f.Classification.EPSS; e != nil {
+		return fmt.Sprintf("%.5f", e.Probability)
+	}
+	return ""
 }

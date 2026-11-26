@@ -6,6 +6,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/Autumn-27/artex/db"
+	"github.com/Autumn-27/artex/vulnmeta"
 )
 
 // Quality is the proof-strength descriptor of one finding: how far exploitation
@@ -29,6 +30,10 @@ type Quality struct {
 	Report                string // reporter-written detailed report body (Markdown)
 	EvidenceVersion       int64  // version of the evidence bound to the row
 	ReportEvidenceVersion int64  // evidence version the stored report was written against
+
+	// Classification is the client-facing CVSS / EPSS / remediation / framework
+	// block of the standalone row (E1); zero = not classified.
+	Classification vulnmeta.Classification
 
 	// Missing marks a finding node with no standalone findings row at all: no
 	// PoE level, no verification state and no traffic binding was ever recorded.
@@ -77,6 +82,7 @@ func qualityFromRows(nodeID int64, rows map[int64]db.FindingQuality) Quality {
 		Report:                q.Report,
 		EvidenceVersion:       q.EvidenceVersion,
 		ReportEvidenceVersion: q.ReportEvidenceVersion,
+		Classification:        q.Classification,
 	}
 }
 
@@ -93,6 +99,7 @@ func qualityFromDBFinding(f *db.DBFinding) Quality {
 		Report:                f.Report,
 		EvidenceVersion:       f.EvidenceVersion,
 		ReportEvidenceVersion: f.ReportEvidenceVersion,
+		Classification:        f.Classification,
 	}
 }
 
