@@ -2,6 +2,7 @@
 
 import { t } from "@/i18n";
 
+import { ReportBrandingCard } from "./_components/report-branding-card";
 import { ChatSendKeyCard } from "./_components/chat-send-key-card";
 import {
   ConstraintInjectionCard,
@@ -38,6 +39,8 @@ export default function SystemSettingsPage() {
         />
 
         <NoiseProfileCard />
+
+        <ReportBrandingCard />
 
         <AgentTrafficBindingCard
           agentTrafficBinding={s.agentTrafficBinding}

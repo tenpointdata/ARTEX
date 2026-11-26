@@ -9,6 +9,7 @@ import type {
   NotificationFilter,
   NotificationMeta,
   Settings,
+  ReportBranding,
   TamperDryRunRequest,
   TamperDryRunResult,
   TamperHook,
@@ -29,6 +30,9 @@ export const settingsApi = {
   trafficHookVersions: (id: number) => get<{ versions: TamperHookVersion[] }>(`/traffic/hooks/${id}/versions`),
   rollbackTrafficHook: (id: number, version: number) => post<TamperHook>(`/traffic/hooks/${id}/rollback`, { version }),
   dryRunTrafficHook: (body: TamperDryRunRequest) => post<TamperDryRunResult>(`/traffic/hooks/dry-run`, body),
+
+  reportBranding: () => get<ReportBranding>(`/settings/report-branding`),
+  setReportBranding: (branding: ReportBranding) => put<ReportBranding>(`/settings/report-branding`, branding),
 
   // ---- app settings (runtime toggles) ----
   settings: () => get<Settings>(`/settings`),

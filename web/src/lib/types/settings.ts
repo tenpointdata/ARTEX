@@ -134,3 +134,12 @@ export interface NotificationDelivery {
   title: string;
   severity: string;
 }
+
+export interface ReportBranding {
+  organization: string;
+  client: string;
+  title: string;
+  marking: string;
+  accent_color: string;
+  footer: string;
+}
