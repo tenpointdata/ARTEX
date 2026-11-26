@@ -147,7 +147,7 @@ func TestFileToolIdentityScopedToItsThreadAsRoot(t *testing.T) {
 	inside, release := make(chan struct{}), make(chan struct{})
 	callErr := make(chan error, 1)
 	go func() {
-		callErr <- RunAsFileToolIdentity(func() {
+		callErr <- RunAsFileToolIdentity("", func() {
 			toolTid = unix.Gettid()
 			toolUID, toolGID, toolGroups = ownFSIDs()
 			toolProcUID, _ = threadFSUID(toolTid)
@@ -248,7 +248,7 @@ func TestFileToolIdentityPanicAsRoot(t *testing.T) {
 				t.Fatalf("recovered %v, want the panic of the call", r)
 			}
 		}()
-		_ = RunAsFileToolIdentity(func() {
+		_ = RunAsFileToolIdentity("", func() {
 			panicTid = unix.Gettid()
 			panicUID, _, _ = ownFSIDs()
 			panic("boom inside the file tool")
@@ -267,7 +267,7 @@ func TestFileToolIdentityPanicAsRoot(t *testing.T) {
 	waitThreadGone(t, panicTid)
 
 	var exitTid int
-	if err := RunAsFileToolIdentity(func() {
+	if err := RunAsFileToolIdentity("", func() {
 		exitTid = unix.Gettid()
 		runtime.Goexit()
 	}); err != nil {

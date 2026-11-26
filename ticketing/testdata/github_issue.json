@@ -1,0 +1,13 @@
+{
+  "url": "https://api.github.com/repos/acme/widgets/issues/%d",
+  "html_url": "https://github.com/acme/widgets/issues/%d",
+  "number": %d,
+  "state": "%s",
+  "state_reason": %s,
+  "title": "%s",
+  "body": %s,
+  "labels": %s,
+  "user": {"login": "artex-bot", "type": "Bot"},
+  "created_at": "2026-11-24T05:00:00Z",
+  "updated_at": "2026-11-24T05:00:00Z"
+}

@@ -35,9 +35,11 @@ import (
 // homes: tool data is at fixed paths (PLAYWRIGHT_BROWSERS_PATH,
 // NUCLEI_TEMPLATES_DIR) that the environment allowlist keeps.
 //
-// This is not isolation between live runs: every agent process has the same uid, so
-// one can still write into another run directory that is live and that it knows the
-// path of. What it removes is the shared place that every later task trusts.
+// With a single executor uid this is not isolation between live runs: every agent
+// process has the same uid, so one can still write into another run directory that
+// is live and that it knows the path of. What it removes is the shared place that
+// every later task trusts. With -exec-uid-range each task and chat session has a
+// uid of its own and its run directories are closed to the others (execuid.go).
 
 // runHomeName is the home directory inside a run directory.
 const runHomeName = ".artex-home"
@@ -121,18 +123,6 @@ func isRunDir(dataDir, dir string) bool {
 		return parts[1] != ""
 	}
 	return false
-}
-
-func isDigits(s string) bool {
-	if s == "" {
-		return false
-	}
-	for _, c := range s {
-		if c < '0' || c > '9' {
-			return false
-		}
-	}
-	return true
 }
 
 // makeOwnedDir makes parent/name a directory of uid:gid, mode 0700. The parent and

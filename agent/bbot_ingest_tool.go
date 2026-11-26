@@ -62,7 +62,7 @@ func openBbotOutput(base, dir, p string) (f *os.File, err error) {
 	}
 	// The open runs as the executor when the privilege drop is active
 	// (filetools_identity.go); the descriptor is then read by the server.
-	if idErr := RunAsFileToolIdentity(func() { f, err = openBbotOutputIn(base, dir, p) }); idErr != nil {
+	if idErr := RunAsFileToolIdentity(dir, func() { f, err = openBbotOutputIn(base, dir, p) }); idErr != nil {
 		return nil, idErr
 	}
 	return f, err

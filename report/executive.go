@@ -13,9 +13,12 @@ import (
 // deliberately small so any finding source (exploration nodes, standalone
 // rows, imported scanner results) can feed the same summary.
 type SummaryItem struct {
-	Title          string
-	Severity       string // critical | high | medium | low | "" (unrated)
-	Verified       bool
+	Title    string
+	Severity string // critical | high | medium | low | "" (unrated)
+	Verified bool
+	// Imported marks an imported scanner claim (E10): listed and counted in
+	// the distribution, but never called confirmed until reproduced.
+	Imported       bool
 	Classification vulnmeta.Classification
 }
 
@@ -47,6 +50,7 @@ type ExecutiveSummary struct {
 	Overall    string // the highest severity present; "" when there are no findings
 	Severities []SeverityCount
 	Verified   int
+	Imported   int            // imported scanner claims among Total, not yet reproduced
 	Scored     int            // findings with a CVSS v4.0 score
 	MaxCVSS    *vulnmeta.CVSS // the highest score, nil when nothing is scored
 	// UrgentWithoutRemediation counts critical/high findings that carry no
@@ -78,6 +82,9 @@ func Summarize(items []SummaryItem) ExecutiveSummary {
 		}
 		if it.Verified {
 			s.Verified++
+		}
+		if it.Imported {
+			s.Imported++
 		}
 		if c := it.Classification.CVSS; c != nil {
 			s.Scored++
@@ -163,6 +170,10 @@ func (s ExecutiveSummary) Headline() string {
 		}
 	}
 	out := fmt.Sprintf("Overall risk is %s: %d finding(s) confirmed", severityLabel(s.Overall), s.Total)
+	if s.Imported > 0 {
+		out = fmt.Sprintf("Overall risk is %s: %d finding(s), %d confirmed by testing and %d imported scanner claim(s) not yet reproduced",
+			severityLabel(s.Overall), s.Total, s.Total-s.Imported, s.Imported)
+	}
 	if urgent > 0 {
 		out += fmt.Sprintf(", %d rated high or critical and requiring prompt remediation", urgent)
 	}
@@ -206,6 +217,9 @@ func (s ExecutiveSummary) Markdown() string {
 		if c := it.Classification.CVSS; c != nil {
 			line += fmt.Sprintf(" — CVSS %.1f", c.Score)
 		}
+		if it.Imported {
+			line += " (scanner claim, unverified)"
+		}
 		b.WriteString(line + "\n")
 	}
 	b.WriteString("\n")
@@ -233,7 +247,7 @@ func summaryItemsFromDB(fs []*db.DBFinding) []SummaryItem {
 	out := make([]SummaryItem, 0, len(fs))
 	for _, f := range fs {
 		out = append(out, SummaryItem{Title: findingTitle(f), Severity: f.Severity,
-			Verified: f.VerificationStatus == db.VerificationVerified, Classification: f.Classification})
+			Verified: f.VerificationStatus == db.VerificationVerified, Imported: SourceOf(f).Imported, Classification: f.Classification})
 	}
 	return out
 }

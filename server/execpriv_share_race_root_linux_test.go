@@ -47,7 +47,7 @@ func TestShareWithExecGroupCannotChmodOutsideAsRoot(t *testing.T) {
 	t.Cleanup(func() { agent.SetFileToolIdentity(nil) })
 	var denied error
 	probe := filepath.Join(run, "write-probe")
-	if err := agent.RunAsFileToolIdentity(func() { denied = os.WriteFile(probe, []byte("x"), 0o600) }); err != nil {
+	if err := agent.RunAsFileToolIdentity("", func() { denied = os.WriteFile(probe, []byte("x"), 0o600) }); err != nil {
 		t.Fatal(err)
 	}
 	if denied != nil {
@@ -56,7 +56,7 @@ func TestShareWithExecGroupCannotChmodOutsideAsRoot(t *testing.T) {
 	if err := os.Remove(probe); err != nil {
 		t.Fatal(err)
 	}
-	if err := agent.RunAsFileToolIdentity(func() { _, denied = os.ReadFile(secret) }); err != nil {
+	if err := agent.RunAsFileToolIdentity("", func() { _, denied = os.ReadFile(secret) }); err != nil {
 		t.Fatal(err)
 	}
 	if denied == nil {
@@ -66,7 +66,7 @@ func TestShareWithExecGroupCannotChmodOutsideAsRoot(t *testing.T) {
 	stop := make(chan struct{})
 	done := make(chan error, 1)
 	go func() {
-		done <- agent.RunAsFileToolIdentity(func() {
+		done <- agent.RunAsFileToolIdentity("", func() {
 			for {
 				select {
 				case <-stop:
@@ -99,7 +99,7 @@ func TestShareWithExecGroupCannotChmodOutsideAsRoot(t *testing.T) {
 			t.Fatalf("executor swap changed root-only file mode to %04o", fi.Mode().Perm())
 		}
 	}
-	if err := agent.RunAsFileToolIdentity(func() { _, denied = os.ReadFile(secret) }); err != nil {
+	if err := agent.RunAsFileToolIdentity("", func() { _, denied = os.ReadFile(secret) }); err != nil {
 		t.Fatal(err)
 	}
 	if denied == nil {

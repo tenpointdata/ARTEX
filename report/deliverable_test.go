@@ -117,20 +117,21 @@ func TestFindingsCSVClassificationColumns(t *testing.T) {
 		t.Fatal(err)
 	}
 	head, row := recs[0], recs[1]
-	col := func(name string) string {
+	idx := func(name string) int {
 		for i, h := range head {
 			if h == name {
-				return row[i]
+				return i
 			}
 		}
 		t.Fatalf("no column %q in %v", name, head)
-		return ""
+		return -1
 	}
+	col := func(name string) string { return row[idx(name)] }
 	if col("CVSS v4 Score") != "9.3" || col("CVSS v4 Vector") != testVector || col("EPSS Probability") != "0.42000" ||
 		col("Framework Tags") != "CWE-89; V5.3.4; WSTG-INPV-05; T1190" || !strings.HasPrefix(col("Remediation"), "Use parameterized") {
 		t.Fatalf("classification columns: %v", row)
 	}
-	if recs[2][len(head)-5] != "" {
+	if recs[2][idx("CVSS v4 Score")] != "" {
 		t.Fatal("an unscored finding must leave the score cell empty")
 	}
 }

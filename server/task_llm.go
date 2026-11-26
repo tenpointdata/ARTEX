@@ -787,12 +787,30 @@ func (s *Server) invalidateTaskAgents() {
 	s.taskAgentMu.Unlock()
 }
 
+// dropTaskAgents forgets a removed task's agents and, under the same lock, its
+// proxy scope token, so no agentsForTask in between rebuilds a bundle holding a
+// token that is then forgotten (a restored task gets a fresh one).
+func (s *Server) dropTaskAgents(id string) {
+	s.taskAgentMu.Lock()
+	defer s.taskAgentMu.Unlock()
+	delete(s.taskAgents, id)
+	if s.m.traffic != nil {
+		s.m.traffic.ForgetScope(id)
+	}
+	if s.m.remoteProxy != nil {
+		if n, err := strconv.ParseInt(id, 10, 64); err == nil {
+			s.m.remoteProxy.Forget(n)
+		}
+	}
+}
+
 func (s *Server) agentsForTask(t *Task) *taskAgentBundle {
 	s.taskAgentMu.Lock()
 	defer s.taskAgentMu.Unlock()
 	if bundle := s.taskAgents[t.ID]; bundle != nil {
 		return bundle
 	}
+	proxy := s.m.TaskProxyAddr(t) // this task's scope rides on its proxy credential
 	goalRuntime := &taskLLMRuntime{s: s, taskID: t.ID, agentKey: "goals"}
 	plannerRuntime := &taskLLMRuntime{s: s, taskID: t.ID, agentKey: "planner"}
 	workerRuntime := &taskLLMRuntime{s: s, taskID: t.ID, agentKey: "worker"}
@@ -800,26 +818,26 @@ func (s *Server) agentsForTask(t *Task) *taskAgentBundle {
 	tx := transcript.NewStore(filepath.Join(s.m.dir, "transcripts"))
 	window := workerRuntime.CompactionWindow()
 	wk := agent.NewWorker(workerRuntime, "task-router", s.m.dir, tx, window, s.agentMaxTurns("worker"))
-	wk.SetFindingRecorder(s.evidenceStore())
+	wk.SetFindingRecorder(s.findingEvidence())
 	wk.SetCompactionWindowResolver(workerRuntime.CompactionWindow)
 	wk.SetNonStreaming(workerRuntime.nonStreaming) // per the task's currently active profile streaming switch (read every turn)
 	wk.SetMaxTokens(workerRuntime.maxTokens)       // as above, the output cap also follows the currently active profile
 	wk.SetNoaEnabled(s.m.NoaCompactionEnabled)     // experimental: noa context compaction (platform-level switch, read every run)
 	wk.SetRunTimeout(time.Duration(s.agentRunSeconds("worker")) * time.Second)
-	wk.SetProxy(s.m.ProxyAddr(), s.m.ProxyCACert())
-	wk.SetFactTraffic(s.m.traffic) // fact provenance: relabel bytes captured from the target (#124 row 1)
+	wk.SetProxy(proxy, s.m.ProxyCACert())
+	wk.SetFactTraffic(s.m.factTraffic()) // fact provenance: relabel bytes captured from the target (#124 row 1)
 	wk.SetWebSearch(s.webSearchFor("worker"))
 	wk.SetConstraintInject(s.constraintInjectWorker) // operation-constraint injection into the worker (configurable, on by default)
 	pl := agent.NewPlanner(plannerRuntime, "task-router", s.m.dir, tx, plannerRuntime.CompactionWindow(), s.agentMaxTurns("planner"))
-	pl.SetFindingRecorder(s.evidenceStore())
+	pl.SetFindingRecorder(s.findingEvidence())
 	pl.SetCompactionWindowResolver(plannerRuntime.CompactionWindow)
 	pl.SetNonStreaming(plannerRuntime.nonStreaming)
 	pl.SetMaxTokens(plannerRuntime.maxTokens)
 	pl.SetNoaEnabled(s.m.NoaCompactionEnabled) // experimental: noa context compaction (platform-level switch, read every run)
 	pl.SetKillWork(s.engine.KillWork)
 	pl.SetSteerWork(s.engine.SteerWork)
-	pl.SetProxy(s.m.ProxyAddr(), s.m.ProxyCACert())
-	pl.SetFactTraffic(s.m.traffic)
+	pl.SetProxy(proxy, s.m.ProxyCACert())
+	pl.SetFactTraffic(s.m.factTraffic())
 	pl.SetWebSearch(s.webSearchFor("planner"))
 	pl.SetConstraintInject(s.constraintInjectPlanner) // operation-constraint injection into the planner (configurable, on by default)
 	// cold-digest §7: background compaction of cold nodes. This per-task planner set
@@ -830,13 +848,13 @@ func (s *Server) agentsForTask(t *Task) *taskAgentBundle {
 	// default; shadow logs what would be shown, inject appends the block.
 	s.wireTaskLessons(t, wk, pl)
 	main := agent.NewMainAgent(mainRuntime, "task-router", s.m.dir, tx, mainRuntime.CompactionWindow(), s.agentMaxTurns("mainagent"))
-	main.SetFindingRecorder(s.evidenceStore())
+	main.SetFindingRecorder(s.findingEvidence())
 	main.SetCompactionWindowResolver(mainRuntime.CompactionWindow)
 	main.SetNonStreaming(mainRuntime.nonStreaming)
 	main.SetMaxTokens(mainRuntime.maxTokens)
 	main.SetNoaEnabled(s.m.NoaCompactionEnabled) // experimental: noa context compaction (platform-level switch, read every run)
-	main.SetProxy(s.m.ProxyAddr(), s.m.ProxyCACert())
-	main.SetFactTraffic(s.m.traffic)
+	main.SetProxy(proxy, s.m.ProxyCACert())
+	main.SetFactTraffic(s.m.factTraffic())
 	main.SetWebSearch(s.webSearchFor("mainagent"))
 	main.SetSteerWork(s.engine.SteerWork) // steer_work: real-time course correction on running work by a human
 	bundle := &taskAgentBundle{

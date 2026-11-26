@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/Autumn-27/artex/db"
+	"github.com/Autumn-27/artex/methodology"
 	acperm "github.com/Autumn-27/norma/permission"
 	actool "github.com/Autumn-27/norma/tool"
 )
@@ -123,6 +124,9 @@ func compactIntents(ns []*db.Node, parentsOf, yieldsOf map[int64][]int64) []map[
 			m["asset_ids"] = tg
 		} else if tg, ok := p["target_id"]; ok && tg != nil && tg != "" {
 			m["asset_ids"] = []any{tg}
+		}
+		if mi, ok := p[db.IntentMethodologyItemKey].(string); ok && mi != "" {
+			m[db.IntentMethodologyItemKey] = mi
 		}
 		if ps := parentsOf[n.ID]; len(ps) > 0 {
 			m["parents"] = ps // upstream: which nodes this intent derived from (multiple facts can jointly produce one intent)
@@ -584,7 +588,8 @@ func (t *ToolSet) graphOverviewData() map[string]any {
 	vulnNodes, _ := t.ts.ListByKind(db.KindFinding, 1000)
 	factNodes, _ := t.ts.ListByKind(db.KindFact, 1000) // newest first
 	// findings_total is what goal judgment reads. A false_positive, duplicate,
-	// or ignored triage label is not an open finding, so it does not count.
+	// or ignored triage label is not an open finding, so it does not count;
+	// neither does an imported scanner claim.
 	// finding_list still shows those rows, with status, so the planner can see them.
 	out["findings_total"] = countActionableFindings(vulnNodes)
 	out["facts"] = len(factNodes) // number of exploration facts/conclusions (including negative conclusions)
@@ -617,8 +622,10 @@ func (t *ToolSet) graphOverviewData() map[string]any {
 		if st, ok := fp["status"].(string); ok && strings.TrimSpace(st) != "" {
 			m["status"] = st
 		}
-		if from := factFrom[n.ID]; from > 0 {
-			m["from_intent"] = from // which intent produced this finding
+		if lane, ok := fp["lane"].(string); ok && fp["source"] == db.ImportSourceOrigin {
+			m["imported"] = lane // an unverified scanner claim (runtime|sast|sca): a lead to test, not a result
+		} else if from := factFrom[n.ID]; from > 0 {
+			m["from_intent"] = from // which intent produced this finding (an import's parent is its fact, not an intent)
 		}
 		findingList = append(findingList, m)
 	}
@@ -1110,10 +1117,23 @@ func findingTriageBlocksGoal(status string) bool {
 	return db.FindingStatusInvalidatesGoal(status)
 }
 
+// findingIsImported is true for a finding node written by a scanner import
+// (E2/E10): an unverified scanner claim, not a result of this task's work.
+func findingIsImported(n *db.Node) bool {
+	var p struct {
+		Source string `json:"source"`
+	}
+	_ = json.Unmarshal(n.Payload, &p)
+	return p.Source == db.ImportSourceOrigin
+}
+
+// countActionableFindings counts the findings goal judgment may lean on:
+// neither triaged away nor an imported scanner claim (prove_goal refuses
+// those anyway, since they carry no verified traffic).
 func countActionableFindings(nodes []*db.Node) int {
 	n := 0
 	for _, node := range nodes {
-		if !findingTriageBlocksGoal(findingPayloadStatus(node)) {
+		if !findingTriageBlocksGoal(findingPayloadStatus(node)) && !findingIsImported(node) {
 			n++
 		}
 	}
@@ -1247,6 +1267,9 @@ type intentItem struct {
 	AssetIDs  []json.RawMessage `json:"asset_ids"`
 	ParentIDs []json.RawMessage `json:"parent_ids"`
 	Priority  int               `json:"priority"`
+	// MethodologyItem is the checklist item this direction advances (e.g.
+	// WSTG-INPV-05), from the [Methodology coverage] block; optional.
+	MethodologyItem string `json:"methodology_item"`
 }
 
 // addOneIntent creates one intent node, links its upstream lineage, and returns the id.
@@ -1255,9 +1278,13 @@ type intentItem struct {
 // parent_ids empty for a top-level brand-new direction; it falls back to the origin
 // fact. This enforces at the creation path that "every intent links to a fact node and
 // is finding-driven rather than planned out of thin air".
-func (t *ToolSet) addOneIntent(it intentItem) (int64, error) {
+func (t *ToolSet) addOneIntent(it intentItem, ms []methodology.Methodology) (int64, error) {
 	if strings.TrimSpace(it.Summary) == "" {
 		return 0, fmt.Errorf("summary must not be empty")
+	}
+	item, err := resolveMethodologyItem(ms, it.MethodologyItem)
+	if err != nil {
+		return 0, err
 	}
 	// Validate anchors first (before creating the node, so a bad anchor leaves no orphan intent).
 	parents := pidList(it.ParentIDs)
@@ -1295,6 +1322,9 @@ func (t *ToolSet) addOneIntent(it intentItem) (int64, error) {
 	if len(anchors) > 0 {
 		payload["asset_ids"] = anchors
 	}
+	if item != "" {
+		payload[db.IntentMethodologyItemKey] = item
+	}
 	id, err := t.ts.AddIntent(payload, priority, anchors, "planner")
 	if err != nil {
 		return 0, err
@@ -1319,11 +1349,12 @@ func (t *ToolSet) addIntent() actool.CoreTool {
 	return t.writeExpTool("add_intent", "Generate [exploration directions] into the frontier and link them into the exploration graph. An intent is an open exploration direction, not a fixed type — describe freely in one summary sentence what to explore/verify/exploit.\n"+
 		"★Batch preferred: put multiple new directions filtered in one round into the intents array in a single submission (saves round trips vs. one call per item). Returns an ids array, same length and order as intents (failed items get id=0, details in errors). For a single intent, omit intents and pass the top-level summary.",
 		obj(map[string]any{
-			"intents":    map[string]any{"type": "array", "description": "[Prefer this] array of exploration directions to add, processed in order. Each element has the same fields as the top-level ones below (summary/asset_ids/parent_ids/priority). The returned ids match this array in length and order.", "items": map[string]any{"type": "object"}},
-			"summary":    str("[single] one sentence describing this exploration direction: what to do + why. Just write the direction clearly; asset ids are not required."),
-			"asset_ids":  map[string]any{"type": "array", "items": map[string]any{"type": "integer"}, "description": "the [target asset ids] this direction tests/attacks (**pass whenever possible**, 0/1/many; these are asset ids from list_assets, not exploration node ids): which assets (sites/endpoints/parameters/hosts etc.) this direction targets. Whenever the direction revolves around concrete assets, be sure to pass them — it is the structured marker of 'which targets this exploration hits', used for coverage dedup and linking the intent into the asset lineage. Leave empty only for pure global recon with truly no concrete target assets."},
-			"parent_ids": map[string]any{"type": "array", "items": map[string]any{"type": "integer"}, "description": "upstream anchor ids (optional, 0/1/many): which [confirmed fact/finding] nodes this direction is synthesized from. **Only existing fact/finding node ids may be passed — not intents/goals/hints** — an intent must anchor on confirmed knowledge, finding-driven rather than planned out of thin air. Pass several when multiple facts jointly produce one new intent; leave empty for a top-level brand-new recon direction (it is automatically attached to the task's origin fact)."},
-			"priority":   intp("priority 0-10, default 5"),
+			"intents":          map[string]any{"type": "array", "description": "[Prefer this] array of exploration directions to add, processed in order. Each element has the same fields as the top-level ones below (summary/asset_ids/parent_ids/priority). The returned ids match this array in length and order.", "items": map[string]any{"type": "object"}},
+			"summary":          str("[single] one sentence describing this exploration direction: what to do + why. Just write the direction clearly; asset ids are not required."),
+			"asset_ids":        map[string]any{"type": "array", "items": map[string]any{"type": "integer"}, "description": "the [target asset ids] this direction tests/attacks (**pass whenever possible**, 0/1/many; these are asset ids from list_assets, not exploration node ids): which assets (sites/endpoints/parameters/hosts etc.) this direction targets. Whenever the direction revolves around concrete assets, be sure to pass them — it is the structured marker of 'which targets this exploration hits', used for coverage dedup and linking the intent into the asset lineage. Leave empty only for pure global recon with truly no concrete target assets."},
+			"parent_ids":       map[string]any{"type": "array", "items": map[string]any{"type": "integer"}, "description": "upstream anchor ids (optional, 0/1/many): which [confirmed fact/finding] nodes this direction is synthesized from. **Only existing fact/finding node ids may be passed — not intents/goals/hints** — an intent must anchor on confirmed knowledge, finding-driven rather than planned out of thin air. Pass several when multiple facts jointly produce one new intent; leave empty for a top-level brand-new recon direction (it is automatically attached to the task's origin fact)."},
+			"priority":         intp("priority 0-10, default 5"),
+			"methodology_item": str("optional: the id of the methodology checklist item this direction advances (e.g. WSTG-INPV-05, API1:2023), from the [Methodology coverage] block; omit when none fits. An id that is not an item of the task's methodologies is refused."),
 		}),
 		func(_ context.Context, in json.RawMessage) (actool.Result, error) {
 			var a struct {
@@ -1340,8 +1371,15 @@ func (t *ToolSet) addIntent() actool.CoreTool {
 			ids := make([]int64, len(items))
 			errs := map[string]string{}
 			createdAny := false
+			var ms []methodology.Methodology
+			for _, it := range items {
+				if strings.TrimSpace(it.MethodologyItem) != "" {
+					ms = t.taskMethodologies() // looked up once, only when an item is cited
+					break
+				}
+			}
 			for i, it := range items {
-				id, err := t.addOneIntent(it)
+				id, err := t.addOneIntent(it, ms)
 				if err != nil {
 					errs[strconv.Itoa(i)] = err.Error()
 					continue

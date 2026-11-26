@@ -22,6 +22,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Autumn-27/artex/db"
 	"github.com/Autumn-27/artex/llmrec"
 	"github.com/Autumn-27/norma/agentcore"
 	"github.com/Autumn-27/norma/compaction"
@@ -98,6 +99,9 @@ type Config struct {
 	// global policy → built-in default, resolved server-side). See RetryConfig for
 	// the per-layer semantics; zero values = fully inherit the built-in defaults.
 	Retry RetryConfig
+	// Sampling is the profile's optional seed/temperature pin (E8 A/B runs),
+	// applied on the wire by samplingTransport. Zero value = nothing sent.
+	Sampling db.Sampling
 }
 
 // RetryConfig holds the retry parameters that travel with one LLM config. The
@@ -410,6 +414,9 @@ func (c Config) NewProvider() (llm.Provider, error) {
 		qt.base = &bedrockGatewayTransport{base: qt.base, baseURL: baseURL, token: apiKey, model: c.Model, headers: headers}
 		client.Transport = qt
 		client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	}
+	if fields := samplingFields(c.Provider(), c.Sampling); len(fields) > 0 {
+		client.Transport = samplingTransport{base: client.Transport, fields: fields}
 	}
 	lc := llm.Config{
 		Format:     wireFormat,

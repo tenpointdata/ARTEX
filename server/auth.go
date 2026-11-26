@@ -21,6 +21,7 @@ import (
 	"golang.org/x/crypto/bcrypt"
 
 	"github.com/Autumn-27/artex/config"
+	"github.com/Autumn-27/artex/db"
 )
 
 const (
@@ -143,20 +144,41 @@ func migrateJWTKey(dst, dataDir string) error {
 	return nil
 }
 
-// writeNewJWTKey creates path with mode 0600, failing if it already exists.
+// writeNewJWTKey creates path with mode 0600 holding data, failing if it already
+// exists. The key is written and synced to a temporary file first and then
+// hard-linked into place: link fails when path exists, so an existing key is
+// never overwritten, and a crash mid-write (a killed pod whose key volume
+// survives) never leaves an empty or partial key that the never-overwrite rule
+// would then refuse at every start.
 func writeNewJWTKey(path string, data []byte) error {
-	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	dir := filepath.Dir(path)
+	f, err := os.CreateTemp(dir, ".jwt.key.tmp-*")
 	if err != nil {
+		return err
+	}
+	tmp := f.Name()
+	defer os.Remove(tmp)
+	if err := f.Chmod(0o600); err != nil {
+		f.Close()
 		return err
 	}
 	if _, err := f.Write(data); err != nil {
 		f.Close()
-		_ = os.Remove(path)
+		return err
+	}
+	if err := f.Sync(); err != nil {
+		f.Close()
 		return err
 	}
 	if err := f.Close(); err != nil {
-		_ = os.Remove(path)
 		return err
+	}
+	if err := os.Link(tmp, path); err != nil {
+		return err
+	}
+	if d, err := os.Open(dir); err == nil {
+		_ = d.Sync()
+		d.Close()
 	}
 	return nil
 }
@@ -174,8 +196,12 @@ func samePath(a, b string) bool {
 // sessionClaims carries the password version the token was signed under.
 // Two changes in the same second get different versions, so a cutoff based on
 // the issued-at second cannot leave the older token valid.
+// Console-user tokens (rbac.go) also carry uid and uv, the user's id and
+// version; legacy tokens have neither and still parse.
 type sessionClaims struct {
 	Pwd int64 `json:"pwd"`
+	UID int64 `json:"uid,omitempty"`
+	UV  int64 `json:"uv,omitempty"`
 	jwt.RegisteredClaims
 }
 
@@ -219,11 +245,10 @@ func verifyJWT(tokenStr string, key []byte, version int64) bool {
 // sessionOK reports whether token is still a session for the password version
 // this process has loaded. A failed version read rejects every token until
 // login reads the counter again.
+// Console-user tokens are checked against the users table instead (rbac.go).
 func (s *Server) sessionOK(token string) bool {
-	if s.pwdState.Load() == pwdUnreadable {
-		return false
-	}
-	return verifyJWT(token, s.jwtKey, s.pwdVersion.Load())
+	_, ok := s.sessionPrincipal(token)
+	return ok
 }
 
 func (s *Server) passwordHashKey() string {
@@ -262,14 +287,14 @@ func jwtSubject(tokenStr string, key []byte) string {
 	return claims.Subject
 }
 
-// approver is who a human decision is recorded for: the subject of the
-// request's session token.
+// approver is who a human decision is recorded for: the username of the
+// request's session ("ARTEX" for the legacy login).
 func (s *Server) approver(r *http.Request) string {
-	tok := extractToken(r)
-	if !s.sessionOK(tok) {
-		return ""
+	if p, ok := principalFrom(r.Context()); ok {
+		return p.Username
 	}
-	return jwtSubject(tok, s.jwtKey)
+	p, _ := s.sessionPrincipal(extractToken(r))
+	return p.Username
 }
 
 // extractToken reads the JWT from Authorization: Bearer header,
@@ -328,14 +353,20 @@ func hostWithPort(host, scheme string) string {
 }
 
 // requireAuth wraps h with JWT validation.
-// /api/auth/*, /api/health and /api/ready are exempt.
+// /api/auth/*, /api/health, /api/ready, the node RPC (/api/node/rpc/) and the
+// tracker webhooks (/api/hooks/trackers/) are exempt.
 // A state-changing request whose session is the cookie must be same-origin
 // (see sameOrigin), so that a foreign page cannot act with the operator's
 // session. Requests that carry a bearer token, and GET and HEAD, are not checked.
 func (s *Server) requireAuth(h http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		p := r.URL.Path
-		if strings.HasPrefix(p, "/api/auth/") || p == "/api/health" || p == "/api/ready" {
+		// The node RPC authenticates itself (node_rpc.go: an HMAC under the
+		// deployment's node key, not a user session).
+		// A tracker webhook authenticates itself too (ticket_webhook.go: an
+		// HMAC of the body under the tracker's webhook secret).
+		if strings.HasPrefix(p, "/api/auth/") || p == "/api/health" || p == "/api/ready" || strings.HasPrefix(p, nodeRPCPrefix) ||
+			strings.HasPrefix(p, ticketWebhookPrefix) {
 			h.ServeHTTP(w, r)
 			return
 		}
@@ -344,7 +375,8 @@ func (s *Server) requireAuth(h http.Handler) http.Handler {
 			writeErr(w, 401, "Unauthorized")
 			return
 		}
-		if !s.sessionOK(tok) {
+		who, ok := s.sessionPrincipal(tok)
+		if !ok {
 			writeErr(w, 401, "token is invalid or expired")
 			return
 		}
@@ -355,7 +387,17 @@ func (s *Server) requireAuth(h http.Handler) http.Handler {
 				return
 			}
 		}
-		h.ServeHTTP(w, r)
+		if !s.authorizeRole(w, r, h, who) {
+			return
+		}
+		if who.Role == db.RoleClientRead {
+			bound, ok := s.bindClient(w, r, h, who)
+			if !ok {
+				return
+			}
+			r = bound
+		}
+		h.ServeHTTP(w, r.WithContext(withPrincipal(r.Context(), who)))
 	})
 }
 
@@ -540,8 +582,15 @@ func (s *Server) authChangePassword(w http.ResponseWriter, r *http.Request) {
 	if pg == nil {
 		return
 	}
-	if !s.sessionOK(extractToken(r)) {
+	who, ok := s.sessionPrincipal(extractToken(r))
+	if !ok {
 		writeErr(w, 401, "Unauthorized")
+		return
+	}
+	// This changes the bootstrap ARTEX password only. A console user's
+	// password is changed by an admin (PATCH /api/users/{id}).
+	if who.UserID != 0 {
+		writeErr(w, 403, "only the ARTEX bootstrap login can change its password here; ask an admin to change a console user's password")
 		return
 	}
 	if wait := s.passwordChangeWait(r); wait > 0 {
@@ -645,8 +694,8 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request, getSetting func(s
 		writeErr(w, 400, "Invalid request format")
 		return
 	}
-	if req.Username != "ARTEX" {
-		writeErr(w, 401, "Incorrect username or password")
+	if req.Username != legacyUsername {
+		s.userLogin(w, r, ip, req.Username, req.Password)
 		return
 	}
 	hash, ok, err := getSetting(s.passwordHashKey())
@@ -659,6 +708,7 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request, getSetting func(s
 		return
 	}
 	if err := bcrypt.CompareHashAndPassword([]byte(hash), []byte(req.Password)); err != nil {
+		s.appendAuditBestEffort(auditAnonymous, db.AuditLoginFailed, legacyUsername, map[string]string{"username": legacyUsername, "ip": ip})
 		writeErr(w, 401, "Incorrect username or password")
 		return
 	}
@@ -675,6 +725,7 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request, getSetting func(s
 		writeErr(w, 500, "token generation failed")
 		return
 	}
+	s.appendAuditBestEffort(legacyUsername, db.AuditLoginOK, legacyUsername, map[string]string{"username": legacyUsername, "ip": ip})
 	s.setSession(w, r, tok)
 	writeJSON(w, 200, map[string]any{"token": tok})
 }

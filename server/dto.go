@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/Autumn-27/artex/db"
+	"github.com/Autumn-27/artex/scanimport"
 	"github.com/Autumn-27/artex/traffic"
 	"github.com/Autumn-27/artex/vulnmeta"
 )
@@ -63,6 +64,7 @@ type TaskDTO struct {
 	ArchiveBlockedBy   string             `json:"archive_blocked_by_task_id,omitempty"`
 	CompanyIDs         []int64            `json:"company_ids"`
 	CoverageEnabled    bool               `json:"coverage_enabled"` // asset coverage feature switch (fixed at creation)
+	Methodologies      []string           `json:"methodologies"`    // operator-chosen methodology ids (fixed at creation); empty = automatic
 	PlanQuietMode      bool               `json:"plan_quiet_mode"`  // planner quiet-mode switch (#86), editable mid-run
 	TargetGate         bool               `json:"target_gate"`      // approval gate for asset targets, opt-in, editable mid-run
 }
@@ -146,6 +148,7 @@ func taskDTO(t *Task, status string) TaskDTO {
 		SourceTaskIDs:      sourceIDs,
 		CompanyIDs:         lifecycle.CompanyIDs,
 		CoverageEnabled:    t.CoverageEnabled,
+		Methodologies:      append([]string{}, t.Methodologies...),
 		PlanQuietMode:      t.PlanQuietMode,
 		TargetGate:         t.targetGate.Load(),
 	}
@@ -329,6 +332,9 @@ type FindingDTO struct {
 	VerificationNote      string                     `json:"verification_note"`
 	Counterevidence       string                     `json:"counterevidence,omitempty"`      // what was tested and did not work; optional
 	ConfidenceRationale   string                     `json:"confidence_rationale,omitempty"` // why the conclusion holds; optional
+	// Source is where a scanner-imported finding came from (lane, tool, rule,
+	// code location); absent for a finding from ARTEX's workers (runtime lane).
+	Source *FindingSourceDTO `json:"source,omitempty"`
 	// Client-grade classification (E1), flattened: cvss {vector, score, rating},
 	// epss, remediation, framework_tags. Omitted while unclassified and on
 	// per-task node DTOs, which carry no standalone row.
@@ -462,6 +468,29 @@ func findingAssetDTOs(ids []int64, assets map[int64]*db.Asset) []FindingAssetDTO
 	return out
 }
 
+// FindingSourceDTO is the client-safe part of a finding's import provenance:
+// the same fields the task report's Source line shows. The raw scanner record
+// and dedup key stay behind GET /findings/{id}/integrations (read).
+type FindingSourceDTO struct {
+	Lane     string `json:"lane"` // runtime | sast | sca
+	Tool     string `json:"tool"`
+	RuleID   string `json:"rule_id,omitempty"`
+	Location string `json:"location,omitempty"` // repo-relative path (code lanes)
+	Line     int    `json:"line,omitempty"`
+	ImportID *int64 `json:"import_id,omitempty"`
+}
+
+func findingSourceDTO(s *db.FindingImportSource) *FindingSourceDTO {
+	if s == nil {
+		return nil
+	}
+	lane := s.Lane
+	if lane == "" {
+		lane = string(scanimport.LaneRuntime)
+	}
+	return &FindingSourceDTO{Lane: lane, Tool: s.Tool, RuleID: s.RuleID, Location: s.Location, Line: s.Line, ImportID: s.ImportID}
+}
+
 // findingFromDB converts a standalone DBFinding row to a FindingDTO. task_id and
 // task_description are empty when the originating task has been deleted (NULL).
 func findingFromDB(f *db.DBFinding, assets map[int64]*db.Asset) FindingDTO {
@@ -480,6 +509,7 @@ func findingFromDB(f *db.DBFinding, assets map[int64]*db.Asset) FindingDTO {
 		ReportStale: f.Report != "" && f.EvidenceVersion != f.ReportEvidenceVersion, TrafficBindings: f.TrafficBindings,
 		PoELevel: f.PoELevel, VerificationStatus: f.VerificationStatus, VerificationNote: f.VerificationNote,
 		Counterevidence: f.Counterevidence, ConfidenceRationale: f.ConfidenceRationale,
+		Source:         findingSourceDTO(f.ImportSource),
 		Classification: f.Classification,
 		VulnClass:      f.VulnClass,
 		Name:           f.Name,
@@ -656,6 +686,9 @@ type LLMProfileDTO struct {
 	// window). Per item attempts: 0=inherit the global policy | -1=disable that retry
 	// layer | >0=count; interval_ms: 0=default exponential backoff | >0=use that fixed millisecond interval. All zero = fully follow the global policy, i.e. the historical behavior.
 	Retry db.RetryOverride `json:"retry"`
+	// Optional sampling pin for reproducible A/B runs: seed (openai/ollama only)
+	// and a default temperature; an absent field is not pinned.
+	Sampling db.Sampling `json:"sampling"`
 }
 
 func llmProfileDTO(p *db.LLMProfile) LLMProfileDTO {
@@ -683,6 +716,7 @@ func llmProfileDTO(p *db.LLMProfile) LLMProfileDTO {
 		UserAgent:        p.UserAgent,
 		CustomHeadersSet: p.CustomHeaders != "",
 		Retry:            p.Retry,
+		Sampling:         p.Sampling,
 	}
 }
 

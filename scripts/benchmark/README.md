@@ -15,7 +15,35 @@ benchmark harness (Apache-2.0).
 |---|---|
 | `run_bench.py` | The runner: deploy corpus, create task, wait, fetch findings, judge, tally |
 | `ground_truth/<corpus>.json` | Version-stamped ground truth (component + class + mechanism, deliberately coarse) |
+| `eval_suite.py` | Planner/worker evaluation suite: baseline vs candidate prompt arms over a suite, per-gate comparison |
+| `suite_stats.py` | Pure aggregation: per-gate rates with denominators, Wilson/Newcombe intervals, paired table |
+| `arms.py`, `arms/*.json` | Prompt-version arms and the server-side prompt switch (apply, read back, restore) |
+| `suites/*.json` | Target sets: `heldout-v1` (adoption evidence) and `dev-v1` (proposing and debugging), disjoint |
+| `ground_truth/dvga.json` | Damn Vulnerable GraphQL Application 2.2.0 ground truth (v2, 12 entries hand-verified against the 2.2.0 source, each citing its resolver/helper; DoS classes excluded) |
 | `benchmark-results/` | Output (gitignored): one directory per run with `report.md` + `results.json` |
+
+## Subject instance
+
+The instance under test is `docker-compose.bench.yml` at the repository root. It
+builds from the production `Dockerfile` (the benchmark measures the shipped
+image) and runs its own Postgres and named volumes for data and keys, separate from any production
+instance on the host:
+
+```bash
+cp bench/.env.example bench/.env     # set ARTEX_PG_PASSWORD and an LLM key
+docker compose -f docker-compose.bench.yml up --build -d
+docker compose -f docker-compose.bench.yml logs artex-bench | grep "Setup token"
+```
+
+`bench/.env.example` sets `ARTEX_RSI_LESSONS=off`, so held-out runs measure the
+prompts under test and not the lesson library. The runner can mint its token
+from the server's key: `docker compose -f docker-compose.bench.yml cp
+artex-bench:/app/keys/jwt.key bench/jwt.key`, then `ARTEX_JWT_KEY=bench/jwt.key`
+(gitignored). When port 8787 is taken, set `ARTEX_BENCH_PORT` (and
+`ARTEX_BENCH_PROXY_PORT`) in the shell and point `ARTEX_BASE` at it. A corpus
+published on the host is reached as `--target-host host.docker.internal`, which
+the egress filter denies to agents until `bench/.env` allows that one address
+(`ARTEX_EGRESS_ALLOW`, see the comment there).
 
 ## Scoring
 
@@ -74,6 +102,7 @@ Environment contract:
 | `--llm-profiles` | comma-separated profile ids for the task chain, head first (e.g. `3,2`); stamped into the result |
 | `--target-host` | host the task should target, as reachable from ARTEX (use `172.17.0.1` when ARTEX runs in a container and the corpus runs on the host) |
 | `--image` / `--port` / `--corpus-url` | corpus container image, local port, or an existing deployment |
+| `--image-env NAME=VALUE` | environment for an image target; repeat for multiple variables. Suite image targets can declare an `env` object. |
 | `--task-timeout` | task `timeout_seconds` (default 5400) |
 | `--keep` | keep the corpus container after the run |
 
@@ -129,6 +158,160 @@ DROST_REPO=/path/to/drost-benchmarks python3 run_bench.py \
 
 `--deploy-only` brings a challenge up and prints its URL and flag without
 creating a task, to validate an install.
+
+## Evaluation suite (baseline vs candidate prompt arms)
+
+`eval_suite.py` turns single runs into a controlled A/B over a held-out suite,
+to meet the measurement half of the `RSI.md` Loop C contract: a baseline arm and
+a candidate arm with the same model, seed, budget and judge, compared per gate
+with denominators. It adopts nothing: the output is evidence for an owner
+decision, and the suite puts the starting prompts back when it ends.
+
+```bash
+cd scripts/benchmark
+# export the body you want to change, edit it, and name it in an arm file
+curl -s -H "Authorization: Bearer $ARTEX_TOKEN" localhost:8787/api/agents/planner \
+  | python3 -c 'import json,sys; print(json.load(sys.stdin)["prompt"], end="")' > arms/planner-v2.tmpl
+cat > arms/planner-v2.json <<'JSON'
+{"name": "planner-v2", "proposed_from": ["DBEN-v1-001"],
+ "prompts": {"planner": {"source": "file", "path": "planner-v2.tmpl"}}}
+JSON
+
+ARTEX_TOKEN=... JUDGE_BASE_URL=... JUDGE_MODEL=... JUDGE_API_KEY=... DROST_REPO=/path/to/drost-benchmarks \
+python3 eval_suite.py run --suite suites/heldout-v1.json \
+    --baseline arms/baseline.json --candidate arms/planner-v2.json \
+    --subject-model deepseek-chat --llm-profiles 3,2 --target-host 172.17.0.1 \
+    --replicates 3 --seed 7 --task-timeout 3600
+
+# re-render or compare two saved arm results (refuses mismatched invariants)
+python3 eval_suite.py compare <dir>/baseline.json <dir>/candidate.json
+```
+
+What it holds fixed and checks:
+
+- **Arms vary only the editable prompt body** of `goals`, `planner` and `worker`
+  (`source`: `current` = the body active when the suite started, `builtin` =
+  the in-code default, `file` = a template). Swaps go through the server's own
+  versioned prompt API (`PUT /api/agents/{key}/prompt`), so the code-owned
+  tails, gates, scope checks, injection defenses and tool allowlists cannot be
+  in an arm. Each swap is read back and its sha256 is stamped; a body that
+  changes mid-suite aborts it.
+- **Held-out discipline.** Adoption evidence comes from a `held-out` suite only
+  (`--allow-dev-split` for exploration), and an arm whose `proposed_from` names
+  a suite target is refused.
+- **Same model, seed, budget, judge.** One stamp covers both arms: method
+  version, subject model and llm chain, judge model, per-task timeout, seed,
+  replicates, suite version and content-hashed ground-truth versions.
+  `compare` refuses two results whose stamps differ (`--allow-mismatch` marks
+  the report NOT COMPARABLE).
+- **The seed fixes the schedule**: target order per replicate and arm order per
+  pair, so neither arm always runs first against a freshly started target. It
+  does not seed the LLM. For that, pin sampling on the LLM profile (Settings →
+  LLM, or `sampling: {seed, temperature}` on `POST /api/llm/profiles`): the
+  seed is sent as the request `seed` on the openai and ollama formats only,
+  and the temperature fills any request whose code sets none. The suite stamps
+  each chain profile's pin as `llm_sampling` (an invariant) and refuses to
+  finish if a pin changed mid-suite. Providers treat a seed as best effort, so
+  replicates remain the variance control.
+- **Sequential, dedicated instance.** The server reads the active prompt live,
+  so the suite refuses to start while any task is running or queued
+  (`--allow-busy` overrides knowingly) and never runs two tasks at once. Run it
+  on a bench instance with the RSI lesson library `off` (`ARTEX_RSI_LESSONS`),
+  or a lesson learned in one arm leaks into the other. Arms that pin lessons
+  need `ARTEX_RSI_LESSONS=bench` instead (see "Benchmark gate").
+- **Per-gate results with denominators.** Gates: `detected`, `component`,
+  `class`, `keywords`, `proof` (over ground-truth entries of judged runs, with
+  the "over detected" view alongside) and `flag_captured` (over drost runs).
+  Each carries passes/n and a Wilson 95% interval; the delta carries a Newcombe
+  interval; a paired table counts gained and lost observations on the same
+  target, replicate and entry. Failed runs are counted and excluded from the
+  denominators, never scored as misses. Cost (tokens, tool calls, wall time
+  from `GET /api/tasks/{id}/outcome`) is reported per arm, so a gain bought
+  with a bigger spend is visible.
+- **A judge failure stops the suite**: an untrusted grader invalidates every
+  judged result.
+
+Output: `benchmark-results/suite-<suite>/<run-id>/` with `baseline.json` and
+`candidate.json` (stamp + per-run records, written after every run), the
+per-run directories under `runs/`, `comparison.json` and `report.md`.
+
+## Benchmark gate (E3, RSI Loop C)
+
+The gate turns suite output into an adoptable proposal without letting the loop
+adopt anything. `rsi_submit.py` talks to `/api/rsi/*` (same `ARTEX_TOKEN` /
+`ARTEX_JWT_KEY` handling as the runner) and has no adopt command: adoption needs
+the owner's password (step-up), through the API or the UI, and is not scriptable.
+The server needs `ARTEX_RSI_LOOP` on (otherwise proposals answer 409).
+
+```bash
+cd scripts/benchmark
+# 1. propose: a prompt body (the arm's role spec must be source "file") ...
+python3 rsi_submit.py propose --arm arms/planner-v2.json --round 1 --target planner \
+    --rationale "planner stops after the first finding on multi-step targets"
+#    ... or a lesson set (arm: {"name": "lessons-v1", "lessons": [12, 15]}, prompts all "current")
+python3 rsi_submit.py propose --arm arms/lessons-v1.json --round 1 --lessons --rationale "..."
+
+# 2. run the held-out suite for that same arm file against arms/baseline.json
+python3 eval_suite.py run --suite suites/heldout-v1.json --baseline arms/baseline.json \
+    --candidate arms/planner-v2.json --subject-model deepseek-chat --replicates 3 --seed 7
+
+# 3. attach the evidence; exits 1 unless the gate's verdict passed
+python3 rsi_submit.py evidence <proposal_id> benchmark-results/suite-heldout-v1/<run-id>
+python3 rsi_submit.py status
+```
+
+4. **Owner adoption**: the owner reviews `report.md` and the verdict, then adopts
+   the proposal with their password. A prompt body becomes a new `agent_prompts`
+   version; a lesson set is adopted through the lesson library's owner actions.
+5. **Rollback**: a one-step pointer change back to the previous `agent_prompts`
+   version (prompt bodies) or the previous lesson status (lessons); neither
+   needs a deploy.
+
+Automatic proposals (the critic, RSI.md rule 6). `artex-rsi-propose`
+(`cmd/artex-rsi-propose`, core in `rsi/propose`) drafts step 1 for you from closed
+live tasks. It reads `/api/tasks`, each closed task's `/outcome` and `/lessons`,
+`/api/skill-gaps` and the active goals/planner/worker bodies, and keeps a rule only
+when its signal holds on at least 2 closed tasks that span at least 2 companies or
+categories, and on a quarter of them. Each kept rule appends a fixed guidance
+paragraph (`## Field guidance`) to one role's active body; no live text (lesson
+cues, skill names, titles) enters a body, since live output is untrusted. It
+writes `round-<N>/<name>.json` + `.tmpl` arm files (with `proposed_from` set to
+`task:<id>` and a `rationale`) and `plan.json` (the drafts and every skipped rule
+with its reason), never more than the round's remaining budget from
+`GET /api/rsi/status` and the open-proposal cap. It refuses to run unless the
+server reports the loop on, stays in the newest round unless `--round` names the
+next one, and can only read and `POST /api/rsi/proposals`: it has no adopt path.
+
+```bash
+go build -o artex-rsi-propose ./cmd/artex-rsi-propose
+ARTEX_TOKEN=... ./artex-rsi-propose --artex-url http://localhost:8787 --out rsi-proposals   # dry run: files only
+ARTEX_TOKEN=... ./artex-rsi-propose --out rsi-proposals --post                              # also register them
+# then step 2 with --candidate rsi-proposals/round-<N>/<name>.json
+```
+
+Binding: the server ties evidence to the proposal. For a prompt body,
+`candidate.stamp.prompt_sha[target]` must equal the sha256 (first 16 hex) of the
+proposed body and every other role must match the baseline. For lessons,
+`candidate.stamp.lesson_ids` must equal the proposal's sorted ids and
+`baseline.stamp.lesson_ids` must be `[]`. A proposal that does not match the
+files it was run from is rejected, so edit the arm file, not the proposal.
+
+Lesson arms. An arm may carry `"lessons": [ids]` (positive integers, deduplicated
+and sorted on load). Run the instance with `ARTEX_RSI_LESSONS=bench`: every new
+task's planner and worker then get exactly the pinned lessons, none when the list
+is empty. The suite pins each arm's set through `/api/rsi/bench-lessons`, reads it
+back (a mismatch aborts), stamps `lesson_ids` and `lessons_block_sha` per arm and
+restores the starting pin when it ends. The baseline arm must not carry lessons
+(it is the non-evolving side of the paired comparison). These two stamps differ
+between arms by design, so they are not among the invariants `compare` enforces,
+but each must stay constant across one arm's runs. Suites with no lesson arm never
+call the endpoint.
+
+What is outside the gate: skills and tool descriptions are adopted only through a
+git PR with review, never through this path. The immutable surfaces of `RSI.md`
+(gates, scope and authorization checks, injection defenses, tool allowlists and
+the code-owned prompt tails, including the lesson block itself) are outside every
+arm: a suite can vary only the editable prompt body and the pinned lesson ids.
 
 ## What this does not measure
 

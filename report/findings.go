@@ -66,6 +66,7 @@ func FindingsMarkdown(fs []*db.DBFinding, generatedAt time.Time) string {
 			fmt.Fprintf(&b, "- **Task**: %s\n", desc)
 		}
 		fmt.Fprintf(&b, "- **Found at**: %s\n", f.CreatedAt.Format("2006-01-02 15:04:05"))
+		b.WriteString(SourceOf(f).bullet())
 		q := qualityFromDBFinding(f)
 		b.WriteString(qualityBullets(q, false))
 		b.WriteString(classificationBullets(f.Classification))
@@ -99,6 +100,7 @@ func SingleFindingMarkdown(f *db.DBFinding, generatedAt time.Time) string {
 	}
 	fmt.Fprintf(&b, "- **Found at**: %s\n", f.CreatedAt.Format("2006-01-02 15:04:05"))
 	fmt.Fprintf(&b, "- **Generated at**: %s\n", generatedAt.Format("2006-01-02 15:04:05"))
+	b.WriteString(SourceOf(f).bullet())
 	q := qualityFromDBFinding(f)
 	b.WriteString(qualityBullets(q, false))
 	b.WriteString(classificationBullets(f.Classification))
@@ -200,8 +202,14 @@ func FindingsCSV(fs []*db.DBFinding) []byte {
 	buf.WriteString("\xEF\xBB\xBF") // UTF-8 BOM
 	w := csv.NewWriter(&buf)
 	_ = w.Write([]string{"ID", "Name", "Class", "Severity", "Status", "Report Stage", "Task", "Found At", "Summary", "Traffic Evidence Count", "Traffic Evidence IDs",
-		"CVSS v4 Score", "CVSS v4 Vector", "EPSS Probability", "Framework Tags", "Remediation"})
+		"CVSS v4 Score", "CVSS v4 Vector", "EPSS Probability", "Framework Tags", "Remediation",
+		"Lane", "Source Tool", "Source Rule", "Source Location", "Import ID"})
 	for _, f := range items {
+		src := SourceOf(f)
+		importID := ""
+		if src.ImportID > 0 {
+			importID = fmt.Sprint(src.ImportID)
+		}
 		_ = w.Write([]string{
 			fmt.Sprintf("%d", f.ID),
 			csvCell(findingTitle(f)),
@@ -219,6 +227,11 @@ func FindingsCSV(fs []*db.DBFinding) []byte {
 			csvEPSS(f),
 			csvCell(csvTags(f.Classification)),
 			csvCell(strings.TrimSpace(f.Classification.Remediation)),
+			src.LaneKey(),
+			csvCell(src.Tool),
+			csvCell(src.RuleID),
+			csvCell(src.codeLocation()),
+			importID,
 		})
 	}
 	w.Flush()

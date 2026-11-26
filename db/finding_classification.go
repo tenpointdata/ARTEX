@@ -11,7 +11,7 @@ import (
 	"github.com/Autumn-27/artex/vulnmeta"
 )
 
-// Client-grade classification columns on findings (migration 0017): CVSS v4.0
+// Client-grade classification columns on findings (migration 0029): CVSS v4.0
 // vector + computed score, optional EPSS, remediation and framework tags. The
 // typed contract and its validation live in package vulnmeta; this file only
 // maps it to columns.

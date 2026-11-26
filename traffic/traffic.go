@@ -274,6 +274,15 @@ type Traffic struct {
 	// gate is the loopback proxy every upstream dial goes through when upstream
 	// is nil, so the platform's egress checks apply to them (upstream_gate.go).
 	gate *upstreamGate
+	// scopes are the run scopes a proxy client may name in its credential
+	// (scope.go); sink binds client connections to them.
+	scopes scopeRegistry
+	// remote resolves scope tokens worker nodes minted (scope_remote.go).
+	remote remoteScopes
+	// isLoopback classifies a client remote address; nil is isLoopbackAddr.
+	// Tests replace it to stand a loopback client in for a remote one.
+	isLoopback atomic.Pointer[func(addr string) bool]
+	sink       *sink
 	// rewriteRules is the compiled snapshot of the rewrite rules, replaced as a
 	// whole by SetRewriteRules and applied by the sink (rewrite_flow.go).
 	rewriteRules atomic.Pointer[rewrite.Set]
@@ -350,6 +359,9 @@ func Open(dir, addr string) (*Traffic, error) {
 		// opts out; go-mitmproxy exposes only a global switch, not per-host.
 		SslInsecure: InsecureUpstream(),
 		CaRootPath:  filepath.Join(dir, "_ca"),
+		// ARTEX's own CA (ca.go): ECDSA P-256, one year, short-lived leaves.
+		// An existing CA file is loaded unchanged.
+		NewCaFunc: NewCAFunc(filepath.Join(dir, "_ca"), CAConfigFromEnv()),
 	})
 	if err != nil {
 		db.Close()
@@ -375,7 +387,7 @@ func Open(dir, addr string) (*Traffic, error) {
 	// "Directly" means through the upstream gate (upstream_gate.go): go-mitmproxy
 	// has no dial hook, so its upstream is a loopback proxy that dials with the
 	// platform's checks (SetUpstreamDialer), never a bare net.Dialer.
-	gate, err := startUpstreamGate(nil)
+	gate, err := startUpstreamGate(nil, t.resolveScope)
 	if err != nil {
 		db.Close()
 		return nil, fmt.Errorf("start the upstream gate: %w", err)
@@ -388,7 +400,8 @@ func Open(dir, addr string) (*Traffic, error) {
 	p.SetShouldInterceptRule(func(req *http.Request) bool {
 		return !t.tunneling(hostOnly(req.Host))
 	})
-	p.AddAddon(&sink{t: t})
+	t.sink = &sink{t: t}
+	p.AddAddon(t.sink)
 	t.proxy = p
 	t.sweeping.Go(t.sweepSnapshots) // stops on t.closed; Close waits for it
 	return t, nil
@@ -681,6 +694,9 @@ type sink struct {
 	mproxy.BaseAddon
 	t       *Traffic
 	paced   sync.Map // ClientConn.Id of a marked connection -> struct{}
+	scoped  sync.Map // client remote address -> scopeBinding (scope.go)
+	relayed sync.Map // address of a scope relay's connection -> scope token (scope_relay.go)
+	clients sync.Map // client remote address -> live *mproxy.ClientConn (closeScope, scope.go)
 	streams sync.Map // *mproxy.Flow of a live WebSocket/SSE stream -> *streamState (stream.go)
 	bypass  sync.Map // flowKey of a replay flow bypassing rewrite rules -> struct{}
 }
@@ -1353,6 +1369,7 @@ const (
 type PageQuery struct {
 	Host      string   // host substring
 	Hosts     []string // exact host allowlist (company scope); empty = no filter
+	IDs       []string // exact exchange ids (a row selection); empty = no filter
 	MatchNone bool     // force an empty result (a company that owns no host yet)
 	Method    string   // exact method (case-insensitive)
 	Query     string   // broad search box: metadata columns OR captured text
@@ -1428,6 +1445,10 @@ func (t *Traffic) pageWhere(f PageQuery) (where string, args []any) {
 			args2[i] = h
 		}
 		add("host IN ("+strings.Join(placeholders, ",")+")", args2...)
+	}
+	if len(f.IDs) > 0 {
+		cond, idArgs := idsCondition(f.IDs)
+		add(cond, idArgs...)
 	}
 	if m := strings.TrimSpace(f.Method); m != "" {
 		add("method=?", strings.ToUpper(m))

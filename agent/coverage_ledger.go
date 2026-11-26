@@ -20,7 +20,7 @@ func (t *ToolSet) recordCoverage() actool.CoreTool {
 		"Record what you examined on a surface for one risk class (use the goal's vulnclass as risk_area when it applies), including negative results, so an absent finding is never read as a clean target.",
 		obj(map[string]any{
 			"surface":   str("what was examined: a URL, endpoint, parameter, host or feature"),
-			"risk_area": str("risk class, e.g. sqli, xss, idor"),
+			"risk_area": str("risk class, e.g. sqli, xss, idor; when your intent carries a methodology_item (e.g. WSTG-INPV-05), use that item id so the checklist item is closed"),
 			"outcome":   map[string]any{"type": "string", "enum": []string{db.OutcomeReported, db.OutcomeNoIssueFound, db.OutcomeRuledOut, db.OutcomeNotApplicable, db.OutcomeNeedsFollowUp}, "description": "result for this surface and risk class"},
 			"evidence":  str("required for no_issue_found: a fact id, intent id or traffic id that shows the test"),
 			"reason":    str("required for ruled_out and not_applicable: why"),

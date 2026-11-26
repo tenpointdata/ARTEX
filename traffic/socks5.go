@@ -39,6 +39,12 @@ const (
 	// explicitly false/0/off/no.
 	SOCKS5UDPEnabledEnv = "ARTEX_SOCKS5_UDP_ENABLED"
 
+	// SOCKS5UserEnv and SOCKS5PasswordEnv set the operator credential the
+	// listener requires of a client that carries no task scope token (default
+	// user "artex" when only the password is set). See socks5_auth.go.
+	SOCKS5UserEnv     = "ARTEX_SOCKS5_USER"
+	SOCKS5PasswordEnv = "ARTEX_SOCKS5_PASSWORD"
+
 	DefaultSOCKS5Addr               = "127.0.0.1:1080"
 	DefaultSOCKS5MaxConcurrent      = 64
 	DefaultSOCKS5MaxBytesPerDir     = 4 * 1024 * 1024
@@ -109,6 +115,13 @@ type SOCKS5Config struct {
 	// When nil and attached to a Traffic store, the store's raw-TCP recorder runs.
 	OnRecord func(RawTCPCapture)
 
+	// Username and Password are the operator credential (RFC 1929) that
+	// admits a client under the global rules, from ARTEX_SOCKS5_USER and
+	// ARTEX_SOCKS5_PASSWORD. Empty Password means none is configured. See
+	// socks5_auth.go for the full authentication policy.
+	Username string
+	Password string
+
 	// EnableUDP opts into RFC 1928 UDP ASSOCIATE (IPv4 first, P4.1c).
 	// Off by default: when false, UDP ASSOCIATE returns 0x07.
 	EnableUDP bool
@@ -168,7 +181,7 @@ func SOCKS5ConfigFromEnv() (SOCKS5Config, bool) {
 		if addr == "" {
 			addr = DefaultSOCKS5Addr
 		}
-		return SOCKS5Config{Addr: addr, EnableUDP: enableUDP}, true
+		return socks5OperatorCred(SOCKS5Config{Addr: addr, EnableUDP: enableUDP}), true
 	case "":
 		if rawAddr == "" && !enableUDP {
 			return SOCKS5Config{}, false
@@ -177,7 +190,7 @@ func SOCKS5ConfigFromEnv() (SOCKS5Config, bool) {
 		if addr == "" {
 			addr = DefaultSOCKS5Addr
 		}
-		return SOCKS5Config{Addr: addr, EnableUDP: enableUDP}, true
+		return socks5OperatorCred(SOCKS5Config{Addr: addr, EnableUDP: enableUDP}), true
 	default:
 		log.Printf("[traffic] %s=%q is not a boolean; leaving SOCKS5 disabled", SOCKS5EnabledEnv, rawEnabled)
 		return SOCKS5Config{}, false
@@ -239,6 +252,11 @@ type socks5Server struct {
 	once sync.Once
 	wg   sync.WaitGroup
 
+	// allowNoAuth admits loopback clients that offer no-auth (0x00) and the
+	// pace marker as a credential: only a loopback-bound listener with no
+	// operator credential configured (socks5_auth.go).
+	allowNoAuth bool
+
 	mu     sync.Mutex
 	active map[io.Closer]struct{}
 }
@@ -247,17 +265,23 @@ type socks5Server struct {
 // Returns the actual bound address (useful when cfg.Addr uses port 0).
 func (t *Traffic) StartSOCKS5(cfg SOCKS5Config) (string, error) {
 	cfg = cfg.withDefaults()
+	if err := cfg.validateAuth(); err != nil {
+		return "", err
+	}
 	ln, err := net.Listen("tcp", cfg.Addr)
 	if err != nil {
 		return "", fmt.Errorf("socks5 listen %s: %w", cfg.Addr, err)
 	}
+	allowNoAuth := cfg.Password == "" && isLoopbackBound(ln.Addr())
+	logSOCKS5AuthMode(ln.Addr(), cfg, allowNoAuth)
 	srv := &socks5Server{
-		t:      t,
-		cfg:    cfg,
-		ln:     ln,
-		sem:    make(chan struct{}, cfg.MaxConcurrent),
-		stop:   make(chan struct{}),
-		active: map[io.Closer]struct{}{},
+		allowNoAuth: allowNoAuth,
+		t:           t,
+		cfg:         cfg,
+		ln:          ln,
+		sem:         make(chan struct{}, cfg.MaxConcurrent),
+		stop:        make(chan struct{}),
+		active:      map[io.Closer]struct{}{},
 	}
 	t.socksMu.Lock()
 	if t.socks != nil {
@@ -364,18 +388,25 @@ func (s *socks5Server) handleConn(client net.Conn) {
 	// 1. Handshake (greeting + optional RFC 1929 auth + CONNECT request) under HandshakeTimeout.
 	_ = client.SetDeadline(time.Now().Add(s.cfg.HandshakeTimeout))
 
-	paced, ok := s.negotiateAuth(client)
+	cred, ok := s.negotiateAuth(client)
 	if !ok {
 		return
 	}
+	paced := cred.paced
+	scope, ok := s.connScope(cred, client.RemoteAddr())
 
 	cmd, atyp, host, port, rep := readSOCKS5Request(client, s.cfg.EnableUDP)
+	if rep == socks5RepSuccess && !ok {
+		// The client named a run scope that has ended: refuse, never fall
+		// back to the global rules alone.
+		rep = socks5RepNotAllowed
+	}
 	if rep != socks5RepSuccess {
 		_ = writeSOCKS5Reply(client, rep, nil)
 		return
 	}
 	if cmd == socks5CmdUDPAssociate {
-		s.handleUDPAssociate(client, atyp, host, port)
+		s.handleUDPAssociate(client, atyp, host, port, scope)
 		return
 	}
 
@@ -390,7 +421,7 @@ func (s *socks5Server) handleConn(client net.Conn) {
 
 	// 3. Apply the egress governor and target gate before dialing.
 	targetAddr := net.JoinHostPort(host, strconv.Itoa(port))
-	upstream, rep := s.dialTarget(host, port, targetAddr)
+	upstream, rep := s.dialTarget(host, port, targetAddr, scope)
 	if rep != socks5RepSuccess {
 		_ = writeSOCKS5Reply(client, rep, nil)
 		return
@@ -455,17 +486,56 @@ func (s *socks5Server) recordCapture(rec RawTCPCapture) {
 	}
 }
 
-func (s *socks5Server) negotiateAuth(conn net.Conn) (paced bool, ok bool) {
+// socks5Cred is what a client's RFC 1929 credential carries (egress/proxycred.go):
+// the pace marker in the username, a run scope token in the password.
+type socks5Cred struct {
+	paced bool
+	token string
+}
+
+// connScope resolves the run scope a credential names, locally or through the
+// remote resolver (scope_remote.go). ok is false when it names a scope neither
+// holds, or names none from a non-loopback client while
+// RequireScopeForRemoteClients is on; a nil ScopeFunc means no scope.
+func (s *socks5Server) connScope(cred socks5Cred, client net.Addr) (ScopeFunc, bool) {
+	if cred.token == "" {
+		if s.t != nil && s.t.remote.requireScope() && (client == nil || !s.t.loopbackClient(client.String())) {
+			return nil, false
+		}
+		return nil, true
+	}
+	if s.t == nil {
+		return nil, false
+	}
+	return s.t.resolveScope(cred.token)
+}
+
+// baseContext is the context of a connection's policy checks and dials:
+// BaseContext's, then the connection's run scope.
+func (s *socks5Server) baseContext(scope ScopeFunc) context.Context {
+	ctx := context.Background()
+	if s.cfg.BaseContext != nil {
+		if c := s.cfg.BaseContext(); c != nil {
+			ctx = c
+		}
+	}
+	if scope != nil {
+		ctx = scope(ctx)
+	}
+	return ctx
+}
+
+func (s *socks5Server) negotiateAuth(conn net.Conn) (cred socks5Cred, ok bool) {
 	var hdr [2]byte
 	if _, err := io.ReadFull(conn, hdr[:]); err != nil {
-		return false, false
+		return socks5Cred{}, false
 	}
 	if hdr[0] != socks5Version || hdr[1] == 0 {
-		return false, false
+		return socks5Cred{}, false
 	}
 	methods := make([]byte, int(hdr[1]))
 	if _, err := io.ReadFull(conn, methods); err != nil {
-		return false, false
+		return socks5Cred{}, false
 	}
 
 	var hasNone, hasUserPass bool
@@ -478,55 +548,22 @@ func (s *socks5Server) negotiateAuth(conn net.Conn) (paced bool, ok bool) {
 		}
 	}
 
-	// Prefer username/password when offered so clients carrying the pace marker
-	// (egress.PaceUser) can pass it through without requiring real credentials.
-	// Accept no-auth for loopback clients.
+	// Prefer username/password when offered so clients carrying a scope token
+	// or the pace marker (egress.PaceUser) can pass them through.
 	if hasUserPass {
 		if _, err := conn.Write([]byte{socks5Version, socks5AuthUserPass}); err != nil {
-			return false, false
+			return socks5Cred{}, false
 		}
-		return readSOCKS5UserPass(conn)
+		return s.authUserPass(conn)
 	}
-	if hasNone && isLoopbackRemote(conn.RemoteAddr()) {
+	if hasNone && s.allowNoAuth && isLoopbackRemote(conn.RemoteAddr()) {
 		if _, err := conn.Write([]byte{socks5Version, socks5AuthNone}); err != nil {
-			return false, false
+			return socks5Cred{}, false
 		}
-		return false, true
+		return socks5Cred{}, true
 	}
 	_, _ = conn.Write([]byte{socks5Version, socks5AuthNoAccept})
-	return false, false
-}
-
-// readSOCKS5UserPass parses an RFC 1929 username/password subnegotiation.
-// Credentials are never required (any username/password succeeds); a username
-// equal to egress.PaceUser marks the connection as paced.
-func readSOCKS5UserPass(conn net.Conn) (paced bool, ok bool) {
-	var head [2]byte
-	if _, err := io.ReadFull(conn, head[:]); err != nil {
-		return false, false
-	}
-	if head[0] != socks5UserPassVer {
-		_, _ = conn.Write([]byte{socks5UserPassVer, 0x01})
-		return false, false
-	}
-	uname := make([]byte, int(head[1]))
-	if _, err := io.ReadFull(conn, uname); err != nil {
-		return false, false
-	}
-	var plen [1]byte
-	if _, err := io.ReadFull(conn, plen[:]); err != nil {
-		return false, false
-	}
-	if plen[0] > 0 {
-		pass := make([]byte, int(plen[0]))
-		if _, err := io.ReadFull(conn, pass); err != nil {
-			return false, false
-		}
-	}
-	if _, err := conn.Write([]byte{socks5UserPassVer, 0x00}); err != nil {
-		return false, false
-	}
-	return string(uname) == egress.PaceUser, true
+	return socks5Cred{}, false
 }
 
 func readSOCKS5Request(conn net.Conn, enableUDP bool) (cmd byte, atyp byte, host string, port int, rep byte) {
@@ -636,13 +673,8 @@ func writeSOCKS5Reply(conn net.Conn, rep byte, bindAddr net.Addr) error {
 	return err
 }
 
-func (s *socks5Server) dialTarget(host string, port int, targetAddr string) (net.Conn, byte) {
-	baseCtx := context.Background()
-	if s.cfg.BaseContext != nil {
-		if ctx := s.cfg.BaseContext(); ctx != nil {
-			baseCtx = ctx
-		}
-	}
+func (s *socks5Server) dialTarget(host string, port int, targetAddr string, scope ScopeFunc) (net.Conn, byte) {
+	baseCtx := s.baseContext(scope)
 	stopCtx, stopCancel := context.WithCancel(baseCtx)
 	defer stopCancel()
 	go func() {

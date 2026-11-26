@@ -128,7 +128,7 @@ func (s *socks5Server) newUDPAssociationID(started time.Time) string {
 	return fmt.Sprintf("udpa-%d-%04d", started.UnixMilli(), n%10000)
 }
 
-func (s *socks5Server) handleUDPAssociate(client net.Conn, reqAtyp byte, reqHost string, reqPort int) {
+func (s *socks5Server) handleUDPAssociate(client net.Conn, reqAtyp byte, reqHost string, reqPort int, scope ScopeFunc) {
 	// 1. Enforce max concurrent sessions before allocating UDP sockets.
 	select {
 	case s.sem <- struct{}{}:
@@ -198,12 +198,7 @@ func (s *socks5Server) handleUDPAssociate(client net.Conn, reqAtyp byte, reqHost
 
 	assocID := s.newUDPAssociationID(time.Now().UTC())
 
-	baseCtx := context.Background()
-	if s.cfg.BaseContext != nil {
-		if ctx := s.cfg.BaseContext(); ctx != nil {
-			baseCtx = ctx
-		}
-	}
+	baseCtx := s.baseContext(scope)
 	assocCtx, assocCancel := context.WithCancel(baseCtx)
 	var closeOnce sync.Once
 	closeAssoc := func() {

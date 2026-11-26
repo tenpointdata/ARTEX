@@ -888,7 +888,7 @@ for k, v in os.environ.items():
 func TestPrepareExecPrivilegeSetsFileToolIdentityAsRoot(t *testing.T) {
 	f := newExecRootFixture(t)
 	var readErr error
-	if err := agent.RunAsFileToolIdentity(func() { _, readErr = os.ReadFile(f.secret) }); err != nil {
+	if err := agent.RunAsFileToolIdentity("", func() { _, readErr = os.ReadFile(f.secret) }); err != nil {
 		t.Fatal(err)
 	}
 	if !errors.Is(readErr, fs.ErrPermission) {

@@ -327,6 +327,14 @@ func (s *Server) toolSpawnTask() actool.CoreTool {
 					}
 				}
 			}
+			// Engagement authorization: a child of a task with an artifact inherits
+			// its current version, so spawning cannot shed the scope, window or
+			// techniques. A revoked or out-of-window artifact refuses the spawn
+			// (the gate refuses it first; this is the second line).
+			inherited, err := s.callerAuthorization(ctx)
+			if err != nil {
+				return actool.Errorf(err.Error()), nil
+			}
 			t, err := s.m.CreateTaskWithOptions(a.Description, a.Goal, db.TaskCreateOptions{
 				SourceTaskIDs:        sourceIDs,
 				LLMProfileIDs:        llmIDs,
@@ -337,6 +345,11 @@ func (s *Server) toolSpawnTask() actool.CoreTool {
 			})
 			if err != nil {
 				return actool.Errorf(err.Error()), nil
+			}
+			if inherited != nil {
+				if err := s.inheritAuthorization(t.ID, inherited); err != nil {
+					return actool.Errorf(err.Error()), nil
+				}
 			}
 			if a.ParentRef != "" {
 				t.ParentRef = a.ParentRef

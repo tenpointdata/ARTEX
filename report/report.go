@@ -44,6 +44,7 @@ type findingView struct {
 	Severity  string
 	Summary   string
 	PoC       string
+	Src       Source  // which lane found it, and the scanner import it came from
 	Q         Quality // proof-strength fields grafted from the standalone row
 }
 
@@ -58,7 +59,8 @@ func parseFinding(n *db.Node) findingView {
 		} `json:"evidence"`
 	}
 	_ = json.Unmarshal(n.Payload, &p)
-	return findingView{VulnClass: p.VulnClass, Name: p.Name, Severity: p.Severity, Summary: p.Summary, PoC: p.Evidence.PoC}
+	return findingView{VulnClass: p.VulnClass, Name: p.Name, Severity: p.Severity, Summary: p.Summary, PoC: p.Evidence.PoC,
+		Src: sourceFromPayload(n.Payload)}
 }
 
 var sevRank = map[string]int{"critical": 0, "high": 1, "medium": 2, "low": 3, "": 4}
@@ -72,7 +74,11 @@ func Markdown(in Input) string {
 
 	// summary
 	fmt.Fprintf(&b, "## Summary\n\n")
-	fmt.Fprintf(&b, "- Confirmed findings: **%d**\n", len(in.Findings))
+	// Imported scanner claims are listed with the findings but not counted as
+	// confirmed: the headline must not overstate what was tested (E10).
+	imported := importedCount(in.Findings)
+	fmt.Fprintf(&b, "- Confirmed findings: **%d**\n", len(in.Findings)-imported)
+	b.WriteString(laneSummary(in.Findings, imported))
 	fmt.Fprintf(&b, "- Assets: ")
 	var types []string
 	for t := range in.AssetCounts {
@@ -94,7 +100,7 @@ func Markdown(in Input) string {
 		v.Q = qualityFromRows(n.ID, in.Quality)
 		fs = append(fs, v)
 		items = append(items, SummaryItem{Title: nz(v.Name, nz(v.VulnClass, "Uncategorized")), Severity: v.Severity,
-			Verified: v.Q.Verification == db.VerificationVerified, Classification: v.Q.Classification})
+			Verified: v.Q.Verification == db.VerificationVerified, Imported: v.Src.Imported, Classification: v.Q.Classification})
 	}
 	b.WriteString(Summarize(items).Markdown())
 
@@ -107,6 +113,7 @@ func Markdown(in Input) string {
 		for i, f := range fs {
 			fmt.Fprintf(&b, "### %d. [%s] %s\n\n", i+1, strings.ToUpper(nz(f.Severity, "info")), nz(f.Name, nz(f.VulnClass, "Uncategorized")))
 			fmt.Fprintf(&b, "%s\n\n", nz(f.Summary, ""))
+			b.WriteString(f.Src.bullet())
 			b.WriteString(qualityBullets(f.Q, true)) // honest proof strength, including its gaps
 			if !f.Q.Missing && !f.Q.Unavailable {
 				b.WriteString(classificationBullets(f.Q.Classification))
