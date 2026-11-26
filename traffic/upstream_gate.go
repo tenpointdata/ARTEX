@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/subtle"
-	"encoding/base64"
 	"encoding/hex"
 	"errors"
 	"io"
@@ -17,6 +16,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/Autumn-27/artex/egress"
 	"github.com/Autumn-27/artex/intercept"
 )
 
@@ -37,25 +37,34 @@ type DialFunc func(ctx context.Context, network, addr string) (net.Conn, error)
 // dialling only the addresses it checked). It is never a direct dial.
 //
 // The listener is bound to loopback and requires a per-process random
-// credential, so it is not one more unrecorded relay for local users.
+// credential (the password), so it is not one more unrecorded relay for local
+// users. The user names the scope of the dial (scope.go): gateUnscoped for the
+// global rules only, else the scope token of the client connection, whose
+// ScopeFunc derives the dial's context. A token the registry no longer holds is
+// refused.
 
 // gateDialTimeout bounds one upstream dial through the gate.
 const gateDialTimeout = 30 * time.Second
 
+// gateUnscoped is the gate user of a dial that names no scope.
+const gateUnscoped = "artex"
+
 type upstreamGate struct {
-	ln    net.Listener
-	srv   *http.Server
-	url   *url.URL // http://artex:<token>@127.0.0.1:<port>
-	auth  string   // expected Proxy-Authorization value
-	dial  atomic.Pointer[DialFunc]
-	ctx   context.Context
-	stop  context.CancelFunc
-	conns sync.WaitGroup
+	ln     net.Listener
+	srv    *http.Server
+	url    *url.URL // http://artex:<secret>@127.0.0.1:<port>
+	secret string   // the expected password
+	scope  func(token string) (ScopeFunc, bool)
+	dial   atomic.Pointer[DialFunc]
+	ctx    context.Context
+	stop   context.CancelFunc
+	conns  sync.WaitGroup
 }
 
 // startUpstreamGate listens on a free loopback port and serves CONNECT (and
 // absolute-form plain HTTP) with dial. A nil dial is intercept.DialRefusingMetadata.
-func startUpstreamGate(dial DialFunc) (*upstreamGate, error) {
+// scope resolves the scope token a dial names; nil resolves none.
+func startUpstreamGate(dial DialFunc, scope func(token string) (ScopeFunc, bool)) (*upstreamGate, error) {
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		return nil, err
@@ -65,14 +74,18 @@ func startUpstreamGate(dial DialFunc) (*upstreamGate, error) {
 		ln.Close()
 		return nil, err
 	}
-	user := url.UserPassword("artex", hex.EncodeToString(raw))
+	if scope == nil {
+		scope = func(string) (ScopeFunc, bool) { return nil, false }
+	}
+	secret := hex.EncodeToString(raw)
 	ctx, stop := context.WithCancel(context.Background())
 	g := &upstreamGate{
-		ln:   ln,
-		url:  &url.URL{Scheme: "http", User: user, Host: ln.Addr().String()},
-		auth: "Basic " + base64.StdEncoding.EncodeToString([]byte(user.String())),
-		ctx:  ctx,
-		stop: stop,
+		ln:     ln,
+		url:    &url.URL{Scheme: "http", User: url.UserPassword(gateUnscoped, secret), Host: ln.Addr().String()},
+		secret: secret,
+		scope:  scope,
+		ctx:    ctx,
+		stop:   stop,
 	}
 	g.setDial(dial)
 	g.srv = &http.Server{Handler: g, ReadHeaderTimeout: 30 * time.Second, ErrorLog: log.New(io.Discard, "", 0)}
@@ -107,7 +120,8 @@ func refuse(w http.ResponseWriter, code int, err error) {
 }
 
 func (g *upstreamGate) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	if subtle.ConstantTimeCompare([]byte(r.Header.Get("Proxy-Authorization")), []byte(g.auth)) != 1 {
+	user, pass, ok := egress.ProxyCredential(r.Header.Get("Proxy-Authorization"))
+	if !ok || subtle.ConstantTimeCompare([]byte(pass), []byte(g.secret)) != 1 {
 		w.Header().Set("Proxy-Authenticate", `Basic realm="artex-upstream"`)
 		http.Error(w, "proxy authentication required", http.StatusProxyAuthRequired)
 		return
@@ -115,6 +129,14 @@ func (g *upstreamGate) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	dial := *g.dial.Load()
 	ctx, cancel := context.WithTimeout(g.ctx, gateDialTimeout)
 	defer cancel()
+	if user != gateUnscoped {
+		fn, known := g.scope(user)
+		if !known {
+			refuse(w, http.StatusForbidden, errScopeUnknown)
+			return
+		}
+		dial = scopedDial(dial, fn)
+	}
 	if r.Method != http.MethodConnect {
 		g.forward(w, r, dial)
 		return
@@ -147,6 +169,16 @@ func (g *upstreamGate) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	g.conns.Add(1)
 	go g.splice(down, buf.Reader, up)
+}
+
+// errScopeUnknown refuses a dial whose client named a scope that has ended.
+var errScopeUnknown = errors.New("the proxy credential names a run scope that is not active (the run ended); refusing the connection")
+
+// scopedDial is dial on contexts derived by fn.
+func scopedDial(dial DialFunc, fn ScopeFunc) DialFunc {
+	return func(ctx context.Context, network, addr string) (net.Conn, error) {
+		return dial(fn(ctx), network, addr)
+	}
 }
 
 // splice copies both ways until either side ends or the gate closes.
@@ -204,13 +236,37 @@ func (t *Traffic) SetUpstreamDialer(dial DialFunc) {
 }
 
 // upstreamFor is go-mitmproxy's upstream proxy: the operator's global egress
-// proxy when one is set (it, not this host, reaches the target), else the gate.
-func (t *Traffic) upstreamFor(*http.Request) (*url.URL, error) {
+// proxy when one is set (it, not this host, reaches the target), else the gate,
+// with the scope token of req's client connection as the gate user.
+//
+// With a global egress proxy the gate is not on the path, and neither the
+// global rules nor a run's are applied to the proxy's dial: the operator's
+// proxy reaches the target. That is the intent for a remote egress proxy; a
+// proxy on this host would reach what this host reaches, metadata included,
+// so OPS.md tells operators to run it with its own deny (decision recorded in
+// HANDOFF.md).
+//
+// A non-loopback client is checked first, while RequireScopeForRemoteClients is
+// on (scope_remote.go): without an active scope its dial is refused, on either
+// path, so the proxy is no open relay for the network it listens on.
+func (t *Traffic) upstreamFor(req *http.Request) (*url.URL, error) {
+	tok := ""
+	if t.sink != nil {
+		tok = t.sink.scopeOf(req)
+	}
+	if err := t.remoteClientRefusal(req, tok); err != nil {
+		return nil, err
+	}
 	if u := t.upstream.Load(); u != nil {
 		return u, nil
 	}
 	if t.gate == nil {
 		return nil, errors.New("the upstream gate is not running; refusing a direct dial")
+	}
+	if tok != "" {
+		u := *t.gate.url
+		u.User = url.UserPassword(tok, t.gate.secret)
+		return &u, nil
 	}
 	return t.gate.url, nil
 }

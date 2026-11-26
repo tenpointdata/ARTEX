@@ -1,0 +1,19 @@
+{{- range $n, $p := dict "data" .Values.control.persistence.data "keys" .Values.control.persistence.keys }}
+{{- if and $p.enabled (not $p.existingClaim) }}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "artex.fullname" $ }}-control-{{ $n }}
+  labels:
+    {{- include "artex.labels" $ | nindent 4 }}
+spec:
+  accessModes: {{ toYaml $p.accessModes | nindent 4 }}
+  {{- with $p.storageClass }}
+  storageClassName: {{ . | quote }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ $p.size }}
+{{- end }}
+{{- end }}

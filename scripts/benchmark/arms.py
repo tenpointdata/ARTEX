@@ -12,6 +12,10 @@ source: "current" = the body active when the suite started (the default for any
 role the arm omits), "builtin" = the in-code default (POST .../prompt/reset),
 "file" = a template file relative to the arm file.
 
+An arm may also pin recorded lessons: "lessons": [12, 15] (lesson ids). The server
+must run with ARTEX_RSI_LESSONS=bench, where every new task gets exactly the pinned
+lessons and none when the list is empty. Baseline arms never carry lessons.
+
 Only the editable body (section [A], stored in agent_prompts) can be varied,
 through the server's own versioned prompt API. The code-owned tails, the
 adversarial and quality gates, scope checks, injection defenses and tool
@@ -64,7 +68,16 @@ def load_arm(path: str) -> dict:
     proposed = arm.get("proposed_from") or []
     if not isinstance(proposed, list) or not all(isinstance(x, str) for x in proposed):
         raise SystemExit(f"{path}: proposed_from must be a list of target ids")
-    return {"name": arm["name"], "proposed_from": proposed, "prompts": resolved, "file": str(p)}
+    return {"name": arm["name"], "proposed_from": proposed, "prompts": resolved,
+            "lessons": _lesson_ids(path, arm.get("lessons")), "file": str(p)}
+
+
+def _lesson_ids(path: str, raw) -> list[int]:
+    if raw is None:
+        return []
+    if not isinstance(raw, list) or not all(isinstance(x, int) and not isinstance(x, bool) and x > 0 for x in raw):
+        raise SystemExit(f"{path}: lessons must be a list of positive integer lesson ids")
+    return sorted(set(raw))
 
 
 def check_held_out(arm: dict, target_ids: list[str]) -> None:
@@ -76,11 +89,20 @@ def check_held_out(arm: dict, target_ids: list[str]) -> None:
 
 
 class PromptSwitch:
-    """Applies arms through the server's prompt API and restores the start state."""
+    """Applies arms through the server's prompt API and restores the start state.
 
-    def __init__(self, api):
+    With lessons=True (some arm pins lessons) it also drives /api/rsi/bench-lessons;
+    with lessons=False that endpoint is never called, so suites without lesson arms
+    run on any instance, whatever ARTEX_RSI_LESSONS says.
+    """
+
+    LESSONS_PATH = "/api/rsi/bench-lessons"
+
+    def __init__(self, api, lessons: bool = False):
         self.api = api
+        self.lessons = lessons
         self.start: dict[str, str] = {}
+        self.start_lessons: list[int] = []
         self.builtin: dict[str, str] = {}
 
     def current(self, role: str) -> str:
@@ -88,6 +110,11 @@ class PromptSwitch:
 
     def snapshot(self) -> None:
         self.start = {role: self.current(role) for role in ROLES}
+        if self.lessons:
+            self.start_lessons = sorted(self.api.get(self.LESSONS_PATH).get("lesson_ids") or [])
+
+    def _pin(self, ids: list[int]) -> dict:
+        return self.api.req("PUT", self.LESSONS_PATH, {"lesson_ids": ids})
 
     def _put(self, role: str, text: str, note: str) -> None:
         self.api.req("PUT", f"/api/agents/{role}/prompt", {"template": text, "note": note})
@@ -98,8 +125,12 @@ class PromptSwitch:
             self.builtin[role] = self.current(role)
         return self.builtin[role]
 
-    def apply(self, arm: dict) -> dict[str, str]:
-        """Make every role run the arm's body; returns {role: sha} read back from the server."""
+    def apply(self, arm: dict) -> dict:
+        """Make every role run the arm's body (and, with lessons on, its pinned lessons).
+
+        Returns what the server reports back: {"prompt_sha": {role: sha},
+        "lesson_ids": sorted ids ([] when lessons are off), "lessons_block_sha": str|None}.
+        """
         stamp = {}
         for role in ROLES:
             spec = arm["prompts"][role]
@@ -117,13 +148,26 @@ class PromptSwitch:
             if got != want:
                 raise SystemExit(f"{role}: server did not activate the arm body for {arm['name']!r}")
             stamp[role] = sha(got)
-        return stamp
+        applied = {"prompt_sha": stamp, "lesson_ids": [], "lessons_block_sha": None}
+        if self.lessons:
+            want_ids = list(arm.get("lessons") or [])
+            self._pin(want_ids)
+            back = self.api.get(self.LESSONS_PATH)
+            got_ids = sorted(back.get("lesson_ids") or [])
+            if got_ids != want_ids:
+                raise SystemExit(f"server pinned lessons {got_ids}, arm {arm['name']!r} wants {want_ids}")
+            applied.update(lesson_ids=got_ids, lessons_block_sha=back.get("block_sha"))
+        return applied
 
     def restore(self) -> None:
-        for role, text in self.start.items():
-            if self.current(role) == text:
-                continue
-            if text:
-                self._put(role, text, "bench restore")
-            else:  # no stored body at start: the built-in default is the equivalent state
-                self.api.post(f"/api/agents/{role}/prompt/reset", {})
+        try:
+            for role, text in self.start.items():
+                if self.current(role) == text:
+                    continue
+                if text:
+                    self._put(role, text, "bench restore")
+                else:  # no stored body at start: the built-in default is the equivalent state
+                    self.api.post(f"/api/agents/{role}/prompt/reset", {})
+        finally:
+            if self.lessons:
+                self._pin(self.start_lessons)

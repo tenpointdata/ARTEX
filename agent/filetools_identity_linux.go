@@ -56,7 +56,11 @@ func runWithFileIdentity(id FileToolIdentity, fn func()) error {
 // invalid id (-1) changes nothing and returns the current one.
 func enterFileIdentity(id FileToolIdentity) error {
 	uid, gid := int(id.UID), int(id.GID)
-	if err := unix.Setgroups([]int{gid}); err != nil {
+	want := make([]int, 0, len(id.groups()))
+	for _, g := range id.groups() {
+		want = append(want, int(g))
+	}
+	if err := unix.Setgroups(want); err != nil {
 		return fmt.Errorf("file tool identity: setgroups: %w", err)
 	}
 	_, _ = unix.SetfsgidRetGid(gid)
@@ -64,8 +68,25 @@ func enterFileIdentity(id FileToolIdentity) error {
 	curGID, _ := unix.SetfsgidRetGid(-1)
 	curUID, _ := unix.SetfsuidRetUid(-1)
 	groups, err := unix.Getgroups()
-	if err != nil || curUID != uid || curGID != gid || len(groups) != 1 || groups[0] != gid {
+	if err != nil || curUID != uid || curGID != gid || !sameGroups(groups, want) {
 		return fmt.Errorf("file tool identity %d:%d did not take effect (fsuid %d, fsgid %d, groups %v)", uid, gid, curUID, curGID, groups)
 	}
 	return nil
+}
+
+// sameGroups reports whether got and want hold the same groups.
+func sameGroups(got, want []int) bool {
+	if len(got) != len(want) {
+		return false
+	}
+	seen := make(map[int]bool, len(want))
+	for _, g := range want {
+		seen[g] = true
+	}
+	for _, g := range got {
+		if !seen[g] {
+			return false
+		}
+	}
+	return true
 }

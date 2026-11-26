@@ -50,6 +50,11 @@ type Server struct {
 	m      *Manager
 	engine *Engine
 	ctx    context.Context
+	node   NodeConfig // process role (node.go); zero value = RoleAll
+	// nodeRPC authenticates worker nodes' calls (node_rpc.go); control only.
+	nodeRPC *nodeRPCVerifier
+
+	changes changeHub // row-change fan-out for GET /api/events/stream (events_hub.go)
 
 	skillDir string // root directory for skill subdirectories
 	jwtKey   []byte // HS256 signing key loaded from / generated into keyDir/jwt.key
@@ -72,13 +77,17 @@ type Server struct {
 	authHashKey    string
 	authVersionKey string
 
+	ticketCursors  ticketCursors      // per-tracker ticket sync cursor (ticket_sync_run.go)
+	ticketWebhooks ticketWebhookGuard // in-flight cap + delivery replay window (ticket_webhook.go)
+
 	// Test-only seams for pgListModels SSRF checks. All remain zero/nil in
 	// production (strict public-only default; only exact host:port entries in
 	// ARTEX_LLM_PRIVATE_ENDPOINTS may resolve to private addresses).
 	allowLoopbackModels bool
-	modelLookupIP       func(ctx context.Context, host string) ([]netip.Addr, error)
-	modelDialContext    func(ctx context.Context, network, addr string) (net.Conn, error)
-	modelRootCAs        *x509.CertPool
+
+	modelLookupIP    func(ctx context.Context, host string) ([]netip.Addr, error)
+	modelDialContext func(ctx context.Context, network, addr string) (net.Conn, error)
+	modelRootCAs     *x509.CertPool
 
 	loginLimit     *loginLimiter  // per-IP attempt limit on POST /api/auth/login
 	pwdLimit       *loginLimiter  // attempt limit on POST /api/auth/change-password (IP + session token)
@@ -207,6 +216,14 @@ func New(ctx context.Context, m *Manager, skillDir string, dataDir string, keyDi
 	for _, o := range opts {
 		o(s)
 	}
+	if s.node.Role == "" {
+		s.node = NodeConfig{Role: RoleAll, Workers: -1}
+	}
+	s.engine.node = s.node
+	worker := s.node.Role == RoleWorker
+	if s.node.Role == RoleControl {
+		s.nodeRPC = newNodeRPCVerifier(db.NodeRPCKey)
+	}
 	s.initSetupToken()
 	s.loadPasswordVersion()
 	s.initSideQuestions()
@@ -275,21 +292,26 @@ func New(ctx context.Context, m *Manager, skillDir string, dataDir string, keyDi
 			}
 			return a.TaskTimeoutWrapupMaxTurns, true
 		})
-		wireAgentAugment(m.pg, s.skillDir, s.hostTools, s.execPriv) // wire visible skills/MCP + traffic/orchestration host tools into the agent toolset
+		wireAgentAugment(m.pg, s.skillDir, s.hostTools, s.execPriv, m.scopeMCPProxy) // wire visible skills/MCP + traffic/orchestration host tools into the agent toolset
 		domainReg := buildDomainReg(m.Assets())
 		wireTools(m.pg, domainReg)   // built-in tools table: filter per agent + override description/schema + inject defaults
-		seedPrompts(m.pg)            // seed built-in agent default prompt bodies into agent_prompts (only when empty)
 		warnBrokenSkills(s.skillDir) // surface skills whose frontmatter silently failed to parse
-		s.seedOrchestrationTools()   // seed P2 cross-task orchestration tools into the tools table (bindable per agent)
-		if err := s.seedFindingRetester(); err != nil {
-			log.Printf("[retester] seed: %v", err)
+		// A worker node (E7) only executes intents: seeding, evidence GC, the
+		// trigger scheduler and the push notifier belong to the control node.
+		if !worker {
+			seedPrompts(m.pg)          // seed built-in agent default prompt bodies into agent_prompts (only when empty)
+			s.seedOrchestrationTools() // seed P2 cross-task orchestration tools into the tools table (bindable per agent)
+			if err := s.seedFindingRetester(); err != nil {
+				log.Printf("[retester] seed: %v", err)
+			}
+			go s.evidenceStore().RunGC(s.ctx)
+			s.seedPythonInterpreter()     // custom script tool: detect the python interpreter at boot and store it (only when empty)
+			go newScheduler(s).Run(s.ctx) // P3 trigger scheduling (scheduled/finding/goal events), custom agents only
+			// Vulnerability IM push delivery engine. Sits beside the Scheduler but independent: push latency demands (3s)
+			// differ from the triggers' business cadence, and neither's failures drag the other down — a stuck push must not affect agent triggers.
+			go newNotifier(s).Run(s.ctx)
+			go newTicketSyncRunner(s).Run(s.ctx) // background ticket sync; off unless ticket_sync_interval_min > 0
 		}
-		go s.evidenceStore().RunGC(s.ctx)
-		s.seedPythonInterpreter()     // custom script tool: detect the python interpreter at boot and store it (only when empty)
-		go newScheduler(s).Run(s.ctx) // P3 trigger scheduling (scheduled/finding/goal events), custom agents only
-		// Vulnerability IM push delivery engine. Sits beside the Scheduler but independent: push latency demands (3s)
-		// differ from the triggers' business cadence, and neither's failures drag the other down — a stuck push must not affect agent triggers.
-		go newNotifier(s).Run(s.ctx)
 		logSink.SetDB(ctx, m.pg) // restore last 100 log rows and enable async persistence
 	}
 	// precedence: persisted DB config > env.
@@ -320,10 +342,22 @@ func New(ctx context.Context, m *Manager, skillDir string, dataDir string, keyDi
 	// Fill the tool cache for any enabled MCP that has none yet (notably the
 	// seeded browser MCP on first run). Async so it never blocks startup.
 	go s.discoverEmptyMCPsOnStartup()
+	s.wireInterceptReviewer() // LLM fallback approval: commands that hit no interception rule go to the model for judgment
+	if m.pg != nil && ctx.Err() == nil {
+		go s.runNodeHeartbeat(ctx)
+	}
+	if worker {
+		s.startWorkerNode() // claims intents of every running task (worker_node.go)
+		return s
+	}
+	if s.node.Role == RoleControl && m.pg != nil {
+		if err := publishBudgets(m.pg); err != nil {
+			log.Printf("[node] publish run budgets: %v (worker nodes claim nothing until they can read them)", err)
+		}
+	}
 	s.restoreTaskRuntimes()
 	go s.reconcileConcurrency()
 	s.startTaskArchiveWorker()
-	s.wireInterceptReviewer() // LLM fallback approval: commands that hit no interception rule go to the model for judgment
 	return s
 }
 
@@ -434,6 +468,7 @@ func (s *Server) loadLLMConfig() (agent.Config, bool) {
 	cfg.SessionHeaderKey = p.SessionHeaderKey
 	cfg.UserAgent = p.UserAgent
 	cfg.CustomHeaders = p.CustomHeaders
+	cfg.Sampling = p.Sampling
 	s.applyProfileRetry(&cfg, p)
 	// Ollama profiles run keyless (local server); the other formats need a key.
 	if cfg.APIKey == "" && cfg.NeedsAPIKey() {
@@ -462,6 +497,7 @@ func (s *Server) saveLLMConfig(cfg agent.Config) error {
 	var sessionHeaderKey string
 	var userAgent string
 	var retry db.RetryOverride
+	var sampling db.Sampling
 	clearCustomHeaders := format != "bedrock-gateway"
 	if profs, _ := s.m.pg.ListProfiles(); profs != nil {
 		for _, p := range profs {
@@ -476,6 +512,7 @@ func (s *Server) saveLLMConfig(cfg agent.Config) error {
 				sessionHeaderKey = p.SessionHeaderKey
 				userAgent = p.UserAgent
 				retry = p.Retry
+				sampling = p.Sampling
 				break
 			}
 		}
@@ -487,6 +524,7 @@ func (s *Server) saveLLMConfig(cfg agent.Config) error {
 		Priority: priority, PoolExclude: poolExclude, Streaming: streaming,
 		MaxTokens: maxTokens, MaxTokensField: maxTokensField, SessionHeaderKey: sessionHeaderKey, UserAgent: userAgent,
 		Retry: retry, CustomHeaders: cfg.CustomHeaders, ClearCustomHeaders: clearCustomHeaders,
+		Sampling: sampling,
 	})
 	if err != nil {
 		return err
@@ -583,6 +621,7 @@ func (s *Server) applyLLM(cfg agent.Config) error {
 	// (backend/key) and gates Enabled per-conversation-agent at Chat time. Conversations always use the active profile.
 	s.chatAgent = agent.NewChatAgent(prov, cfg.Model, s.m.dir, tx, win) // chat page runner
 	s.chatAgent.SetProxy(s.m.ProxyAddr(), s.m.ProxyCACert())
+	s.chatAgent.SetProxyResolver(s.m.ScopedProxyAddr) // per conversation: its scope token (proxy_scope.go)
 	s.chatAgent.SetWebSearch(s.m.WebSearchOpts())
 	s.chatAgent.SetGuard(s.chatGuard())
 	s.chatAgent.SetNonStreaming(nonStreamingResolver(cfg))
@@ -620,6 +659,7 @@ func (s *Server) loadProfileConfig(id int64) (agent.Config, bool) {
 	cfg.SessionHeaderKey = p.SessionHeaderKey
 	cfg.UserAgent = p.UserAgent
 	cfg.CustomHeaders = p.CustomHeaders
+	cfg.Sampling = p.Sampling
 	s.applyProfileRetry(&cfg, p)
 	if cfg.APIKey == "" && cfg.NeedsAPIKey() {
 		return cfg, false
@@ -728,6 +768,7 @@ func (s *Server) chatAgentForProfile(id int64) *agent.ChatAgent {
 	tx := transcript.NewStore(filepath.Join(s.m.dir, "transcripts"))
 	ca := agent.NewChatAgent(s.poolForBinding(id, prov, cfg), cfg.Model, s.m.dir, tx, cfg.CompactionWindow())
 	ca.SetProxy(s.m.ProxyAddr(), s.m.ProxyCACert())
+	ca.SetProxyResolver(s.m.ScopedProxyAddr) // per conversation: its scope token (proxy_scope.go)
 	ca.SetWebSearch(s.m.WebSearchOpts())
 	ca.SetGuard(s.chatGuard())
 	ca.SetNonStreaming(nonStreamingResolver(cfg))
@@ -776,13 +817,19 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/auth/change-password", s.authChangePassword)
 
 	mux.HandleFunc("GET /api/health", s.health)
+	if s.nodeRPC != nil {
+		mux.HandleFunc("POST "+nodeRPCPrefix+"{op}", s.handleNodeRPC)
+	}
 	mux.HandleFunc("GET /api/ready", s.ready)
 	mux.HandleFunc("GET /api/stats", s.stats)
 	mux.HandleFunc("GET /api/logs", s.getLogs)
 	mux.HandleFunc("GET /api/logs/history", s.getLogsHistory)
 	mux.HandleFunc("GET /api/logs/stream", s.streamLogs)
+	mux.HandleFunc("GET /api/events/stream", s.streamEvents)
 
 	mux.HandleFunc("GET /api/tasks", s.listTasks)
+	mux.HandleFunc("GET /api/me/companies", s.myCompanies)
+	mux.HandleFunc("GET /api/me/tasks", s.myTasks)
 	mux.HandleFunc("POST /api/tasks", s.createTask)
 	mux.HandleFunc("GET /api/skill-gaps", s.skillGaps)
 	mux.HandleFunc("GET /api/task-categories", s.pgListTaskCategories)
@@ -798,6 +845,18 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/tasks/{id}/outcome", s.taskOutcome)
 	mux.HandleFunc("GET /api/tasks/{id}/lessons", s.taskLessons)
 	mux.HandleFunc("POST /api/tasks/{id}/lessons/extract", s.extractTaskLessons)
+	// RSI benchmark gate (RSI.md; server/rsi_loop.go)
+	mux.HandleFunc("GET /api/rsi/status", s.rsiStatus)
+	mux.HandleFunc("GET /api/rsi/log", s.rsiLog)
+	mux.HandleFunc("GET /api/rsi/proposals", s.rsiListProposals)
+	mux.HandleFunc("POST /api/rsi/proposals", s.rsiCreateProposal)
+	mux.HandleFunc("GET /api/rsi/proposals/{id}", s.rsiGetProposal)
+	mux.HandleFunc("POST /api/rsi/proposals/{id}/evidence", s.rsiAddEvidence)
+	mux.HandleFunc("POST /api/rsi/proposals/{id}/adopt", s.rsiAdopt)
+	mux.HandleFunc("POST /api/rsi/proposals/{id}/reject", s.rsiReject)
+	mux.HandleFunc("POST /api/rsi/proposals/{id}/rollback", s.rsiRollback)
+	mux.HandleFunc("GET /api/rsi/bench-lessons", s.getBenchLessons)
+	mux.HandleFunc("PUT /api/rsi/bench-lessons", s.putBenchLessons)
 	mux.HandleFunc("PATCH /api/tasks/{id}", s.updateTaskMetadata)
 	mux.HandleFunc("PATCH /api/tasks/{id}/category", s.updateTaskCategory)
 	// task-level asset interception/allow rules
@@ -821,6 +880,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("DELETE /api/task-archives/{id}", s.queueTaskArchiveDelete)
 	mux.HandleFunc("POST /api/task-archives/delete/batch", s.deleteTaskArchivesBatch)
 	mux.HandleFunc("GET /api/tasks/{id}/coverage", s.taskCoverage)
+	mux.HandleFunc("GET /api/methodologies", s.listMethodologies)
 	mux.HandleFunc("GET /api/tasks/{id}/coverage-graph", s.taskCoverageGraph)
 	mux.HandleFunc("GET /api/tasks/{id}/asset-refs", s.taskAssetRefs)
 	mux.HandleFunc("POST /api/tasks/{id}/assets", s.attachTaskAssets)
@@ -918,6 +978,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/traffic/replay", s.replayTraffic)
 	mux.HandleFunc("POST /api/traffic/import/har", s.importTrafficHAR)
 	mux.HandleFunc("GET /api/traffic/export/har", s.exportTrafficHAR)
+	mux.HandleFunc("POST /api/traffic/bulk-delete", s.bulkDeleteTraffic)
+	mux.HandleFunc("POST /api/traffic/bulk-export", s.bulkExportTrafficHAR)
 	mux.HandleFunc("GET /api/commands", s.pgListCommands)
 	mux.HandleFunc("GET /api/commands/stats", s.pgToolStats) // aggregate call counts per tool
 	mux.HandleFunc("GET /api/llm/records", s.pgListLLMRecords)
@@ -929,6 +991,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/settings", s.getSettings)
 	mux.HandleFunc("PUT /api/settings", s.putSettings)
 	mux.HandleFunc("GET /api/settings/noise", s.noiseStatus) // current noise profile + per-host counters (no reset)
+	mux.HandleFunc("GET /api/settings/nodes", s.listNodes)   // control and worker nodes sharing this database (E7)
 	// Vulnerability IM push. Channels are "multi-instance + per-instance filter rules" resources, so they get their own group of
 	// REST endpoints instead of being stuffed into the flat /api/settings key-value store.
 	mux.HandleFunc("GET /api/notify/meta", s.notifyMeta)
@@ -939,6 +1002,18 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/notify/channels/{id}/test", s.notifyTestChannel)
 	mux.HandleFunc("GET /api/notify/deliveries", s.notifyListDeliveries)
 	mux.HandleFunc("POST /api/notify/deliveries/{id}/retry", s.notifyRetryDelivery)
+	// E2 integrations: ticket trackers (findings out) and scanner imports (data in).
+	mux.HandleFunc("GET /api/integrations/meta", s.trackersMeta)
+	mux.HandleFunc("GET /api/integrations/trackers", s.listTrackers)
+	mux.HandleFunc("POST /api/integrations/trackers", s.createTracker)
+	mux.HandleFunc("PATCH /api/integrations/trackers/{id}", s.updateTracker)
+	mux.HandleFunc("DELETE /api/integrations/trackers/{id}", s.deleteTracker)
+	mux.HandleFunc("POST /api/integrations/trackers/{id}/push", s.pushTickets)
+	mux.HandleFunc("POST /api/integrations/trackers/{id}/sync", s.syncTickets)
+	mux.HandleFunc("POST "+ticketWebhookPrefix+"{id}", s.ticketWebhook) // public: HMAC-authenticated (requireAuth exempts it)
+	mux.HandleFunc("GET /api/integrations/imports", s.listScanImports)
+	mux.HandleFunc("POST /api/integrations/imports", s.importScan)
+	mux.HandleFunc("GET /api/exploration/findings/{id}/integrations", s.findingIntegrations)
 	mux.HandleFunc("POST /api/settings/web-search/test", s.testWebSearch)
 	mux.HandleFunc("GET /api/report", s.getReport)
 	mux.HandleFunc("GET /api/chat/mentions", s.searchChatMentions)
@@ -1085,6 +1160,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/intercept/judge", s.interceptGetJudgeConfig)
 	mux.HandleFunc("PUT /api/intercept/judge", s.interceptSetJudgeConfig)
 	mux.HandleFunc("GET /api/intercept/judge/usage", s.interceptJudgeUsage) // cumulative token usage of fallback approval
+	s.registerGovernanceRoutes(mux)
+	s.registerRBACRoutes(mux)
 
 	// /api/* goes through CORS + JWT; everything else is served by the embedded
 	// frontend (public — auth is enforced client-side and on the API). With the
@@ -1127,12 +1204,15 @@ func (s *Server) stats(w http.ResponseWriter, r *http.Request) {
 	out := map[string]any{}
 	out["engine_mode"] = "idle"              // spec enum; overridden below when a task is active
 	out["llm_configured"] = s.engine.Ready() // is an LLM provider installed at all
-	if tr := s.m.Traffic(); tr != nil {
+	_, client := clientScopeFrom(r.Context())
+	// Traffic and asset totals span every client; a client account gets only
+	// its task's fields below (its binder already admitted ?task).
+	if tr := s.m.Traffic(); tr != nil && !client {
 		c, _ := tr.Count()
 		out["traffic"] = c
 		out["traffic_enabled"] = true
 	}
-	if counts, err := s.m.Assets().CountsByType(); err == nil {
+	if counts, err := s.m.Assets().CountsByType(); err == nil && !client {
 		total := 0
 		for _, n := range counts {
 			total += n
@@ -1767,6 +1847,7 @@ type createTaskReq struct {
 	PlanQuietMode        *bool    `json:"plan_quiet_mode,omitempty"`   // planner quiet-mode switch (#86); omitted = default on; false = edge rounds always plan
 	TargetGate           *bool    `json:"target_gate,omitempty"`       // approval gate for asset targets, opt-in; omitted/null = off
 	SeedFirstIntent      *bool    `json:"seed_first_intent,omitempty"` // issue one seed intent at creation (content = description + goal) so a worker can start right away without waiting for the first planner round; omitted/null = default off, the standard plan-then-execute flow. Pass true explicitly to enable (for CTF tasks often solved in one work, this skips the pre-start planner round).
+	Methodologies        []string `json:"methodologies,omitempty"`     // testing methodology ids (GET /api/methodologies) the task is checked against; omitted/empty = automatic, derived from the goal and description
 	CoverageEnabled      *bool    `json:"coverage_enabled,omitempty"`  // asset coverage feature; omitted/null = default on (true). false = disables coverage calculation/display/auto-accumulated scope + hides add_task_scope/list_untested_assets. company links are unaffected.
 	// InterceptRules: task-level asset interception/allow rules (entered at creation, stored in task_intercept_rules, never the global table).
 	InterceptRules []taskInterceptRuleReq `json:"intercept_rules,omitempty"`
@@ -1840,6 +1921,7 @@ func (s *Server) createTask(w http.ResponseWriter, r *http.Request) {
 		SourceTaskIDs: sourceIDs, CompanyIDs: req.CompanyIDs, LLMProfileIDs: req.LLMProfileIDs,
 		TimeoutSeconds: req.TimeoutSeconds, PlanHeartbeatSeconds: req.PlanHeartbeatSeconds, PlanQuietMode: req.PlanQuietMode,
 		CoverageEnabled: req.CoverageEnabled,
+		Methodologies:   req.Methodologies,
 		InterceptRules:  interceptRules,
 		LLMRotate:       req.LLMRotate,
 		TargetGate:      req.TargetGate,
@@ -1851,6 +1933,10 @@ func (s *Server) createTask(w http.ResponseWriter, r *http.Request) {
 		}
 		if errors.Is(err, db.ErrTaskCompanyIDsInvalid) || errors.Is(err, db.ErrTaskCompanyNotFound) {
 			writeErr(w, 400, "linked company not found or invalid")
+			return
+		}
+		if errors.Is(err, db.ErrTaskMethodologyUnknown) {
+			writeErr(w, 400, err.Error())
 			return
 		}
 		writeErr(w, 500, err.Error())
@@ -2141,6 +2227,11 @@ func (s *Server) taskCoverage(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 500, "coverage ledger query failed")
 		return
 	}
+	if cov.Methodologies, err = as.MethodologyCoverage(taskID); err != nil {
+		log.Printf("[coverage] methodology query failed for task %d: %v", taskID, err)
+		writeErr(w, 500, "methodology coverage query failed")
+		return
+	}
 	writeJSON(w, 200, cov)
 }
 
@@ -2300,7 +2391,7 @@ func (s *Server) findings(w http.ResponseWriter, r *http.Request) {
 		// same compat policy as the intents endpoint). Filtering/sorting is pushed down to SQL uniformly, and the bare
 		// array honours the filters too: the dashboard narrows by the active company through asset_scope.
 		if q.Get("page") == "" && q.Get("limit") == "" {
-			fs, _ := s.m.pg.ListFindingsFiltered(findingFilterFromQuery(q), 500)
+			fs, _ := s.m.pg.ListFindingsFiltered(clientFindingFilter(r, findingFilterFromQuery(q)), 500)
 			assets := s.resolveFindingAssets(fs)
 			out := make([]FindingDTO, 0, len(fs))
 			for _, f := range fs {
@@ -2311,7 +2402,7 @@ func (s *Server) findings(w http.ResponseWriter, r *http.Request) {
 		}
 		page := findingPaginationParam(q.Get("page"), 1, 0)
 		limit := findingPaginationParam(q.Get("limit"), 20, 200)
-		fs, total, err := s.m.pg.ListFindingsPage(findingFilterFromQuery(q), page, limit)
+		fs, total, err := s.m.pg.ListFindingsPage(clientFindingFilter(r, findingFilterFromQuery(q)), page, limit)
 		if err != nil {
 			writeErr(w, 500, err.Error())
 			return
@@ -2429,7 +2520,7 @@ func (s *Server) resolveAssetIDs(ids []int64) map[int64]*db.Asset {
 // for the paginated Findings page.
 func (s *Server) findingStats(w http.ResponseWriter, r *http.Request) {
 	// company narrows the cards to the sidebar's company, with the list's rule.
-	st, err := s.m.pg.FindingStatsForCompany(r.URL.Query().Get("company"))
+	st, err := s.m.pg.FindingStatsFor(clientFindingFilter(r, db.FindingFilter{Company: r.URL.Query().Get("company")}))
 	if err != nil {
 		writeErr(w, 500, err.Error())
 		return
@@ -2506,9 +2597,10 @@ func (s *Server) findingsExport(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	case "all":
-		// empty filter = no conditions added.
+		// empty filter = no conditions added (a client account: its company).
+		filter = clientFindingFilter(r, db.FindingFilter{})
 	case "filtered", "":
-		filter = findingFilterFromQuery(q)
+		filter = clientFindingFilter(r, findingFilterFromQuery(q))
 	default:
 		writeErr(w, 400, "bad scope: "+scope)
 		return
@@ -3434,13 +3526,9 @@ func (s *Server) streamLogs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	since := int64(atoiDefault(r.URL.Query().Get("since"), 0))
-	w.Header().Set("Content-Type", "text/event-stream")
-	w.Header().Set("Cache-Control", "no-cache")
-	w.Header().Set("Connection", "keep-alive")
-	w.Header().Set("X-Accel-Buffering", "no")
-
 	ch, unsub := logSink.subscribe()
 	defer unsub()
+	openSSE(w, flusher)
 	send := func(l LogLine) {
 		b, _ := json.Marshal(l)
 		fmt.Fprintf(w, "data: %s\n\n", b)
@@ -3517,15 +3605,11 @@ func (s *Server) streamActivity(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	w.Header().Set("Content-Type", "text/event-stream")
-	w.Header().Set("Cache-Control", "no-cache")
-	w.Header().Set("Connection", "keep-alive")
-	w.Header().Set("X-Accel-Buffering", "no") // disable proxy buffering
-
 	// Subscribe BEFORE replaying history so events in between aren't lost; dedup the
 	// overlap by skipping channel events whose id was already replayed.
 	ch, unsub := s.engine.Broadcaster().Subscribe(t.ID)
 	defer unsub()
+	openSSE(w, flusher)
 
 	// Emit a standard SSE id: line so the browser echoes it as Last-Event-ID on
 	// auto-reconnect (see cursor precedence above).
@@ -3951,6 +4035,8 @@ func (s *Server) settingsPayload() map[string]any {
 		"notify_enabled":             s.m.pg.GetBool(settingNotifyEnabled, true),
 		"notify_public_base_url":     notifyPublicBaseURL(s.m.pg),
 		"notify_digest_interval_min": notifyDigestIntervalMin(s.m.pg),
+		// Background ticket sync period in minutes; 0 = off (sync only on request).
+		"ticket_sync_interval_min": ticketSyncInterval(s.m.pg),
 		// Render limits of IM messages; 0 = no truncation.
 		"notify_summary_max_runes": limits.SummaryRunes,
 		"notify_assets_max_shown":  limits.AssetsShown,
@@ -4030,6 +4116,8 @@ func (s *Server) putSettings(w http.ResponseWriter, r *http.Request) {
 		NotifyEnabled    *bool   `json:"notify_enabled"`
 		NotifyBaseURL    *string `json:"notify_public_base_url"`
 		NotifyDigestMins *int    `json:"notify_digest_interval_min"`
+		// Background ticket sync period (minutes, 0 = off); the runner re-reads it every tick.
+		TicketSyncMins *int `json:"ticket_sync_interval_min"`
 		// Render limits of IM messages: summary characters (0-4000) and asset names listed (0-50); 0 = no truncation.
 		NotifySummaryMaxRunes *int `json:"notify_summary_max_runes"`
 		NotifyAssetsMaxShown  *int `json:"notify_assets_max_shown"`
@@ -4103,6 +4191,16 @@ func (s *Server) putSettings(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if err := s.m.pg.SetSetting(settingNotifyDigestMinutes, strconv.Itoa(*req.NotifyDigestMins)); err != nil {
+			writeErr(w, 500, err.Error())
+			return
+		}
+	}
+	if req.TicketSyncMins != nil {
+		if *req.TicketSyncMins < 0 || *req.TicketSyncMins > ticketSyncIntervalMax {
+			writeErr(w, 400, fmt.Sprintf("ticket sync interval must be between 0 (off) and %d minutes", ticketSyncIntervalMax))
+			return
+		}
+		if err := s.m.pg.SetSetting(settingTicketSyncInterval, strconv.Itoa(*req.TicketSyncMins)); err != nil {
 			writeErr(w, 500, err.Error())
 			return
 		}
@@ -4223,6 +4321,11 @@ func (s *Server) putSettings(w http.ResponseWriter, r *http.Request) {
 		changed = true
 	}
 	if changed {
+		// Worker nodes build their own agents from the same settings rows: the
+		// revision tells them to reload and rebuild (followAgentSettings).
+		if _, err := s.m.pg.BumpSettingsRevision(db.AgentSettingsRevisionKey); err != nil {
+			log.Printf("[settings] agent settings revision not bumped; worker nodes keep their agents until restart: %v", err)
+		}
 		// rebuild agents so the new proxy/tools/prompt/web-search take hold (only if LLM configured).
 		s.cfgMu.Lock()
 		cfg, on := s.llmCfg, s.llmOn
@@ -4542,11 +4645,17 @@ func (s *Server) getReport(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	findings, _ := t.Store.ListByKind(db.KindFinding, 1000) // pure vulnerabilities (facts are a separate KindFact and never enter the report)
+	assetTypes := []string{"root_domain", "ip", "subdomain", "app", "service", "endpoint"}
 	counts := map[string]int{}
-	for _, ty := range []string{"root_domain", "ip", "subdomain", "app", "service", "endpoint"} {
-		ns, _ := s.m.Assets().QueryByType(ty, 100000, 0)
-		if len(ns) > 0 {
-			counts[ty] = len(ns)
+	if sc, ok := clientScopeFrom(r.Context()); ok {
+		// A client sees its own companies' assets, not the whole inventory.
+		counts = s.clientAssetCounts(sc.TaskCompanies, assetTypes)
+	} else {
+		for _, ty := range assetTypes {
+			ns, _ := s.m.Assets().QueryByType(ty, 100000, 0)
+			if len(ns) > 0 {
+				counts[ty] = len(ns)
+			}
 		}
 	}
 	taskID, _ := strconv.ParseInt(t.ID, 10, 64)

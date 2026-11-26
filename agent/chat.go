@@ -31,6 +31,7 @@ type ChatAgent struct {
 	tx             *transcript.Store
 	window         int
 	proxyAddr      string
+	proxyFor       func(context.Context) string // resolver: the proxy URL of the run on ctx (nil = proxyAddr)
 	proxyCACert    string
 	webSearch      WebSearchOpts
 	guard          *guard.Guard // optional; nil disables intercept hooks for chat
@@ -68,6 +69,20 @@ func (c *ChatAgent) maxTokens() int {
 // SetProxy points the chat agent's WebFetch/Bash at the recording proxy plus the
 // CA cert it trusts (empty addr = direct). Kept for parity with the other agents.
 func (c *ChatAgent) SetProxy(addr, caCert string) { c.proxyAddr, c.proxyCACert = addr, caCert }
+
+// SetProxyResolver wires a resolver for the proxy URL of the run on a context.
+// One chat agent serves many conversations, so the URL that carries a
+// conversation's proxy scope is resolved per Chat call; it takes precedence
+// over the SetProxy address. nil = the SetProxy address.
+func (c *ChatAgent) SetProxyResolver(fn func(context.Context) string) { c.proxyFor = fn }
+
+// proxy is the proxy URL for the run on ctx.
+func (c *ChatAgent) proxy(ctx context.Context) string {
+	if c.proxyFor != nil {
+		return c.proxyFor(ctx)
+	}
+	return c.proxyAddr
+}
 
 // SetWebSearch selects the web_search backend for the chat agent (off by default).
 func (c *ChatAgent) SetWebSearch(o WebSearchOpts) { c.webSearch = o }
@@ -165,11 +180,12 @@ func (c *ChatAgent) Chat(ctx context.Context, agentKey, sessionID, message strin
 	defer cleanup()
 
 	system, boundary := deferredSystem(chatSystem(agentKey, c.workDir, sessionWorkDir), def)
+	proxy := c.proxy(ctx) // this conversation's scope rides on its proxy credential
 	opts := agentcore.Options{
 		Provider:        c.prov,
 		SystemPrompt:    system,
 		DynamicBoundary: boundary,
-		Tools:           withWebFetch(ctx, tools, c.proxyAddr, c.proxyCACert), // WebFetch: routed through the recording proxy for tracing; loads the proxy CA to verify MITM-resigned HTTPS certificates; every redirect hop is gated
+		Tools:           withWebFetch(ctx, tools, proxy, c.proxyCACert), // WebFetch: routed through the recording proxy for tracing; loads the proxy CA to verify MITM-resigned HTTPS certificates; every redirect hop is gated
 		DeferredTools:   def.Deferred,
 		UnlockSet:       def.Unlock,
 		PermissionMode:  permission.ModeBypass,
@@ -185,7 +201,7 @@ func (c *ChatAgent) Chat(ctx context.Context, agentKey, sessionID, message strin
 		DeepSeekSearchAPIKey:  ws.DeepSeekAPIKey,
 		DeepSeekSearchModel:   ws.DeepSeekModel,
 		WebSearchProxy:        ws.Proxy,
-		BashEnv:               proxyEnv(c.proxyAddr, c.proxyCACert), // Bash subcommands go through the proxy + trust the CA by default
+		BashEnv:               proxyEnv(proxy, c.proxyCACert), // Bash subcommands go through the proxy + trust the CA by default
 		WorkingDir:            sessionWorkDir,
 		MaxTurns:              maxTurns,
 		MaxDuration:           maxDuration,

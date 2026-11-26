@@ -18,6 +18,14 @@ improver) comes from the awesome-rsi list (lobehub).
 | unset / `off` | no selection, no logging, no prompt change (default) |
 | `shadow` | select lessons and log what would have been shown, without injecting |
 | `inject` | select, log, and append the block to the planner and worker system prompts |
+| `adopted` | as `inject`, but only lessons an owner graduated through the benchmark gate (status `adopted`) |
+| `bench` | benchmark instance only: inject exactly the set pinned with `PUT /api/rsi/bench-lessons`, ignoring scope; nothing when the pin is empty |
+
+`adopted` and `bench` log usage as `inject`. Graduation (candidate → adopted) is
+an RSI proposal with `surface: "lesson"`: it needs held-out benchmark evidence
+from a suite whose candidate arm pinned exactly those lessons and whose baseline
+pinned none, then one owner action (password). Rollback returns the lessons to
+`candidate`. See `RSI.md`, "Benchmark gate (built)".
 
 The block is code-owned: it is appended after the rendered prompt, so editing
 the agent prompt in the UI cannot remove it. Changing the flag affects new
@@ -108,7 +116,8 @@ What this layer deliberately does not do:
 
 - no LLM summarization in this phase: rules only, so every lesson traces to a
   finding or retest id;
-- no prompt mutation, no benchmark probing, no lesson editing through the UI;
+- no prompt mutation and no lesson editing through the UI; the only path to
+  `adopted` is the benchmark gate (`server/rsi_loop.go`);
 - `status` starts as `candidate`. Extraction auto-retires a lesson when its last
   evidence is retracted. It un-retires only a retired lesson with no remaining
   evidence. Adopted stays adopted; a retired lesson that still has evidence

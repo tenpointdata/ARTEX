@@ -1,0 +1,6 @@
+{
+  "count": %d,
+  "next": null,
+  "previous": null,
+  "results": [%s]
+}

@@ -238,7 +238,7 @@ func fileToolIsolationFailures(secrets []string) []string {
 			continue
 		}
 		var openErr error
-		if err := agent.RunAsFileToolIdentity(func() {
+		if err := agent.RunAsFileToolIdentity("", func() {
 			f, err := os.Open(path)
 			if err == nil {
 				f.Close()
@@ -255,12 +255,19 @@ func fileToolIsolationFailures(secrets []string) []string {
 	return failures
 }
 
+// isolationProbeBinary is the executable the probe runs as (see runIsolationProbe).
+var isolationProbeBinary = os.Executable
+
 // runIsolationProbe starts the probe the way the agent's Bash starts: "bash" looked
 // up on PATH, where InstallBashShim put the shim that drops to the executor. bash
 // then execs this binary as the probe, which gets the spec on stdin.
+//
+// The binary is isolationProbeBinary: this executable in production. A test
+// points it at a copy the executor can run, since `go test` builds into a
+// root-only directory.
 func runIsolationProbe(spec isolationProbeSpec) (isolationProbeReport, error) {
 	var rep isolationProbeReport
-	self, err := os.Executable()
+	self, err := isolationProbeBinary()
 	if err != nil {
 		return rep, err
 	}

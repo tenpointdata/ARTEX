@@ -1,27 +1,92 @@
-# ARTEX Tencent TSec Benchmark evaluation image — one-command local build + run.
-# Independent of the production docker-compose.yml (multi-service: artex+postgres).
-# Usage:
-#   cp bench/.env.example bench/.env   # fill in LLM_API_KEY / BENCHMARK_TOKEN etc.
-#   docker compose -f docker-compose.bench.yml up --build      # build and run in the foreground (watch logs)
-#   docker compose -f docker-compose.bench.yml up --build -d   # background
-#   docker compose -f docker-compose.bench.yml logs -f
-#   docker compose -f docker-compose.bench.yml down            # stop (add -v to also delete the data volume)
-# Browser: http://localhost:8787 (log in with ADMIN_PASSWORD)
+# ARTEX benchmark subject instance: the instance scripts/benchmark measures.
+#
+# Reproducible from a clean clone. The image is built from the production
+# Dockerfile, so the benchmark measures the product as shipped, and nothing it
+# needs is gitignored. The only local input is bench/.env, copied from the
+# committed bench/.env.example.
+#
+#   cp bench/.env.example bench/.env        # set ARTEX_PG_PASSWORD and an LLM key
+#   docker compose -f docker-compose.bench.yml up --build -d
+#   docker compose -f docker-compose.bench.yml logs artex-bench | grep "Setup token"
+#   docker compose -f docker-compose.bench.yml down        # -v also drops the database
+#
+# Open http://localhost:8787 (ARTEX_BENCH_PORT) and finish setup with the token.
+# The runner can mint its API token from the server's jwt.key (ARTEX_JWT_KEY):
+#   docker compose -f docker-compose.bench.yml cp artex-bench:/app/keys/jwt.key bench/jwt.key
+# See scripts/benchmark/README.md.
+#
+# Its own compose project (artex-bench) and volumes, so it never shares state with a
+# production instance on the host.
+
+name: artex-bench
 
 services:
+  postgres:
+    image: postgres:16-alpine@sha256:f2f98726820d0342055351c6e9d36e705f5bfffb3dd53ff556325114b08afb6d
+    env_file:
+      - bench/.env
+    environment:
+      POSTGRES_USER: artex
+      POSTGRES_DB: artex
+      # SCRAM for every TCP connection, as in docker-compose.yml: the server's
+      # isolation self-test checks that an agent cannot connect without it.
+      POSTGRES_HOST_AUTH_METHOD: scram-sha-256
+    # One password setting in bench/.env (ARTEX_PG_PASSWORD) serves both services:
+    # bench/.env is not read for ${} interpolation, so the database takes it here.
+    entrypoint:
+      - sh
+      - -c
+      - 'export POSTGRES_PASSWORD="$${ARTEX_PG_PASSWORD:?set ARTEX_PG_PASSWORD in bench/.env}"; exec docker-entrypoint.sh postgres'
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U artex -d artex"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: "no"
+
   artex-bench:
     build:
       context: .
-      dockerfile: Dockerfile.bench
-    image: artex-bench:latest
-    container_name: artex-bench
+      dockerfile: Dockerfile
+      args:
+        ARTEX_VERSION: ${ARTEX_VERSION:-bench}
+    image: artex:bench
+    # Same confinement as docker-compose.yml: agent processes run as the
+    # unprivileged executor and cannot regain root; NET_ADMIN is for egress.sh.
+    security_opt:
+      - "no-new-privileges:true"
+    cap_add:
+      - NET_ADMIN
+    depends_on:
+      postgres:
+        condition: service_healthy
     env_file:
       - bench/.env
-    # Shares the network with the physical machine: the container uses the host network stack directly and can reach the target machine network on the host/VPN.
-    # In host mode no ports mapping is needed; the container binds host ports directly: 8787 (UI/API), 8788 (proxy),
-    # and the internal PostgreSQL 5432 — make sure these three host ports are free (stop any local services occupying them before testing).
-    network_mode: host
+    environment:
+      ARTEX_PG_HOST: postgres
+      ARTEX_PG_PORT: "5432"
+      ARTEX_PG_USER: artex
+      ARTEX_PG_DBNAME: artex
+      ARTEX_PG_SSLMODE: disable
+      ARTEX_JWT_KEY_DIR: /app/keys
+    # Lets corpus containers published on the host be reached on Linux as on
+    # Docker Desktop. The egress filter still denies the host gateway to agent
+    # processes unless bench/.env allows it (see ARTEX_EGRESS_ALLOW there).
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "127.0.0.1:${ARTEX_BENCH_PORT:-8787}:8787"
+      - "127.0.0.1:${ARTEX_BENCH_PROXY_PORT:-8788}:8788"
+    # Named volumes, not bind mounts: on Docker Desktop a bind mount is writable
+    # by every uid, and the isolation self-test refuses to start (c-775dc2).
+    volumes:
+      - data:/app/data
+      - keys:/app/keys
     restart: "no"
 
 volumes:
-  artex_bench_data:
+  pgdata:
+  data:
+  keys:

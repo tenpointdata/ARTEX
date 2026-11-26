@@ -80,7 +80,9 @@ export default function SetupPage() {
       <div className="flex w-full items-center justify-center bg-background p-8 lg:w-2/3">
         <div className="w-full max-w-md space-y-10 py-24 lg:py-32">
           <div className="space-y-4 text-center">
-            <h2 className="text-2xl font-medium tracking-tight">{unavailable ? t("Cannot confirm initialization state") : t("Set initial password")}</h2>
+            <h2 className="text-2xl font-medium tracking-tight">
+              {unavailable ? t("Cannot confirm initialization state") : t("Set initial password")}
+            </h2>
             <p className="mx-auto max-w-xl text-muted-foreground">
               {unavailable
                 ? t(
@@ -142,7 +144,9 @@ export default function SetupPage() {
                 {loading ? t("Saving...") : t("Set password and sign in")}
               </Button>
               <p className="rounded-md border bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
-                {t("Traffic capture is off by default. Enable it in System settings after setup if you need provable HTTP findings — captured traffic is required for findings to prove goals.")}
+                {t(
+                  "Traffic capture is off by default. Enable it in System settings after setup if you need provable HTTP findings — captured traffic is required for findings to prove goals.",
+                )}
               </p>
             </form>
           )}

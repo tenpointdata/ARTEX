@@ -25,10 +25,14 @@ class FakeArtex:
     def __init__(self, start=None):
         self.prompts = dict(start or {"goals": "G0", "planner": "P0", "worker": "W0"})
         self.saves: list[tuple[str, str, str]] = []
+        self.profiles = [{"id": "1", "is_default": True, "sampling": {"seed": 9, "temperature": 0.2}},
+                         {"id": "2", "is_default": False, "sampling": {}}]
 
     def get(self, path):
         if path == "/api/tasks":
             return {"tasks": []}
+        if path == "/api/llm/profiles":
+            return {"profiles": self.profiles}
         return {"prompt": self.prompts[path.split("/")[3]]}
 
     def post(self, path, body):
@@ -44,9 +48,38 @@ class FakeArtex:
         return {"version": 1}
 
 
-def write_arm(tmp: pathlib.Path, name: str, prompts: dict, proposed=None) -> str:
+class FakeLessonsArtex(FakeArtex):
+    """FakeArtex plus /api/rsi/bench-lessons; `drift` makes the readback disagree with the PUT."""
+
+    def __init__(self, start=None, pinned=None, drift=False):
+        super().__init__(start)
+        self.pinned = list(pinned or [])
+        self.drift = drift
+        self.lesson_calls: list[tuple[str, list[int]]] = []
+
+    def block_sha(self):
+        return arms.sha(json.dumps(self.pinned)) if self.pinned else "0" * 16
+
+    def get(self, path):
+        if path == "/api/rsi/bench-lessons":
+            self.lesson_calls.append(("GET", list(self.pinned)))
+            return {"lesson_ids": self.pinned, "block_sha": self.block_sha()}
+        return super().get(path)
+
+    def req(self, method, path, body):
+        if path == "/api/rsi/bench-lessons":
+            self.pinned = [] if self.drift else list(body["lesson_ids"])
+            self.lesson_calls.append((method, list(body["lesson_ids"])))
+            return {"lesson_ids": self.pinned, "block_sha": self.block_sha()}
+        return super().req(method, path, body)
+
+
+def write_arm(tmp: pathlib.Path, name: str, prompts: dict, proposed=None, lessons=None) -> str:
     p = tmp / f"{name}.json"
-    p.write_text(json.dumps({"name": name, "prompts": prompts, "proposed_from": proposed or []}))
+    doc = {"name": name, "prompts": prompts, "proposed_from": proposed or []}
+    if lessons is not None:
+        doc["lessons"] = lessons
+    p.write_text(json.dumps(doc))
     return str(p)
 
 
@@ -98,7 +131,8 @@ class ArmTests(unittest.TestCase):
         sw.snapshot()
         stamp = sw.apply(cand)
         self.assertEqual(api.prompts["planner"], "PLANNER-CANDIDATE {{.Goal}}")
-        self.assertEqual(stamp["planner"], arms.sha("PLANNER-CANDIDATE {{.Goal}}"))
+        self.assertEqual(stamp["prompt_sha"]["planner"], arms.sha("PLANNER-CANDIDATE {{.Goal}}"))
+        self.assertEqual((stamp["lesson_ids"], stamp["lessons_block_sha"]), ([], None))
         self.assertEqual(api.prompts["worker"], "W0")
         sw.apply(base)
         self.assertEqual(api.prompts["planner"], "P0")
@@ -119,6 +153,50 @@ class ArmTests(unittest.TestCase):
         self.assertEqual(api.prompts["goals"], "BUILTIN-goals")  # no stored body ran the default
         sw.restore()
         self.assertEqual(api.prompts["planner"], "P0")
+
+
+class LessonArmTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = pathlib.Path(tempfile.mkdtemp())
+
+    def load(self, name, lessons):
+        return arms.load_arm(write_arm(self.tmp, name, {}, lessons=lessons))
+
+    def test_lessons_are_validated_deduplicated_and_sorted(self):
+        self.assertEqual(self.load("a", [7, 3, 7, 12])["lessons"], [3, 7, 12])
+        self.assertEqual(self.load("b", None)["lessons"], [])
+        self.assertEqual(self.load("c", [])["lessons"], [])
+        for bad in ([0], [-1], ["3"], [1.5], [True], "3", {"1": 1}):
+            with self.assertRaisesRegex(SystemExit, "lessons must be a list of positive integer"):
+                self.load("bad", bad)
+
+    def test_lessons_off_never_touches_bench_lessons(self):
+        api = FakeLessonsArtex(pinned=[9])
+        sw = arms.PromptSwitch(api)
+        sw.snapshot()
+        sw.apply(self.load("x", [1, 2]))  # the arm's lessons are ignored without lessons=True
+        sw.restore()
+        self.assertEqual(api.lesson_calls, [])
+        self.assertEqual(api.pinned, [9])
+
+    def test_apply_pins_reads_back_and_restore_resets(self):
+        api = FakeLessonsArtex(pinned=[9])
+        sw = arms.PromptSwitch(api, lessons=True)
+        sw.snapshot()
+        got = sw.apply(self.load("cand", [5, 2]))
+        self.assertEqual(api.pinned, [2, 5])
+        self.assertEqual(got["lesson_ids"], [2, 5])
+        self.assertEqual(got["lessons_block_sha"], api.block_sha())
+        got = sw.apply(self.load("base", None))  # an arm without lessons pins the empty set
+        self.assertEqual((api.pinned, got["lesson_ids"]), ([], []))
+        sw.restore()
+        self.assertEqual(api.pinned, [9])
+
+    def test_readback_mismatch_raises(self):
+        sw = arms.PromptSwitch(FakeLessonsArtex(drift=True), lessons=True)
+        sw.snapshot()
+        with self.assertRaisesRegex(SystemExit, "server pinned lessons \\[\\], arm 'c' wants \\[4\\]"):
+            sw.apply(self.load("c", [4]))
 
 
 class ScheduleTests(unittest.TestCase):
@@ -225,6 +303,89 @@ class RunTests(unittest.TestCase):
             with self.assertRaisesRegex(SystemExit, "judge battery"):
                 eval_suite.main(argv[:-1] + ["R2"])
         self.assertEqual(api.prompts["planner"], "P0")  # restored even when the suite aborts
+
+    def suite_files(self):
+        tmp = pathlib.Path(tempfile.mkdtemp())
+        suite = tmp / "suite.json"
+        suite.write_text(json.dumps({"suite": "t", "version": "v1", "split": "held-out", "targets": [
+            {"id": "dvga", "type": "image", "ground_truth": "dvga", "image": "x", "port": 1, "container_port": 2}]}))
+        return tmp, str(suite)
+
+    def run_suite(self, tmp, suite, base, cand, api, run_id="R"):
+        argv = ["run", "--suite", suite, "--baseline", base, "--candidate", cand, "--subject-model", "m",
+                "--replicates", "2", "--out-root", str(tmp / "out"), "--run-id", run_id]
+        with mock.patch.object(run_bench, "prepare", return_value="tok"), \
+                mock.patch.object(run_bench, "Api", return_value=api), \
+                mock.patch.object(run_bench, "run", return_value=payload({"GT-001": True})):
+            eval_suite.main(argv)
+
+    def test_baseline_with_lessons_is_rejected(self):
+        tmp, suite = self.suite_files()
+        base = write_arm(tmp, "base", {}, lessons=[1])
+        cand = write_arm(tmp, "cand", {}, lessons=[2])
+        with self.assertRaisesRegex(SystemExit, "baseline arm must not pin lessons"):
+            self.run_suite(tmp, suite, base, cand, FakeLessonsArtex())
+
+    def test_lesson_arms_are_stamped_and_pins_restored(self):
+        tmp, suite = self.suite_files()
+        api = FakeLessonsArtex(pinned=[9])
+        self.run_suite(tmp, suite, write_arm(tmp, "base", {}), write_arm(tmp, "cand", {}, lessons=[6, 4]), api)
+        out = tmp / "out/suite-t/R"
+        base = json.loads((out / "baseline.json").read_text())["stamp"]
+        cand = json.loads((out / "candidate.json").read_text())["stamp"]
+        self.assertEqual((base["lesson_ids"], cand["lesson_ids"]), ([], [4, 6]))
+        self.assertEqual(base["lessons_block_sha"], "0" * 16)
+        self.assertEqual(cand["lessons_block_sha"], arms.sha(json.dumps([4, 6])))
+        self.assertEqual(api.pinned, [9])
+        self.assertNotIn("lesson_ids", suite_stats.INVARIANT_STAMPS)
+        self.assertNotIn("lessons_block_sha", suite_stats.INVARIANT_STAMPS)
+
+    def test_prompt_only_suite_stamps_lessons_off_and_skips_the_endpoint(self):
+        tmp, suite = self.suite_files()
+        api = FakeLessonsArtex(pinned=[9])
+        self.run_suite(tmp, suite, write_arm(tmp, "base", {}), write_arm(tmp, "cand", {}), api)
+        for role in ("baseline", "candidate"):
+            stamp = json.loads((tmp / f"out/suite-t/R/{role}.json").read_text())["stamp"]
+            self.assertEqual((stamp["lesson_ids"], stamp["lessons_block_sha"]), ([], None))
+        self.assertEqual(api.lesson_calls, [])
+
+    def test_sampling_pin_is_stamped_as_an_invariant(self):
+        self.assertIn("llm_sampling", suite_stats.INVARIANT_STAMPS)
+        tmp, suite = self.suite_files()
+        self.run_suite(tmp, suite, write_arm(tmp, "base", {}), write_arm(tmp, "cand", {}), FakeArtex())
+        for role in ("baseline", "candidate"):
+            stamp = json.loads((tmp / f"out/suite-t/R/{role}.json").read_text())["stamp"]
+            self.assertEqual(stamp["llm_sampling"], [{"id": "1", "seed": 9, "temperature": 0.2}])
+        self.assertIn("llm sampling pin #1 seed=9 temp=0.2", (tmp / "out/suite-t/R/report.md").read_text())
+
+    def test_sampling_pin_follows_the_task_chain_order(self):
+        api = FakeArtex()
+        self.assertEqual(eval_suite.llm_sampling(api, "2,1"),
+                         [{"id": "2", "seed": None, "temperature": None}, {"id": "1", "seed": 9, "temperature": 0.2}])
+        self.assertEqual(suite_stats.sampling_label(eval_suite.llm_sampling(api, "2")), "none")
+
+    def test_sampling_pin_changed_mid_suite_is_refused(self):
+        tmp, suite = self.suite_files()
+        api = FakeArtex()
+
+        def drift(args, token):
+            api.profiles[0]["sampling"] = {"seed": 10}
+            return payload({"GT-001": True})
+
+        argv = ["run", "--suite", suite, "--baseline", write_arm(tmp, "base", {}), "--candidate",
+                write_arm(tmp, "cand", {}), "--subject-model", "m", "--out-root", str(tmp / "out"), "--run-id", "R"]
+        with mock.patch.object(run_bench, "prepare", return_value="tok"), \
+                mock.patch.object(run_bench, "Api", return_value=api), \
+                mock.patch.object(run_bench, "run", side_effect=drift):
+            with self.assertRaisesRegex(SystemExit, "sampling pin changed"):
+                eval_suite.main(argv)
+
+    def test_stamp_applied_rejects_a_changed_lesson_set(self):
+        stamp = {"prompt_sha": {}}
+        eval_suite.stamp_applied(stamp, "c", {"prompt_sha": {"planner": "a"}, "lesson_ids": [1], "lessons_block_sha": "x"})
+        eval_suite.stamp_applied(stamp, "c", {"prompt_sha": {"planner": "a"}, "lesson_ids": [1], "lessons_block_sha": "x"})
+        with self.assertRaisesRegex(SystemExit, "lesson_ids changed between runs"):
+            eval_suite.stamp_applied(stamp, "c", {"prompt_sha": {"planner": "a"}, "lesson_ids": [2], "lessons_block_sha": "x"})
 
     def test_dev_split_needs_explicit_opt_in(self):
         argv = ["run", "--suite", str(HERE / "suites/dev-v1.json"), "--baseline", str(HERE / "arms/baseline.json"),

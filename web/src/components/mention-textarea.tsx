@@ -8,6 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { InputGroupTextarea } from "@/components/ui/input-group";
 import { Popover, PopoverAnchor, PopoverContent } from "@/components/ui/popover";
 import { Textarea } from "@/components/ui/textarea";
+import { t } from "@/i18n";
 import { api } from "@/lib/api";
 import {
   activeMention,
@@ -17,7 +18,6 @@ import {
   mentionToken,
   selectedMentions,
 } from "@/lib/chat-mentions";
-import { t } from "@/i18n";
 import { cn } from "@/lib/utils";
 
 type Props = Omit<React.ComponentProps<"textarea">, "value" | "onChange" | "ref"> & {
@@ -321,7 +321,12 @@ export function MentionTextarea({ value, onValueChange, onKeyDown, className, in
                     : t("Showing {count}, scroll down for more", { count: items.length })}
                 </button>
               )}
-              {!loadingMore && !nextCursor && !loading && !error && items.length > 0 && t("All {count} shown", { count: items.length })}
+              {!loadingMore &&
+                !nextCursor &&
+                !loading &&
+                !error &&
+                items.length > 0 &&
+                t("All {count} shown", { count: items.length })}
               {!loadingMore &&
                 !nextCursor &&
                 (loading || !!error || items.length === 0) &&

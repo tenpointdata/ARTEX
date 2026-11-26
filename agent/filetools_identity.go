@@ -12,7 +12,22 @@ import "sync/atomic"
 // filetools_identity_linux.go.
 
 // FileToolIdentity is the uid and gid the file tools access files as.
-type FileToolIdentity struct{ UID, GID uint32 }
+type FileToolIdentity struct {
+	UID, GID uint32
+	// Groups are the supplementary groups; empty means GID alone.
+	Groups []uint32
+	// For, when set, gives the identity for a call in the working directory dir
+	// (one uid per task with server -exec-uid-range). It runs in the server.
+	For func(dir string) FileToolIdentity
+}
+
+// groups returns the supplementary groups of id.
+func (id FileToolIdentity) groups() []uint32 {
+	if len(id.Groups) == 0 {
+		return []uint32{id.GID}
+	}
+	return id.Groups
+}
 
 var fileToolIdentity atomic.Pointer[FileToolIdentity]
 
@@ -24,13 +39,18 @@ func SetFileToolIdentity(id *FileToolIdentity) { fileToolIdentity.Store(id) }
 // identity on this platform.
 func FileToolIdentitySupported() bool { return fileIdentitySupported }
 
-// RunAsFileToolIdentity runs fn with the file tool identity, or directly when none
-// is set. When it returns an error, fn did not run.
-func RunAsFileToolIdentity(fn func()) error {
+// RunAsFileToolIdentity runs fn with the file tool identity for a call in the
+// working directory dir, or directly when none is set. When it returns an error, fn
+// did not run.
+func RunAsFileToolIdentity(dir string, fn func()) error {
 	id := fileToolIdentity.Load()
 	if id == nil {
 		fn()
 		return nil
 	}
-	return runWithFileIdentity(*id, fn)
+	eff := *id
+	if id.For != nil {
+		eff = id.For(dir)
+	}
+	return runWithFileIdentity(eff, fn)
 }

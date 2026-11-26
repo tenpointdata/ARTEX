@@ -19,6 +19,10 @@ type DBFinding struct {
 	EvidenceVersion       int64
 	ReportEvidenceVersion int64
 	TrafficBindings       []FindingTrafficBinding // populated only for export
+	// ImportSource is the provenance of a scanner-imported finding (E2/E10:
+	// lane, tool, rule, code location); nil for a finding from ARTEX's workers.
+	// Filled by the list, export and detail queries (attachImportSources).
+	ImportSource *FindingImportSource
 
 	ID                 int64
 	TaskID             *int64
@@ -186,8 +190,16 @@ type FindingFilter struct {
 	VerificationStatus string // verified | unverified | blocked | not_assessed | false_positive
 	VulnClass          string
 	TaskID             string // task id (in string form; empty/invalid = do not filter by task)
-	Query              string // fuzzy search keyword over name/class/summary/evidence/report body
-	Sort               string // "severity" | "time"
+	// ImportID narrows to the findings a scanner import created (finding_import_sources).
+	// A finding an import only matched by dedup key belongs to the import that created it.
+	// Empty/invalid = do not filter by import.
+	ImportID string
+	// Lane narrows to a testing lane (E10): runtime = ARTEX's own findings and
+	// runtime-scanner imports; sast / sca = the code-scanner imports of that
+	// lane. Any other value matches nothing. Empty = do not filter by lane.
+	Lane  string
+	Query string // fuzzy search keyword over name/class/summary/evidence/report body
+	Sort  string // "severity" | "time"
 	// AssetScope is a node key of the asset tree (a:<id> / c:<id> / r:<domain> /
 	// __none__); selecting a node means selecting its whole subtree.
 	// Empty = do not filter by asset.
@@ -200,6 +212,10 @@ type FindingFilter struct {
 	// A company id that does not exist, or is not a number, matches nothing.
 	// Empty = do not filter by company. An AssetScope of c:<id> means the same.
 	Company string
+	// StrictCompany drops the task-scope fallback of Company for scope rows an
+	// agent added (task_scope.source = 'agent'), so agent output cannot widen
+	// what a client-bound user sees. Set for client_read users only.
+	StrictCompany bool
 
 	// The three below are resolved from AssetScope by applyAssetScope; callers
 	// do not set them.
@@ -244,6 +260,23 @@ func (f FindingFilter) where() (string, []any) {
 		args = append(args, tid)
 		conds = append(conds, fmt.Sprintf("f.task_id = $%d", len(args)))
 	}
+	// Import filter: finding_import_sources is keyed by finding_id, so the
+	// per-row probe is a primary-key lookup.
+	if iid, err := strconv.ParseInt(f.ImportID, 10, 64); err == nil && iid > 0 {
+		args = append(args, iid)
+		conds = append(conds, fmt.Sprintf(
+			"EXISTS (SELECT 1 FROM finding_import_sources fis WHERE fis.finding_id = f.id AND fis.import_id = $%d)", len(args)))
+	}
+	// Lane filter: a finding with no import source is a runtime finding.
+	switch f.Lane {
+	case "":
+	case "runtime":
+		conds = append(conds, "NOT EXISTS (SELECT 1 FROM finding_import_sources fis WHERE fis.finding_id = f.id AND fis.lane IN ('sast','sca'))")
+	default:
+		args = append(args, f.Lane)
+		conds = append(conds, fmt.Sprintf(
+			"EXISTS (SELECT 1 FROM finding_import_sources fis WHERE fis.finding_id = f.id AND fis.lane = $%d)", len(args)))
+	}
 	// Asset filter: asset_ids is a jsonb array; @> ANY(...) can use
 	// idx_findings_asset_ids.
 	switch {
@@ -276,6 +309,10 @@ func (f FindingFilter) where() (string, []any) {
 			args = append(args, assetIDContainments(f.companyAssetIDs))
 			anchored = fmt.Sprintf("f.asset_ids @> ANY($%d::jsonb[])", len(args))
 		}
+		strictSource := ""
+		if f.StrictCompany {
+			strictSource = " AND ts.source <> 'agent'"
+		}
 		// No live asset: attributed through the task's company scope only.
 		args = append(args, f.companyID)
 		conds = append(conds, fmt.Sprintf(`(%s
@@ -287,8 +324,8 @@ func (f FindingFilter) where() (string, []any) {
 				)
 			) AND EXISTS (
 				SELECT 1 FROM task_scope ts
-				WHERE ts.task_id = f.task_id AND ts.kind = 'company' AND ts.company_id = $%d
-			)))`, anchored, len(args)))
+				WHERE ts.task_id = f.task_id AND ts.kind = 'company' AND ts.company_id = $%d%s
+			)))`, anchored, len(args), strictSource))
 	}
 	if query := strings.TrimSpace(f.Query); query != "" {
 		escaped := strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`).Replace(query)
@@ -347,7 +384,10 @@ func (d *DB) ListFindingsPage(f FindingFilter, page, pageSize int) ([]*DBFinding
 	}
 	defer rows.Close()
 	out, err := scanFindings(rows)
-	return out, total, err
+	if err != nil {
+		return nil, 0, err
+	}
+	return out, total, d.attachImportSources(out)
 }
 
 // ListFindingsFiltered returns up to limit findings matching f, newest first,
@@ -372,7 +412,11 @@ func (d *DB) ListFindingsFiltered(f FindingFilter, limit int) ([]*DBFinding, err
 		return nil, err
 	}
 	defer rows.Close()
-	return scanFindings(rows)
+	out, err := scanFindings(rows)
+	if err != nil {
+		return nil, err
+	}
+	return out, d.attachImportSources(out)
 }
 
 // orderBy is the list order: severity first when asked, newest first otherwise.
@@ -626,7 +670,10 @@ func (d *DB) ListFindingsForExport(f FindingFilter, ids []int64) ([]*DBFinding, 
 		_ = json.Unmarshal([]byte(aidsJSON), &f.AssetIDs)
 		out = append(out, f)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return out, d.attachImportSources(out)
 }
 
 // FindingStats is the whole-table aggregate powering the findings page's stat
@@ -667,8 +714,14 @@ func (d *DB) FindingStats() (*FindingStats, error) {
 // company = whole table. A company view leaves out archived (cold) tasks: their
 // aggregates carry no asset or company attribution.
 func (d *DB) FindingStatsForCompany(company string) (*FindingStats, error) {
+	return d.FindingStatsFor(FindingFilter{Company: company})
+}
+
+// FindingStatsFor is FindingStatsForCompany taking the company fields
+// (Company, StrictCompany) of f; its other fields are ignored.
+func (d *DB) FindingStatsFor(cf FindingFilter) (*FindingStats, error) {
 	st := &FindingStats{VulnClasses: []string{}, Tasks: []FindingTaskOption{}}
-	f, err := d.resolveCompany(FindingFilter{Company: company})
+	f, err := d.resolveCompany(FindingFilter{Company: cf.Company, StrictCompany: cf.StrictCompany})
 	if err != nil {
 		return nil, err
 	}
@@ -726,7 +779,7 @@ func (d *DB) FindingStatsForCompany(company string) (*FindingStats, error) {
 	if err := trows.Err(); err != nil {
 		return nil, err
 	}
-	if strings.TrimSpace(company) != "" {
+	if strings.TrimSpace(cf.Company) != "" {
 		return st, nil
 	}
 	archived, err := d.archivedTaskAggregates()
@@ -781,7 +834,7 @@ func (d *DB) GetFinding(id int64) (*DBFinding, error) {
 		return nil, err
 	}
 	_ = json.Unmarshal([]byte(aidsJSON), &f.AssetIDs)
-	return f, nil
+	return f, d.attachImportSources([]*DBFinding{f})
 }
 
 // DeleteFinding removes a finding entirely: the standalone findings row and its

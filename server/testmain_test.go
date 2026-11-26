@@ -17,6 +17,8 @@ func TestMain(m *testing.M) {
 	// The executor tests (execpriv_root_linux_test.go) start this binary as the bash
 	// shim and as the MCP drop shim, the way cmd/artex's main does.
 	RunExecShimIfRequested(os.Args)
+	// assembly_hook_test.go starts this binary as a stdio MCP server.
+	runFakeMCPIfRequested()
 	// Norma keeps background-task output in os.TempDir()/norma. The tests get a temp
 	// directory of their own, so a session they start never writes the host's
 	// <temp>/norma. It is world-writable and sticky like /tmp: MkdirTemp makes it

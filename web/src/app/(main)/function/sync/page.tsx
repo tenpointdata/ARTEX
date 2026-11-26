@@ -13,9 +13,10 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { useCan } from "@/hooks/use-session";
+import { t } from "@/i18n";
 import { api } from "@/lib/api";
 import type { SSProject, SSTask } from "@/lib/types";
-import { t } from "@/i18n";
 
 type SSStatus = {
   exists: boolean;
@@ -102,6 +103,7 @@ function DataSourceCard({
   const [url, setUrl] = React.useState("");
   const [apiKey, setApiKey] = React.useState("");
   const [busy, setBusy] = React.useState(false);
+  const canAdmin = useCan("admin"); // /api/sync/scopesentry/datasource mutations
 
   React.useEffect(() => {
     if (status?.url) setUrl(status.url);
@@ -152,9 +154,11 @@ function DataSourceCard({
             <p className="text-muted-foreground text-sm">
               {t("No ScopeSentry data source yet. Creating one adds a placeholder MCP (empty URL/key, disabled).")}
             </p>
-            <Button onClick={create} disabled={busy}>
-              {t("Create data source")}
-            </Button>
+            {canAdmin && (
+              <Button onClick={create} disabled={busy}>
+                {t("Create data source")}
+              </Button>
+            )}
           </div>
         ) : (
           <>
@@ -171,22 +175,31 @@ function DataSourceCard({
             <div className="grid gap-3 md:grid-cols-2">
               <div className="space-y-1.5">
                 <Label>MCP URL</Label>
-                <Input placeholder="http://<host>:8082/mcp" value={url} onChange={(e) => setUrl(e.target.value)} />
-              </div>
-              <div className="space-y-1.5">
-                <Label>{t("API Key (X-API-Key; leave empty to keep the current value)")}</Label>
                 <Input
-                  type="password"
-                  placeholder="ssk_..."
-                  value={apiKey}
-                  onChange={(e) => setApiKey(e.target.value)}
+                  placeholder="http://<host>:8082/mcp"
+                  value={url}
+                  disabled={!canAdmin}
+                  onChange={(e) => setUrl(e.target.value)}
                 />
               </div>
+              {canAdmin && (
+                <div className="space-y-1.5">
+                  <Label>{t("API Key (X-API-Key; leave empty to keep the current value)")}</Label>
+                  <Input
+                    type="password"
+                    placeholder="ssk_..."
+                    value={apiKey}
+                    onChange={(e) => setApiKey(e.target.value)}
+                  />
+                </div>
+              )}
             </div>
             <div className="flex items-center gap-2">
-              <Button onClick={save} disabled={busy}>
-                {t("Save & enable")}
-              </Button>
+              {canAdmin && (
+                <Button onClick={save} disabled={busy}>
+                  {t("Save & enable")}
+                </Button>
+              )}
               {status.enabled && status.tools.length > 0 && (
                 <span className="text-muted-foreground text-xs">
                   {t("{count} tools discovered", { count: status.tools.length })}
@@ -236,6 +249,7 @@ function SyncWorkbench() {
   const [page, setPage] = React.useState(1);
   const [selected, setSelected] = React.useState<Set<string>>(new Set());
 
+  const canOperate = useCan("operate");
   const [syncing, setSyncing] = React.useState(false);
   const [result, setResult] = React.useState<Awaited<ReturnType<typeof api.ssSync>> | null>(null);
 
@@ -405,9 +419,11 @@ function SyncWorkbench() {
           </Button>
           <div className="flex-1" />
           <span className="text-muted-foreground text-xs">{t("{count} selected", { count: selected.size })}</span>
-          <Button onClick={runSync} disabled={syncing || selected.size === 0}>
-            <DownloadIcon className={syncing ? "size-4 animate-pulse" : "size-4"} /> {t("Sync selected")}
-          </Button>
+          {canOperate && (
+            <Button onClick={runSync} disabled={syncing || selected.size === 0}>
+              <DownloadIcon className={syncing ? "size-4 animate-pulse" : "size-4"} /> {t("Sync selected")}
+            </Button>
+          )}
         </div>
 
         {/* List */}

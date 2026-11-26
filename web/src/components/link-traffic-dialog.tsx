@@ -16,9 +16,9 @@ import {
 } from "@/components/ui/dialog";
 import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
+import { t } from "@/i18n";
 import { api } from "@/lib/api";
 import type { Finding, FindingsPage } from "@/lib/types";
-import { t } from "@/i18n";
 
 export function LinkTrafficDialog({
   trafficIds,
@@ -68,7 +68,10 @@ export function LinkTrafficDialog({
         trafficIds.map((traffic_id) => ({ traffic_id })),
       );
       toast.success(
-        t("Linked {count} traffic records to vulnerability #{id}", { count: trafficIds.length, id: selected.finding_id }),
+        t("Linked {count} traffic records to vulnerability #{id}", {
+          count: trafficIds.length,
+          id: selected.finding_id,
+        }),
       );
       onBound();
       onClose();

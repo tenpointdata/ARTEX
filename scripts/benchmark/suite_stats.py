@@ -21,9 +21,9 @@ FLAG_GATE = "flag_captured"
 
 # Stamps that must be identical between arms for a comparison to mean anything:
 # same model, budget, judge, method and ground truth (RSI.md Loop C contract).
-INVARIANT_STAMPS = ("method_version", "subject_model", "llm_profiles", "judge_model",
+INVARIANT_STAMPS = ("method_version", "subject_model", "llm_profiles", "llm_sampling", "judge_model",
                     "task_timeout_seconds", "seed", "suite", "suite_version", "replicates",
-                    "ground_truth_versions")
+                    "ground_truth_versions", "suite_run")
 
 
 def wilson(passes: int, n: int, z: float = 1.96) -> tuple[float, float]:
@@ -168,6 +168,16 @@ def _fmt(r: dict) -> str:
     return f"{r['passes']}/{r['n']} ({r['rate']:.2f}, {r['wilson95'][0]:.2f}–{r['wilson95'][1]:.2f})"
 
 
+def sampling_label(pins: list[dict] | None) -> str:
+    """'none' when no profile in the chain pins anything, else '#id seed=S temp=T' per profile."""
+    if not isinstance(pins, list):  # absent in pre-pin stamp files
+        return "none" if pins is None else str(pins)
+    pinned = [p for p in pins if p.get("seed") is not None or p.get("temperature") is not None]
+    if not pinned:
+        return "none"
+    return ", ".join(f"#{p.get('id')} seed={p.get('seed')} temp={p.get('temperature')}" for p in pinned)
+
+
 def render_markdown(cmp: dict, stamp: dict) -> str:
     b, c = cmp["baseline"], cmp["candidate"]
     lines = [
@@ -177,7 +187,7 @@ def render_markdown(cmp: dict, stamp: dict) -> str:
         f"- method `{stamp.get('method_version')}`, subject `{stamp.get('subject_model')}`, "
         f"llm chain `{stamp.get('llm_profiles') or 'default'}`, judge `{stamp.get('judge_model') or 'none (flag-only)'}`",
         f"- budget {stamp.get('task_timeout_seconds')}s per task, seed {stamp.get('seed')}, "
-        f"replicates {stamp.get('replicates')}",
+        f"replicates {stamp.get('replicates')}, llm sampling pin {sampling_label(stamp.get('llm_sampling'))}",
         f"- runs (baseline/candidate): attempted {b['runs_attempted']}/{c['runs_attempted']}, "
         f"failed {b['runs_failed']}/{c['runs_failed']}, unjudged {b['runs_unjudged']}/{c['runs_unjudged']}",
     ]
