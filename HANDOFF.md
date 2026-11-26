@@ -1,6 +1,6 @@
 # HANDOFF.md — ARTEX
 
-**Last updated:** 2026-11-25 by claude-code: c-2e4034 merged with main; c-da9198 had already landed via #80, so this adds only `TestTicketSyncDefaultCapLoopsToCompletion`. Earlier hand-offs are under Deltas and in `ej handoff log`.
+**Last updated:** 2026-11-26 00:11 MST, by codex-mcp-client: c-f1518c remains blocked on subject and independent judge configuration. Earlier hand-offs are under Deltas and in `ej handoff log`.
 
 > Single entry point for whoever picks this up next (any agent or human), with no access to the
 > originating conversation. Read this first, then the sections of the code it points at.
@@ -58,6 +58,17 @@ See `docs/ARCHITECTURE.md` for the code-level map. Summary:
 - `docs/` — `ARCHITECTURE.md`, `OPS.md`, traffic docs, `RSI.md` (self-improvement governance contract).
 
 ## Current state
+
+**2026-11-26 — E8 live held-out run remains open (card `c-f1518c`).** Docker Desktop was started; the existing
+`artex-artex-1` is not established as a disposable bench. No subject or independent judge credentials were
+available in the shell; no suite run or prompt restoration comparison occurred. Drost checkout
+`762d2872dff7a9b30fde4c3c16cbb4cdeee7b208` contained all ten held-out IDs. DVGA 2.2.0 returned an empty
+response on its published port by default and HTTP 200 with `WEB_HOST=0.0.0.0`; the image target now declares
+that environment and the runner forwards it. 69 benchmark unit tests pass. The existing instance rejected
+the runner's key-minted JWT with 401; current auth enforces a password-version claim. Before running, provide
+a dedicated bench and subject/judge configuration, verify target reachability from that bench (Docker Desktop
+may need `host.docker.internal`), and compare planner prompts before and after. The checkout under `/tmp` is
+temporary; re-check its SHA. See checkpoint `h-38d371`.
 
 **2026-11-25 — E2 ticket sync lock/cursor/background (`c-da9198`) is on main via #80** (the c-c2bdc8 webhook
 branch carried the cherry-pick of `0f8cd35f`); card `c-2e4034` added only
@@ -163,39 +174,39 @@ the full Docker image, the E8 suite) are in `docs/handoff/2026-11-24-current-sta
 ## Triage (next handful)
 
 **Agents' lane**
-0. *(unclaimed)* — **`go test ./traffic` fails on main** (S), card `c-81b834`: `TestSOCKS5RemoteScope`
+1. *(unclaimed)* — **`go test ./traffic` fails on main** (S), card `c-81b834`: `TestSOCKS5RemoteScope`
    gets auth reply 0x01 since #79's SOCKS5 auth; it stops `scripts/verify.sh` before the web steps. Done = cause found
    (without loosening auth), verify.sh green.
-1. *(unclaimed)* — **E7: worker nodes miss other runtime control-node state** (M), card `c-6bcdd3`: LLM profiles,
+2. *(unclaimed)* — **E7: worker nodes miss other runtime control-node state** (M), card `c-6bcdd3`: LLM profiles,
    MCP servers, custom tools and similar are rebuilt only at start. Done = each one is followed or listed in
    DISTRIBUTED.md Limits.
-2. *(in review)* — **E9 follow-ups**: `c-4b7989` (per-exchange traffic bulk delete/export) is built on
+3. *(in review)* — **E9 follow-ups**: `c-4b7989` (per-exchange traffic bulk delete/export) is built on
    `ej/20261124-191203-08f678`. (`c-f729e8`, approvals triage + grouped advance + biome errors, in review on `ej/20261124-175807-17ca91`.) (`c-45c921`, the dashboard push, is in
    review on `ej/20261124-170157-3aeba5`.)
    "Done when" is on each card.
-3. *(unclaimed)* — **SEC: per-task uid follow-ups** (S each): `c-12df03` (single-uid start-up fails on a
+4. *(unclaimed)* — **SEC: per-task uid follow-ups** (S each): `c-12df03` (single-uid start-up fails on a
    socket; MCP uid not egress-filtered), `c-e70e5c` (release ended tasks at start-up; per-key lock). The "Done when" is on each card.
-4. *(unclaimed)* — **E5: chain newest-first paging** (S), card `c-601ec6`. (`c-bd9b7a` role guard + c-92bb52
+5. *(unclaimed)* — **E5: chain newest-first paging** (S), card `c-601ec6`. (`c-bd9b7a` role guard + c-92bb52
    gates are in review on `ej/20261124-191154-865292`; `c-7c4715`, the client_read console, is in review on
    `ej/20261124-144554-67afc9`.)
-5. *(unclaimed)* — **SEC: gorilla/websocket bump, GO-2026-6278** (XS), card `c-c10f2c`; needs network.
+6. *(unclaimed)* — **SEC: gorilla/websocket bump, GO-2026-6278** (XS), card `c-c10f2c`; needs network.
    Done = govulncheck clean.
-6. *(unclaimed)* — **SEC: upstream-gate residuals** (M), card `c-5a6f96`: task-scoped rules on proxy
+7. *(unclaimed)* — **SEC: upstream-gate residuals** (M), card `c-5a6f96`: task-scoped rules on proxy
    dials, go-mitmproxy keep-alive host pinning, and the global-egress-proxy bypass. Done = a test or a decision for each.
-7. *(unclaimed)* — **SEC: logout revocation** (S), card `c-a0af33`. Done = a token replayed after
+8. *(unclaimed)* — **SEC: logout revocation** (S), card `c-a0af33`. Done = a token replayed after
    logout or a password change gets 401, by a test.
-8. *(unclaimed)* — **SEC: Docker Desktop named volumes** (S), card `c-775dc2`. Done = `docker compose up`
+9. *(unclaimed)* — **SEC: Docker Desktop named volumes** (S), card `c-775dc2`. Done = `docker compose up`
    starts on a Mac with the isolation self-test passing; Linux bind-mount path documented.
-9. *(unclaimed)* — **E1 Client-grade reporting & deliverables** (M). Turn `report/` into
+10. *(unclaimed)* — **E1 Client-grade reporting & deliverables** (M). Turn `report/` into
    CVSS/EPSS-scored, remediation-bearing, standards-mapped deliverables (OWASP ASVS/WSTG, MITRE
    ATT&CK). Done = a report export with per-finding CVSS vector + remediation + framework tags,
    covered by tests. Card `c-8f9cca`.
-10. *(unclaimed)* — **E2 UI: gate integrations controls by role** (S), card `c-119206`. Done = as reviewer
+11. *(unclaimed)* — **E2 UI: gate integrations controls by role** (S), card `c-119206`. Done = as reviewer
    and as client_read, no E2 control the server refuses is shown, and the finding detail has no 403.
 
-11. *(unclaimed)* — **E2×E5 tracker RBAC** (S), card `c-5c4009`. Done = tracker create/update/delete
+12. *(unclaimed)* — **E2×E5 tracker RBAC** (S), card `c-5c4009`. Done = tracker create/update/delete
    need admin (like notify channels), push/sync stay operator; RBAC tests pass.
-12. *(unclaimed)* — **Findings stat cards honour lane/import filters; fact-node deep link** (S), card
+13. *(unclaimed)* — **Findings stat cards honour lane/import filters; fact-node deep link** (S), card
    `c-7651e5`. Done = stat cards match the filtered list under `lane=`/`import_id=` (db test); the
    Past imports fact node opens the task graph on that node.
 
@@ -549,11 +560,13 @@ Card ids in brackets:
 ## Deltas
 
 <!-- composite:deltas · newest first; Composite rewrites this block on every merge (ej handoff merge / merge_handoff) -->
+- **2026-11-26 00:11 MST** · codex-mcp-client · `ej/20261126-000938-74d42f` at `d1a5d70`, no commits · `h-38d371` — c-f1518c remains blocked on subject and independent judge configuration. Verified ten Drost IDs at 762d2872dff7a9b30fde4c3c16cbb4cdeee7b208 and DVGA binding; added per-image env forwarding and set WEB_HOST for DVGA. Benchmark unit tests pass. **Next:** Provide dedicated bench subject model and independent judge credentials, validate Docker Desktop target routing, run held-out suite and compare planner before/after. Key-minted token was rejected by the existing instance; use a valid bench session. **Decided:** Keep the existing instance read-only because it is not established as disposable. Add environment support to fix the first live use of the pinned DVGA target.
+- **2026-11-24 20:54 MST** · claude-code · `ej/20261124-204623-7a8920` `cce7bf1`→`b76ff66` (1 commit) · `h-575a78` — c-81b834 (also closes card c-1a74a4): #79's SOCKS5 checkCredential looked scope tokens up only in the local registry, so remote-worker tokens got 0x01 before the remote resolver ran. That was a real E7 regression. It now uses resolveScope (local registry, then remote resolver); everything else in SOCKS5 auth is unchanged. TestSOCKS5RemoteScope now expects junk and unresolvable tokens to be refused at auth. Also added the six #80 webhook i18n strings that the go failure had hidden. go test ./traffic and scripts/verify.sh pass. Moved six older Current state entries to docs/handoff/2026-11-24-current-state-archive.md to meet the size limit. **Next:** Land ej/20261124-204623-7a8920. Optionally have a native speaker review the tr/zh-CN webhook strings and run a real two-node worker SOCKS5 smoke test. **Decided:** SOCKS5 auth accepts exactly the tokens the scope gate accepts (resolveScope), with the remote resolver as the authority; the policy was not loosened.
 - **2026-11-24 20:51 MST** · claude-code · `ej/20261124-203755-708a1e` `30a1782`→`dac6220` (1 commit) · `h-8ecb71` — c-0aaa24 (in review): propose.Drafter hook (Input.Drafter, nil = fixed guidance). Build drafts in rank order after the transfer filter and the fixed-body ValidateEdit, so only in-space roles reach the model and a refused body frees its slot. DraftRequest carries code-owned text, counts and the active body only. Output is refused (never repaired) on template-action changes, stray delimiters, empty, unchanged or prior bodies, or a ValidateEdit failure. WriteArm re-checks. CheckDrafter refuses a drafter equal to the judge, or any drafter when no judge is named. CLI: --draft-model/--draft-provider/--draft-url/--judge-model, $ARTEX_DRAFT_API_KEY. New agent.Complete (tool-less one-shot) and agent.FrameData (exported data envelope). Arms carry drafted_by. Hostile-output tests in rsi/propose/drafter_test.go and cmd/artex-rsi-propose/drafter_test.go, mutation-checked. Older Current state blocks moved to docs/handoff/. **Next:** Land ej/20261124-203755-708a1e. Then c-4bbf29: run a real-model --draft-model dry run on a bench instance and send one drafted arm through eval_suite with a different judge. Optional: cap the share of a body a rewrite may delete, if real drafts strip useful content. **Decided:** A refused drafted body skips the rule instead of falling back to the fixed text, so the plan says why and the operator can rerun without the flag. Drafting happens after budget ranking to keep model calls within the round's slots. Drafted proposals are tagged "[drafted rule <id>]" in the rationale, because a rewrite need not contain the guidance text the old pruner matches. An unknown judge counts as a refusal, since independence cannot be checked. Template actions must stay exactly the same set as in the active body.
 - **2026-11-24 19:39 MST** · claude-code · `ej/20261124-191154-865292` `e9fbefe`→`af602b8` (12 commits) · `h-be59c2` — c-bd9b7a (in review on ej/20261124-191154-865292): RouteGuard in the (main) layout (route-access.ts resolver from the sidebar's need, tested) sends a role to its landing page without mounting a page it can't see; c-92bb52's useCan gating re-applied onto main's E9 file layout (system/*, tasks, traffic, chat, findings, assets, records, sync, workspace, agent editor, approvals); task Overview by-model card needs operate; integrations page and findings tracker reads gated. scripts/e2e/role-probe.sh passes for reviewer, operator and client_read; scripts/verify.sh passes. The branch also carries the role probe (c-80fe4e). **Next:** Land ej/20261124-191154-865292 (carries c-80fe4e and c-bd9b7a). Do NOT land ej/20261124-144553-d5978e (c-92bb52): superseded. Then c-601ec6. Optional: port c-92bb52's errorText(e) swaps; hide the Overview "click Re-run all" footnote without operate. **Decided:** c-92bb52's single commit (gating + file splits) conflicted with main's E9 split in ~40 files, so its gating intent was ported onto main's files instead of merging; the traffic row selection stays for read roles (Copy URLs) while the sheet opens only with operate. Route permission comes from the sidebar's need so nav and guard share one source.
-- **2026-11-24 19:35 MST** · claude-code · `ej/20261124-192153-48c72c` `5e3f5b4`→`96e3134` (1 commit) · `h-8712ef` — c-936308 (in review): /system/rsi page — proposals table with newest verdict, expandable per-gate rates (with n), paired gained/lost, regressions with targets, adoption log, prompt-history link; inline Adopt (password + newest evidence_id), Reject, Roll back (reason); ARTEX_RSI_LOOP state from /api/rsi/status. GET /api/rsi/proposals now returns latest_evidence (db.LatestRSIEvidence). Verified with tsc, biome, verify.sh, TestRSIGateEndToEndPG on Postgres 17, and headless Chromium: adopt then rollback in 2 clicks each. Issues: opened c-cce755. **Next:** Land ej/20261124-192153-48c72c. Then c-cce755 (decide whether RSI reject/rollback need admin). The live end-to-end run stays c-772190. **Decided:** Newest evidence is attached to the list response (one DISTINCT ON query) rather than a per-row detail call; the field is additive, so existing API users are unaffected. The loop flag is shown, not toggled: turning it on stays an owner decision in the environment (RSI.md rule 5). Actions are shown to operate sessions to match the current server RBAC; c-cce755 tracks whether that should be admin.
-- **2026-11-24 19:31 MST** · claude-code · `ej/20261124-192202-fbe9e3` `5e3f5b4`→`077451f` (1 commit) · `h-8d9748` — c-c89f5b (in review): RSI Loop C proposer. cmd/artex-rsi-propose + rsi/propose read closed tasks' outcome/lessons and /api/skill-gaps, keep only rules whose signal holds on >=2 tasks across >=2 scopes, append fixed guidance to one goals/planner/worker body, validate with rsi.ValidateEdit (draft and write time), write arm files (proposed_from task:<id>, rationale) + plan.json within the round's remaining status budget; --post registers them. Refuses while ARTEX_RSI_LOOP is off; client can only GET and POST /api/rsi/proposals. Tail markers moved to agent.CodeOwnedTailMarkers; status reports max_open. **Next:** Land ej/20261124-192202-fbe9e3. Then c-4bbf29: real-instance dry run and one proposal through eval_suite + evidence (fold with c-f1518c). Later c-0aaa24 (model-drafted critic). **Decided:** Go, not Python, so the proposer calls rsi.ValidateEdit directly. Guidance is a fixed code-written table and no live task text enters a body (live output is untrusted). The proposer stays in the newest round and opens the next only when --round names it, since advancing closes the current round. Dry run is the default. Loop flag is required even for a dry run (checked at start and before posting). **Issues:** opened #c-0aaa24, #c-4bbf29.
 - _Older hand-offs, a line each; `ej handoff log` has them whole:_
+- **2026-11-24 19:35 MST** · claude-code · `h-8712ef` — c-936308 (in review): /system/rsi page — proposals table with newest verdict, expandable per-gate rates (with n), paired gained/lost, regressions with targets, adoption log, prompt-history link; inline Adopt (password + newest evidence_id), Reject, Roll back… **Next:** Land ej/20261124-192153-48c72c.
+- **2026-11-24 19:31 MST** · claude-code · `h-8d9748` — c-c89f5b (in review): RSI Loop C proposer. **Next:** Land ej/20261124-192202-fbe9e3. **Issues:** opened #c-0aaa24, #c-4bbf29.
 - **2026-11-24 19:12 MST** · claude-code · `h-43b8d4` — c-80fe4e (in review): scripts/e2e/role-probe.sh, a role probe on the integrations.sh harness. **Next:** Land c-92bb52 (ej/20261124-144553-d5978e; main still lacks it, so the probe fails widely on main). **Issues:** opened #c-bd9b7a.
 - **2026-11-24 19:11 MST** · claude-code · `h-e9f875` — c-1e3b53 (E7, in review): before worker.Execute a distributed node pulls the stored files of the intent's run dir, the task's spills and the session's sidechains (pullRunFilesFrom), makes the dirs as the run does, then hands what it pulled to the executor (sh… **Next:** Land ej/20261124-185425-cbc1cf instead of ej/20261124-180332-433a2b (it carries it).
 - **2026-11-24 19:02 MST** · claude-code · `h-b23a91` — c-ccc7a8 (in review): this branch merges c-6bcdd3 (ej/20261124-172031-c2bb7b, carrying c-20c400/c-d4946f/c-8cfbfe and the E7 stack) and c-677166 (ej/20261124-163818-870578, proxy-hop TLS), so landing it lands both. **Next:** Land ej/20261124-185428-8c1cc4; do not land ej/20261124-163818-870578 or ej/20261124-172031-c2bb7b separately afterwards.
@@ -563,8 +576,6 @@ Card ids in brackets:
 - **2026-11-24 18:23 MST** · claude-code · `h-c952c8` — c-43dbfc (E7, in review): worker-node run directories, spills and subagent sidechains are mirrored into PostgreSQL (new filesync package, db.TaskFiles, migration 0026) when an intent run ends. **Next:** Land ej/20261124-180332-433a2b (migrations 0025, 0026). **Issues:** opened #c-1bbeb6, #c-1e3b53.
 - **2026-11-24 18:21 MST** · claude-code · `h-9bfe0c` — c-601ec6 (in review): GET /api/intercept/history/chain takes order=desc and before_seq (db.AuditFilter Desc/BeforeSeq; ascending stays the default). **Next:** Land ej/20261124-180916-b60b04.
 - **2026-11-24 18:13 MST** · claude-code · `h-6293db` — c-f729e8 (in review), on a branch that merges the c-45c921 branch (ej/20261124-170157-3aeba5, which carries E9), so landing it lands both. **Next:** Land ej/20261124-175807-17ca91 (carries c-45c921 and E9).
-- **2026-11-24 18:12 MST** · claude-code · `h-bb3c3b` — c-4ee114 done (closed; c-80fe4e opened). **Next:** c-80fe4e: probe the stream-messages view, the detail pages and client_read.
-- **2026-11-24 18:09 MST** · claude-code · `h-8a0153` — c-888292 (E6 follow-up, now in review): archives made before cost_cells are backfilled on start. **Next:** Land ej/20261124-175804-41533a in place of ej/c-990198-wall-time (it carries E6, c-f4a69d and c-990198).
 <!-- /composite:deltas -->
 
 _(written by `merge_handoff`)_

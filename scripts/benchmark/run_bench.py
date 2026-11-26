@@ -126,7 +126,10 @@ def deploy_corpus(args) -> dict:
     subprocess.run(["docker", "rm", "-f", name], capture_output=True)
     port = str(args.port)
     print(f"[corpus] docker run {args.image} -> 127.0.0.1:{port}")
-    subprocess.run(["docker", "run", "-d", "--rm", "--name", name, "-p", f"127.0.0.1:{port}:{args.container_port}", args.image], check=True, capture_output=True)
+    command = ["docker", "run", "-d", "--rm", "--name", name, "-p", f"127.0.0.1:{port}:{args.container_port}"]
+    for entry in getattr(args, "image_env", []):
+        command += ["--env", entry]
+    subprocess.run(command + [args.image], check=True, capture_output=True)
     url = f"http://127.0.0.1:{port}"
     for _ in range(90):
         try:
@@ -475,6 +478,7 @@ def build_parser() -> argparse.ArgumentParser:
     ap.add_argument("--target-host", default="127.0.0.1", help="host the task should target, as reachable from ARTEX (use 172.17.0.1 when ARTEX runs in a container)")
     ap.add_argument("--run-id", default=time.strftime("%Y%m%d-%H%M%S"))
     ap.add_argument("--image", default="bkimminich/juice-shop:latest")
+    ap.add_argument("--image-env", action="append", default=[], metavar="NAME=VALUE", help="environment for the image target (repeatable)")
     ap.add_argument("--port", type=int, default=13100)
     ap.add_argument("--container-port", type=int, default=3000)
     ap.add_argument("--corpus-url", help="use an already-running deployment instead of docker")

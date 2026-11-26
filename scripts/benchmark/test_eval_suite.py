@@ -8,6 +8,7 @@ from __future__ import annotations
 import json
 import pathlib
 import tempfile
+import types
 import unittest
 from unittest import mock
 
@@ -102,6 +103,15 @@ class ArmTests(unittest.TestCase):
             arms.load_arm(str(f))
         for f in (HERE / "suites").glob("*.json"):
             eval_suite.load_suite(str(f))
+
+    def test_dvga_image_environment_is_forwarded(self):
+        suite = eval_suite.load_suite(str(HERE / "suites/heldout-v1.json"))
+        target = next(t for t in suite["targets"] if t["id"] == "dvga")
+        opts = types.SimpleNamespace(subject_model="m", task_timeout=60, target_host="host",
+                                     artex_url="http://localhost", llm_profiles="", allow_self_judge=False)
+        argv = eval_suite.run_argv(target, opts, "r", pathlib.Path("out"), "v")
+        args = run_bench.build_parser().parse_args(argv)
+        self.assertEqual(args.image_env, ["WEB_HOST=0.0.0.0"])
 
     def test_held_out_and_dev_splits_are_disjoint(self):
         held = {t["id"] for t in eval_suite.load_suite(str(HERE / "suites/heldout-v1.json"))["targets"]}
