@@ -187,6 +187,20 @@ Older Current state blocks (bench subject image, E5 governance, client binding, 
 the full Docker image, the E8 suite) are in `docs/handoff/2026-11-24-current-state-archive.md`.
 
 
+**2026-11-24: live scope-relay harness (card `c-517c2d`, still open).** c-15b39d and c-a1c0fc are on
+main (squash-merged as PR #22). `scripts/live-scope-check/run.sh` overlays `docker-compose.bench.yml` as
+compose project `artex-verify` (UI on 127.0.0.1:18797, own Postgres and volumes) and adds two nginx
+targets on that network: `in-scope.verify.test`, whose page embeds and links the other host, and
+`excluded.verify.test`. Over the API it initialises the admin, turns capture on, enables the seeded
+`browser` MCP and makes it visible to the worker. It then creates a task with `target_gate:true` and a
+task block rule for the excluded host, allows gate requests only for the in-scope host, and asserts
+three things: in-scope exchanges are recorded, the excluded host has none, and a proxy refusal log line
+or a denied gate row exists. Verified on an image built from `ee33ec1` (Docker Desktop arm64): the setup
+phase passes, the MCP args carry `--proxy-server http://127.0.0.1:8788`, and both targets answer 200
+to the executor uid (so a refusal can only come from the gate). **Not run:** the task phase, because no
+LLM key was available. The task-phase API calls (task create, pending decide, traffic host filter,
+`/api/intercept/task/{id}`) were taken from the code and not exercised.
+
 ## Triage (next handful)
 
 **Agents' lane**
@@ -241,8 +255,10 @@ the full Docker image, the E8 suite) are in `docs/handoff/2026-11-24-current-sta
   File GitHub issues only if the repo goes private or you want them public.
 - Decide engagement-governance direction (E5): how formal the rules-of-engagement/authorization
   artifact should be for your use.
-- **SEC: live Playwright scope-relay check** (S), card `c-517c2d`: a real task with capture on and the
-  seeded Playwright MCP. Done = the browser's dials show the task scope and an out-of-scope host is refused.
+- **SEC: live Playwright scope-relay check** (XS now), card `c-517c2d`: put an LLM key in `bench/.env`
+  and run `scripts/live-scope-check/run.sh` (it builds nothing: `docker build -t artex:verify .` first).
+  Done = the script prints `RESULT PASS`: in-scope exchanges recorded, `excluded.verify.test` refused
+  with no exchange. Needs only the key: the targets are local nginx containers the script starts.
 - E5 shipped a lightweight artifact (reference, signatory, scope, window, technique classes). Decide
   whether tasks with an artifact must have the target gate forced on (card `c-f4115c` item 2), and
   whether the extra admin-only routes in `server/rbac_policy.go` (tools, MCP, agents, LLM config,
@@ -312,7 +328,7 @@ Card ids in brackets:
   in review), `c-597b06` (stale node rows; in review), `c-620510` (real multi-machine cluster, human).
 - **E8** [`c-5487e8`] Planner/worker evaluation suite (regression targets, prompt-version A/B via the benchmark gate).
 - **E9** [`c-73af97`] Frontend/UX pass (tables over cards, fewer-clicks triage workflow, live engagement dashboard).
-- **SEC** [`c-517c2d`] Live Playwright task check of the scope relay (human/bench: needs an LLM key and an authorized target).
+- **SEC** [`c-517c2d`] Live Playwright task check of the scope relay: harness ready (`scripts/live-scope-check/run.sh`); needs only an LLM key.
 - **SEC** [`c-3b9252`] Capture-proxy upstream connection reuse across scopes (rules checked only at dial time).
 - **SEC** [`c-9b48b7`] Report go-mitmproxy keep-alive host pinning upstream; drop `unpinHostChange` once fixed.
 - **SEC** [`c-dadc14`] Verify the security branch on Linux root, in Docker and against Postgres, plus the web typecheck.
@@ -411,6 +427,10 @@ Card ids in brackets:
 
 ## Decisions
 
+- **2026-11-24** — c-517c2d: the live check uses targets we start ourselves (nginx on the verify
+  project's network) instead of a public or third-party bench target, so authorization is never in
+  question and the result needs only an LLM key. The excluded host is embedded as an `<img>`, so the
+  browser dials it on load even when the model doesn't follow the link.
 - **2026-11-24 c-cce755 (RSI action roles):** `POST /api/rsi/proposals/{id}/rollback` needs `admin`
   (one exact rule in `server/rbac_policy.go`): it re-points an agent's live prompt version, the same effect as
   `PUT /api/agents/...`. No password, so the owner (admin) keeps one-step rollback. Reject, propose and evidence stay
@@ -592,6 +612,7 @@ Card ids in brackets:
 - **2026-11-24 18:49 MST** · claude-code · `h-7cf4df` — c-1bbeb6 (E7, in review): worker nodes sweep their local tasks/<T>, spill/tasks/<T> and transcripts/exp<E>-… of deleted, archived or vanished tasks on start-up and every 10 min (server/worker_node_sweep.go, db.RetiredTasks in db/task_retirement.go); stageTask… **Next:** Land ej/20261124-184127-104862 (card c-1bbeb6 in review).
 - **2026-11-24 18:23 MST** · claude-code · `h-0668f2` — c-67993f done (closed; c-ccc7a8 opened): the E7 TLS proxy hop was checked on a 3-node kind cluster with an agent-driven (stub LLM) task. **Next:** Land c-677166 (ej/20261124-163818-870578, fork h-c56630): rebase onto main and unify the relay helper with c-6bcdd3's relayConns (c-ccc7a8).
 - **2026-11-24 18:23 MST** · claude-code · `h-970bcd` — c-d73308 (E8 follow-up) built, in review: an optional per-profile LLM sampling pin. **Next:** Land ej/20261124-180334-421555.
+- **2026-11-24 12:33 MST** · claude-code · `h-b47a3b` — c-517c2d (still open, needs only an LLM key): added scripts/live-scope-check/run.sh plus a compose overlay.
 <!-- /composite:deltas -->
 
 _(written by `merge_handoff`)_

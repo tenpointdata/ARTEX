@@ -1,0 +1,28 @@
+# Overlay on docker-compose.bench.yml for the live scope-relay check (card c-517c2d).
+# Run through scripts/live-scope-check/run.sh, which uses the compose project
+# artex-verify so nothing is shared with a production or bench instance.
+#
+# Two targets we own, reachable only on this project's network:
+#   in-scope.verify.test  - the authorized target; its page links to the other host
+#   excluded.verify.test  - covered by a task block rule; must never be dialled
+services:
+  artex-bench:
+    image: ${ARTEX_VERIFY_IMAGE:-artex:verify}
+    ports: !override
+      - "127.0.0.1:${ARTEX_VERIFY_PORT:-18797}:8787"
+
+  target-in:
+    image: nginx:1.27-alpine
+    volumes:
+      - ./scripts/live-scope-check/site-in:/usr/share/nginx/html:ro
+    networks:
+      default:
+        aliases: [in-scope.verify.test]
+
+  target-out:
+    image: nginx:1.27-alpine
+    volumes:
+      - ./scripts/live-scope-check/site-out:/usr/share/nginx/html:ro
+    networks:
+      default:
+        aliases: [excluded.verify.test]
