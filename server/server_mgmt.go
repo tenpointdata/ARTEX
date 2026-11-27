@@ -32,6 +32,7 @@ import (
 	"github.com/Autumn-27/artex/agent"
 	"github.com/Autumn-27/artex/db"
 	"github.com/Autumn-27/artex/intercept"
+	"github.com/Autumn-27/artex/netguard"
 	"github.com/Autumn-27/artex/notify"
 	"github.com/Autumn-27/norma/llm"
 	"github.com/Autumn-27/norma/skill"
@@ -2187,6 +2188,10 @@ func (s *Server) pgSaveProfile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	p.UserAgent = ua
+	if err := agent.ValidateSampling(p.Format, p.Sampling); err != nil {
+		writeErr(w, 400, err.Error())
+		return
+	}
 	if p.Format == "bedrock-gateway" {
 		validate := agent.ConfigFrom(p.Format, p.Model, p.BaseURL, p.APIKey, p.Proxy)
 		validate.CustomHeaders = p.CustomHeaders
@@ -2437,75 +2442,13 @@ func sameRedirectHost(a, b *url.URL) bool {
 	return ha != "" && ha == hb
 }
 
-// Ranges that are not public Internet addresses and that
-// intercept.IsNonPublicAddr does not cover. The shared ones are in use on
-// private networks (overlay networks, fake-IP resolvers), so an allow-listed
-// endpoint may sit there; the reserved ones are never a model endpoint.
-var (
-	modelSharedPrefixes = []netip.Prefix{
-		netip.MustParsePrefix("100.64.0.0/10"), // carrier-grade NAT (RFC 6598)
-		netip.MustParsePrefix("198.18.0.0/15"), // benchmarking (RFC 2544)
-	}
-	modelReservedPrefixes = []netip.Prefix{
-		netip.MustParsePrefix("192.0.0.0/24"), // IETF protocol assignments (RFC 6890)
-		netip.MustParsePrefix("240.0.0.0/4"),  // reserved, and the limited broadcast address
-	}
-	// IPv6 prefixes whose addresses reach the IPv4 host they embed. A DNS64
-	// resolver answers with NAT64 addresses for every IPv4-only name, so the
-	// prefixes are not blocked as a whole: the embedded address is judged.
-	modelNAT64Prefix = netip.MustParsePrefix("64:ff9b::/96") // the low 32 bits name an IPv4 host
-	model6to4Prefix  = netip.MustParsePrefix("2002::/16")    // bits 16 to 47 name an IPv4 host
-)
-
-// modelEmbeddedIPv4 returns the IPv4 address a NAT64 or 6to4 address embeds.
-func modelEmbeddedIPv4(addr netip.Addr) (netip.Addr, bool) {
-	b := addr.As16()
-	switch {
-	case modelNAT64Prefix.Contains(addr):
-		return netip.AddrFrom4([4]byte(b[12:16])), true
-	case model6to4Prefix.Contains(addr):
-		return netip.AddrFrom4([4]byte(b[2:6])), true
-	}
-	return netip.Addr{}, false
-}
-
-func prefixesContain(prefixes []netip.Prefix, addr netip.Addr) bool {
-	for _, p := range prefixes {
-		if p.Contains(addr) {
-			return true
-		}
-	}
-	return false
-}
-
+// isBlockedModelAddr applies the shared outbound policy (netguard.Blocked),
+// plus the test-only loopback seam.
 func (s *Server) isBlockedModelAddr(addr netip.Addr, allowPrivate bool) bool {
-	if !addr.IsValid() {
-		return true
-	}
-	addr = addr.Unmap().WithZone("")
-	if v4, ok := modelEmbeddedIPv4(addr); ok {
-		addr = v4
-	}
-	if s != nil && s.allowLoopbackModels && addr.IsLoopback() {
+	if s != nil && s.allowLoopbackModels && addr.IsValid() && addr.Unmap().IsLoopback() {
 		return false
 	}
-	shared := prefixesContain(modelSharedPrefixes, addr)
-	if !intercept.IsNonPublicAddr(addr) && !shared && !prefixesContain(modelReservedPrefixes, addr) {
-		return false
-	}
-	if allowPrivate {
-		// Allow-listed self-hosted endpoints may resolve to loopback, RFC1918 /
-		// unique-local private addresses, or the shared ranges above, but never
-		// link-local, unspecified, multicast, reserved, or instance-metadata
-		// addresses (such as 169.254.169.254, 100.100.100.200 or fd00:ec2::254).
-		if addr.IsLoopback() {
-			return false
-		}
-		if (addr.IsPrivate() || shared) && intercept.ValidateExemptionHost(addr.String()) == nil {
-			return false
-		}
-	}
-	return true
+	return netguard.Blocked(addr, allowPrivate)
 }
 
 func (s *Server) lookupModelIPs(ctx context.Context, host string) ([]netip.Addr, error) {

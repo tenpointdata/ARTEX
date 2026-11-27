@@ -116,9 +116,9 @@ func TestScopeRelayKeepAliveHostChange(t *testing.T) {
 		t.Fatalf("no dial to the second host in %v", got)
 	}
 
-	// The scope is checked at dial time: an upstream already open (here a's,
-	// the connection's pinned one) is not re-checked, which is why the run's
-	// end closes its relay. A host change needs a new dial, and is refused.
+	// The scope is checked at dial time, so ForgetScope also closes the
+	// connections bound to it (TestForgetScopeClosesBoundConnections covers
+	// the pinned host). A host change needs a new dial, and is refused.
 	tr.ForgetScope("task-k")
 	if code, _ := getBody(t, client, b.URL+"/3"); code == http.StatusOK {
 		t.Fatal("a keep-alive host change of a forgotten scope reached its target")

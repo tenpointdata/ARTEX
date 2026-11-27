@@ -1,0 +1,11 @@
+# Lab values for the recorded two-host install (deploy/lab/README.md). Lab only.
+image: {repository: artex, tag: lab, pullPolicy: Never}   # kind load docker-image artex:lab
+secretKey: {existingSecret: artex-key}
+control:
+  persistence: {data: {size: 2Gi}}
+postgresql:
+  bundled: {persistence: {size: 2Gi}}
+worker:
+  resources: {requests: {cpu: 250m}}
+# The scripted stub (llmstub/) in namespace lab. ollama is the keyless provider.
+llm: {provider: ollama, model: stub, baseUrl: "http://llmstub.lab.svc.cluster.local:8080"}

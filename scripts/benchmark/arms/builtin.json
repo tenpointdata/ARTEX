@@ -1,0 +1,15 @@
+{
+  "name": "builtin",
+  "proposed_from": [],
+  "prompts": {
+    "goals": {
+      "source": "builtin"
+    },
+    "planner": {
+      "source": "builtin"
+    },
+    "worker": {
+      "source": "builtin"
+    }
+  }
+}

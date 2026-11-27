@@ -1,10 +1,11 @@
 "use client";
 
 import * as React from "react";
+
 import { Button } from "@/components/ui/button";
+import { t } from "@/i18n";
 import { api } from "@/lib/api";
 import type { Activity, InterceptExecution } from "@/lib/types";
-import { t } from "@/i18n";
 
 // Resolve one exact persisted call, independently of transcript pagination.
 export function useApprovalFocus({ taskId, conversationId }: { taskId?: string; conversationId?: number }) {
@@ -40,7 +41,8 @@ export function useApprovalFocus({ taskId, conversationId }: { taskId?: string; 
         setState({ id, source, loading: false });
       })
       .catch((e) => {
-        if (!cancelled) setState({ id, error: (e as Error).message || t("Unable to locate the original execution"), loading: false });
+        if (!cancelled)
+          setState({ id, error: (e as Error).message || t("Unable to locate the original execution"), loading: false });
       });
     return () => {
       cancelled = true;

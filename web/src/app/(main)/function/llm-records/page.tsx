@@ -1,17 +1,8 @@
 "use client";
 
 import * as React from "react";
-import {
-  RadioIcon,
-  SearchIcon,
-  ChevronLeftIcon,
-  ChevronRightIcon,
-  Loader2Icon,
-  XIcon,
-  Trash2Icon,
-  CopyIcon,
-  CheckIcon,
-} from "lucide-react";
+
+import { ChevronLeftIcon, ChevronRightIcon, Loader2Icon, RadioIcon, SearchIcon, Trash2Icon, XIcon } from "lucide-react";
 
 import {
   AlertDialog,
@@ -23,31 +14,20 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-
-import { Card } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import { cn } from "@/lib/utils";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { useCan } from "@/hooks/use-session";
 import { intlLocale, t } from "@/i18n";
 import { api } from "@/lib/api";
-import type { LLMRecordItem, LLMRecordDetail, LLMTask } from "@/lib/types";
+import type { LLMRecordDetail, LLMRecordItem, LLMTask } from "@/lib/types";
+import { cn } from "@/lib/utils";
+
+import { CopyButton } from "./_components/copy-button";
 
 function fmtTime(ts: string) {
   return new Date(ts).toLocaleString(intlLocale, {
@@ -77,50 +57,18 @@ function tryFormatJSON(s: string): string {
   }
 }
 
-// Small button that copies the text in the current pane. Shows a brief checkmark after copying. Disabled when text is empty/only placeholders.
-function CopyButton({ text }: { text: string }) {
-  const [copied, setCopied] = React.useState(false);
-  const timer = React.useRef<ReturnType<typeof setTimeout> | null>(null);
-  React.useEffect(() => () => { if (timer.current) clearTimeout(timer.current); }, []);
-
-  const disabled = !text;
-  const copy = async () => {
-    if (disabled) return;
-    try {
-      await navigator.clipboard.writeText(text);
-    } catch {
-      // navigator.clipboard is unavailable in non-secure contexts (e.g. http LAN); fall back to execCommand.
-      const ta = document.createElement("textarea");
-      ta.value = text;
-      ta.style.position = "fixed";
-      ta.style.opacity = "0";
-      document.body.appendChild(ta);
-      ta.select();
-      try { document.execCommand("copy"); } catch { /* ignore: stay silent if unsupported */ }
-      document.body.removeChild(ta);
-    }
-    setCopied(true);
-    if (timer.current) clearTimeout(timer.current);
-    timer.current = setTimeout(() => setCopied(false), 1500);
-  };
-
-  return (
-    <Button
-      variant="ghost"
-      size="icon"
-      className="size-5 shrink-0"
-      disabled={disabled}
-      title={copied ? t("Copied") : t("Copy content")}
-      onClick={copy}
-    >
-      {copied ? <CheckIcon className="size-3 text-emerald-600" /> : <CopyIcon className="size-3" />}
-    </Button>
-  );
-}
-
 const PAGE_SIZES = [25, 50, 100];
 
+// Raw LLM records need `operate` to read (they echo prompts and secrets).
 export default function LLMRecordsPage() {
+  if (!useCan("operate")) {
+    return <p className="p-6 text-muted-foreground text-sm">{t("Your role does not allow this.")}</p>;
+  }
+  return <LLMRecordsView />;
+}
+
+function LLMRecordsView() {
+  const canAdmin = useCan("admin"); // toggling recording / deleting records mutate /api/llm
   const [page, setPage] = React.useState(0);
   const [size, setSize] = React.useState(50);
   const [session, setSession] = React.useState("");
@@ -155,9 +103,7 @@ export default function LLMRecordsPage() {
   const reqText = showRaw
     ? detail?.raw_request && tryFormatJSON(detail.raw_request)
     : detail?.request_body && tryFormatJSON(detail.request_body);
-  const respText = showRaw
-    ? detail?.raw_response
-    : detail?.response_body && tryFormatJSON(detail.response_body);
+  const respText = showRaw ? detail?.raw_response : detail?.response_body && tryFormatJSON(detail.response_body);
 
   // Per-task delete (task picker + confirm dialog)
   const [tasks, setTasks] = React.useState<LLMTask[]>([]);
@@ -176,8 +122,12 @@ export default function LLMRecordsPage() {
         setRecEnabled(!!s.llm_record);
         setRecKnown(true);
       })
-      .catch(() => {});
-    return () => { alive = false; };
+      .catch(() => {
+        // best effort: settings unavailable: recording state stays unknown
+      });
+    return () => {
+      alive = false;
+    };
   }, []);
 
   const toggleRecording = async (on: boolean) => {
@@ -200,28 +150,44 @@ export default function LLMRecordsPage() {
   }, [session]);
 
   // Reset page on filter change.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: these values intentionally trigger a page reset.
   React.useEffect(() => {
     setPage(0);
   }, [sessionQ, model, size, pickedTask]);
 
   // Load list.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: reloadTick is an explicit manual-refetch trigger.
   React.useEffect(() => {
     let alive = true;
     setLoading(true);
     api
-      .llmRecords({ model: model || undefined, session: sessionQ || undefined, task: pickedTask || undefined, page, size })
+      .llmRecords({
+        model: model || undefined,
+        session: sessionQ || undefined,
+        task: pickedTask || undefined,
+        page,
+        size,
+      })
       .then((r) => {
         if (!alive) return;
         setRecords(r.records ?? []);
         setTotal(r.total ?? 0);
       })
-      .catch(() => {})
+      .catch(() => {
+        // best effort: list load failure leaves the previous list in place
+      })
       .finally(() => alive && setLoading(false));
     api
       .llmTasks()
-      .then((r) => { if (alive) setTasks(r.tasks ?? []); })
-      .catch(() => {});
-    return () => { alive = false; };
+      .then((r) => {
+        if (alive) setTasks(r.tasks ?? []);
+      })
+      .catch(() => {
+        // best effort: task list is optional; keep the current options
+      });
+    return () => {
+      alive = false;
+    };
   }, [page, size, sessionQ, model, pickedTask, reloadTick]);
 
   // Delete every LLM record for the picked task, then refetch.
@@ -237,7 +203,9 @@ export default function LLMRecordsPage() {
         setPage(0);
         setReloadTick((t) => t + 1);
       })
-      .catch(() => {})
+      .catch(() => {
+        // best effort: delete failure leaves the records untouched
+      })
       .finally(() => setDeleting(false));
   };
 
@@ -252,10 +220,18 @@ export default function LLMRecordsPage() {
     setDetail(null);
     api
       .llmRecordDetail(selected.id)
-      .then((d) => { if (alive) setDetail(d); })
-      .catch(() => {})
-      .finally(() => { if (alive) setDetailLoading(false); });
-    return () => { alive = false; };
+      .then((d) => {
+        if (alive) setDetail(d);
+      })
+      .catch(() => {
+        // best effort: detail load failure leaves the detail pane empty
+      })
+      .finally(() => {
+        if (alive) setDetailLoading(false);
+      });
+    return () => {
+      alive = false;
+    };
   }, [selected]);
 
   const totalPages = Math.max(1, Math.ceil(total / size));
@@ -284,12 +260,7 @@ export default function LLMRecordsPage() {
             className="h-8 pl-8"
           />
         </div>
-        <Input
-          placeholder={t("Model")}
-          className="h-8 w-48"
-          value={model}
-          onChange={(e) => setModel(e.target.value)}
-        />
+        <Input placeholder={t("Model")} className="h-8 w-48" value={model} onChange={(e) => setModel(e.target.value)} />
         <Select value={pickedTask} onValueChange={setPickedTask}>
           <SelectTrigger size="sm" className="w-56">
             <SelectValue placeholder={t("Select a task…")} />
@@ -309,17 +280,19 @@ export default function LLMRecordsPage() {
             )}
           </SelectContent>
         </Select>
-        <Button
-          variant="destructive"
-          size="sm"
-          className="h-8"
-          disabled={!pickedTask || deleting}
-          title={pickedTask ? undefined : t("Select a task above first")}
-          onClick={() => setDeleteOpen(true)}
-        >
-          <Trash2Icon className="size-3.5" />
-          {t("Delete task conversations")}
-        </Button>
+        {canAdmin && (
+          <Button
+            variant="destructive"
+            size="sm"
+            className="h-8"
+            disabled={!pickedTask || deleting}
+            title={pickedTask ? undefined : t("Select a task above first")}
+            onClick={() => setDeleteOpen(true)}
+          >
+            <Trash2Icon className="size-3.5" />
+            {t("Delete task conversations")}
+          </Button>
+        )}
         <Select value={String(size)} onValueChange={(v) => setSize(Number(v))}>
           <SelectTrigger size="sm" className="w-28">
             <SelectValue />
@@ -340,7 +313,7 @@ export default function LLMRecordsPage() {
             size="sm"
             checked={recEnabled}
             onCheckedChange={toggleRecording}
-            disabled={recBusy}
+            disabled={recBusy || !canAdmin}
           />
           <label
             htmlFor="llm-rec-toggle"
@@ -417,15 +390,10 @@ export default function LLMRecordsPage() {
                   records.map((rec) => (
                     <TableRow
                       key={rec.id}
-                      className={cn(
-                        "cursor-pointer",
-                        selected?.id === rec.id && "bg-accent hover:bg-accent",
-                      )}
+                      className={cn("cursor-pointer", selected?.id === rec.id && "bg-accent hover:bg-accent")}
                       onClick={() => setSelected(rec)}
                     >
-                      <TableCell className="text-xs text-muted-foreground tabular-nums">
-                        {fmtTime(rec.ts)}
-                      </TableCell>
+                      <TableCell className="text-xs text-muted-foreground tabular-nums">{fmtTime(rec.ts)}</TableCell>
                       <TableCell className="text-xs font-mono text-muted-foreground">
                         {rec.task_id ? `#${rec.task_id}` : "-"}
                       </TableCell>
@@ -452,9 +420,13 @@ export default function LLMRecordsPage() {
                       </TableCell>
                       <TableCell>
                         {rec.status === "ok" ? (
-                          <Badge variant="secondary" className="text-xs text-emerald-600">{t("OK")}</Badge>
+                          <Badge variant="secondary" className="text-xs text-emerald-600">
+                            {t("OK")}
+                          </Badge>
                         ) : (
-                          <Badge variant="destructive" className="text-xs">{t("Error")}</Badge>
+                          <Badge variant="destructive" className="text-xs">
+                            {t("Error")}
+                          </Badge>
                         )}
                       </TableCell>
                     </TableRow>
@@ -484,16 +456,18 @@ export default function LLMRecordsPage() {
                   {t("Task #{id}", { id: selected.task_id })}
                 </Badge>
               )}
-              <span className="text-xs text-muted-foreground">
-                {fmtTime(selected.ts)}
-              </span>
+              <span className="text-xs text-muted-foreground">{fmtTime(selected.ts)}</span>
               <span className={cn("text-xs", selected.latency_ms > 30000 && "text-amber-500")}>
                 {fmtLatency(selected.latency_ms)}
               </span>
               {selected.status === "ok" ? (
-                <Badge variant="secondary" className="text-xs text-emerald-600">{t("OK")}</Badge>
+                <Badge variant="secondary" className="text-xs text-emerald-600">
+                  {t("OK")}
+                </Badge>
               ) : (
-                <Badge variant="destructive" className="text-xs">{t("Error")}</Badge>
+                <Badge variant="destructive" className="text-xs">
+                  {t("Error")}
+                </Badge>
               )}
               {/* Raw view toggle. Old records have no raw data; disable it rather than silently
                   falling back, to avoid looking like "raw matches parsed". */}
@@ -511,12 +485,7 @@ export default function LLMRecordsPage() {
               >
                 {t("Raw")}
               </Button>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="size-7 shrink-0"
-                onClick={() => setSelected(null)}
-              >
+              <Button variant="ghost" size="icon" className="size-7 shrink-0" onClick={() => setSelected(null)}>
                 <XIcon />
               </Button>
             </div>
@@ -534,9 +503,7 @@ export default function LLMRecordsPage() {
                       {t("Loading…")}
                     </div>
                   ) : (
-                    <pre className="p-3 font-mono text-xs break-all whitespace-pre-wrap">
-                      {reqText || t("(empty)")}
-                    </pre>
+                    <pre className="p-3 font-mono text-xs break-all whitespace-pre-wrap">{reqText || t("(empty)")}</pre>
                   )}
                 </div>
               </div>
@@ -552,10 +519,12 @@ export default function LLMRecordsPage() {
                       {t("Loading…")}
                     </div>
                   ) : (
-                    <pre className={cn(
-                      "p-3 font-mono text-xs break-all whitespace-pre-wrap",
-                      selected.status !== "ok" && "text-red-600 dark:text-red-400",
-                    )}>
+                    <pre
+                      className={cn(
+                        "p-3 font-mono text-xs break-all whitespace-pre-wrap",
+                        selected.status !== "ok" && "text-red-600 dark:text-red-400",
+                      )}
+                    >
                       {respText || t("(empty)")}
                     </pre>
                   )}
@@ -569,7 +538,9 @@ export default function LLMRecordsPage() {
       <AlertDialog open={deleteOpen} onOpenChange={setDeleteOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>{t('Delete all LLM conversations for task "{task}"?', { task: pickedTask })}</AlertDialogTitle>
+            <AlertDialogTitle>
+              {t('Delete all LLM conversations for task "{task}"?', { task: pickedTask })}
+            </AlertDialogTitle>
             <AlertDialogDescription>
               {t(
                 "This will permanently delete all LLM call records for this task (including raw requests/responses). This action cannot be undone.",

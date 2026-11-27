@@ -216,15 +216,37 @@ RUN set -eux; \
     test "$templates" -gt 10000
 
 # bbot recursive recon orchestrator (#117): blacklanternsecurity/bbot, AGPL-3.0
-# (same license as ARTEX; standalone CLI dependency, not linked code). Pinned
-# version, own venv to isolate from the image python. Module dependencies are
-# preinstalled (--install-all-deps) so scans never need pip at runtime, which
-# would fail under a program's egress allowlist.
-ARG BBOT_VERSION=3.0.2
+# (same license as ARTEX; standalone CLI dependency, not linked code). Own venv to
+# isolate from the image python. Module dependencies are preinstalled
+# (--install-all-deps) so scans never need pip at runtime, which would fail under a
+# program's egress allowlist.
+#
+# bbot and its whole Python dependency tree are installed from a hash-pinned
+# requirements file (pip --require-hashes --no-deps), so a re-published or
+# tampered package fails the build instead of entering the image. The bbot version
+# lives in docker/bbot-requirements.in; docker/bbot-requirements-{amd64,arm64}.txt
+# are generated from it for this image's Python (3.12) and glibc (manylinux_2_28):
+#   uv pip compile docker/bbot-requirements.in --python-platform x86_64-manylinux_2_28 \
+#     --python-version 3.12 --generate-hashes --no-header -o docker/bbot-requirements-amd64.txt
+#   (and aarch64-manylinux_2_28 -> -arm64.txt)
+# wordninja is the one sdist-only dependency; it is built without build isolation
+# against a hash-pinned setuptools (docker/bbot-build-requirements.txt, removed again
+# afterwards), so the build backend is pinned too and every other package must be a wheel.
+# NOT pinned: `bbot --install-all-deps` below runs bbot's own ansible installer, which
+# downloads its modules' external tools (gowitness, trufflehog, retire.js, ...) at build
+# time at versions bbot chooses. That step stays trust-on-first-use until bbot's
+# module dependencies can be vendored.
+COPY docker/bbot-build-requirements.txt docker/bbot-requirements-amd64.txt docker/bbot-requirements-arm64.txt /tmp/bbot-requirements/
 # arm64: bbot's Chrome and retirejs's Node are x86-64; use native builds.
 RUN set -eux; \
     python -m venv /opt/bbot; \
-    /opt/bbot/bin/pip install --no-cache-dir "bbot==${BBOT_VERSION}"; \
+    /opt/bbot/bin/pip install --no-cache-dir --require-hashes \
+      -r /tmp/bbot-requirements/bbot-build-requirements.txt; \
+    /opt/bbot/bin/pip install --no-cache-dir --require-hashes --no-deps --no-build-isolation \
+      --only-binary=:all: --no-binary=wordninja \
+      -r "/tmp/bbot-requirements/bbot-requirements-${TARGETARCH:-amd64}.txt"; \
+    /opt/bbot/bin/pip uninstall -y setuptools; \
+    rm -rf /tmp/bbot-requirements; \
     ln -s /opt/bbot/bin/bbot /usr/local/bin/bbot; \
     if [ "${TARGETARCH:-amd64}" = "arm64" ]; then \
       apt-get update; \
@@ -243,28 +265,39 @@ RUN set -eux; \
     ! grep -qE "Installing|ERRR|CRITICAL" /tmp/bbot-dry.log || { cat /tmp/bbot-dry.log; exit 1; }
 
 
-# Preinstall Playwright MCP and CLI (globally) so no network download is needed at runtime.
+# Preinstall Playwright MCP and CLI so no network download is needed at runtime.
+# The three packages and every transitive dependency are installed with `npm ci` from
+# docker/playwright/package-lock.json (integrity hashes) into /opt/playwright, with
+# --ignore-scripts: none of them needs an install script (the browsers are fetched by
+# `playwright install` below, not by a postinstall). The versions are the ones in
+# docker/playwright/package.json; upgrade deliberately with
+# `npm install --package-lock-only --ignore-scripts` in that directory.
 # @playwright/mcp: the seeded browser MCP runs the playwright-mcp binary directly.
 # `npx @playwright/mcp` is not used: it queries the npm registry on every start even
-# with the package installed globally.
+# with the package installed.
 # @playwright/cli: provides playwright-cli, verified with --help right after install.
-# Then install playwright (browser management) and preinstall chromium plus its system
-# dependencies via --with-deps. @playwright/mcp and @playwright/cli bundle their own
-# playwright-core, which expects a different Chromium build than
-# playwright@PLAYWRIGHT_VERSION installs, so that build is installed as well (second
-# install line); without it neither can launch a browser. All three packages are
-# pinned; upgrade deliberately.
-ARG PLAYWRIGHT_MCP_VERSION=0.0.83
-ARG PLAYWRIGHT_CLI_VERSION=0.1.22
-ARG PLAYWRIGHT_VERSION=1.64.1
-# playwright-core's exports map hides cli.js from require.resolve, so run the
-# binary npm links for @playwright/mcp instead: it is the copy MCP actually
-# loads, and it installs the Chromium revision that copy expects.
-RUN npm install -g "@playwright/mcp@${PLAYWRIGHT_MCP_VERSION}" "@playwright/cli@${PLAYWRIGHT_CLI_VERSION}" "playwright@${PLAYWRIGHT_VERSION}" \
-    && playwright-cli --help \
-    && playwright install --with-deps chromium \
-    && "$(npm root -g)/@playwright/mcp/node_modules/.bin/playwright-core" install chromium \
-    && rm -rf /var/lib/apt/lists/*
+# playwright (browser management) preinstalls chromium plus its system dependencies via
+# --with-deps. @playwright/mcp and @playwright/cli use their own playwright-core
+# (hoisted to /opt/playwright/node_modules/playwright-core), which expects a different
+# Chromium build than playwright 1.64.1 installs, so that build is installed as well
+# (second install line); without it neither can launch a browser.
+# The binaries are linked into /usr/local/bin, and the packages into the global npm
+# root, so `playwright-mcp` on PATH and NODE_PATH="$(npm root -g)" (see
+# scripts/docker-login-probe.js) keep working as with `npm install -g`.
+COPY docker/playwright/package.json docker/playwright/package-lock.json /opt/playwright/
+RUN set -eux; \
+    cd /opt/playwright; \
+    npm ci --ignore-scripts --no-audit --no-fund; \
+    for bin in playwright playwright-cli playwright-mcp; do \
+      ln -s "/opt/playwright/node_modules/.bin/$bin" "/usr/local/bin/$bin"; \
+    done; \
+    mkdir -p "$(npm root -g)"; \
+    ln -s /opt/playwright/node_modules/@playwright "$(npm root -g)/@playwright"; \
+    ln -s /opt/playwright/node_modules/playwright "$(npm root -g)/playwright"; \
+    playwright-cli --help; \
+    playwright install --with-deps chromium; \
+    /opt/playwright/node_modules/.bin/playwright-core install chromium; \
+    rm -rf /var/lib/apt/lists/*
 # Agent processes run as the executor with HOME and XDG_CACHE_HOME in the data
 # directory (server/execpriv_unix.go); the browsers installed above stay in root's
 # cache, which /root's 0711 lets the executor reach.

@@ -12,10 +12,10 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { intlLocale, t } from "@/i18n";
 import { api } from "@/lib/api";
 import type { CommandRecord, ToolStat } from "@/lib/types";
 import { cn } from "@/lib/utils";
-import { intlLocale, t } from "@/i18n";
 
 function fmtTime(ts: string) {
   return new Date(ts).toLocaleString(intlLocale, {
@@ -287,7 +287,9 @@ export default function CommandsPage() {
                   {statsErrors > 0 && (
                     <>
                       {" · "}
-                      <span className="text-red-600 dark:text-red-400">{t("Failed {count}", { count: statsErrors })}</span>
+                      <span className="text-red-600 dark:text-red-400">
+                        {t("Failed {count}", { count: statsErrors })}
+                      </span>
                     </>
                   )}
                 </span>

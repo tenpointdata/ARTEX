@@ -59,6 +59,12 @@ rate control).
 `nuclei`, `legba`, `medusa`, `host_header`, `url_manipulation`,
 `generic_ssrf`.
 
+`portscan` is **not available**: masscan needs raw sockets, and the executor
+has none (no sudo, no setuid, no_new_privs). Its setup fails with
+`No such file or directory: 'sudo'`. Leave it out of `-m` and port-scan with
+`nmap -sT` (a connect scan, which needs no privilege), then feed the open
+ports back through the asset graph.
+
 ## Recipes
 
 Common tail for every run: `-om json,txt -o bbot-output -n <intent-name> -y --no-deps`.

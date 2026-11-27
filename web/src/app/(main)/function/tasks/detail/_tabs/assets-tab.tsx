@@ -2,23 +2,10 @@
 
 import * as React from "react";
 
-import {
-  ChevronLeftIcon,
-  ChevronRightIcon,
-  GlobeIcon,
-  KeyRoundIcon,
-  LayoutTemplateIcon,
-  LinkIcon,
-  type LucideIcon,
-  NetworkIcon,
-  PlusIcon,
-  SmartphoneIcon,
-  Trash2Icon,
-} from "lucide-react";
+import { KeyRoundIcon, PlusIcon, Trash2Icon } from "lucide-react";
 import { toast } from "sonner";
 
 import { AssetDslSearch } from "@/components/asset-dsl-search";
-import { ScopeTextEditor } from "@/components/scope-text-editor";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -29,333 +16,23 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardFooter } from "@/components/ui/card";
-import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Sheet, SheetContent, SheetDescription, SheetFooter, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Spinner } from "@/components/ui/spinner";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { TableCell, TableRow } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { useCan } from "@/hooks/use-session";
+import { t } from "@/i18n";
 import { api } from "@/lib/api";
-import { parseCompanyScopeText } from "@/lib/company-scope";
-import { taskAssetSourceLabel } from "@/lib/task-assets";
+import { setVisibleInterval } from "@/lib/polling";
+import { assetLabel } from "@/lib/task-assets";
 import type { Asset, NewAssetType } from "@/lib/types";
 import { cn } from "@/lib/utils";
-import { setVisibleInterval } from "@/lib/polling";
-import { t } from "@/i18n";
 
-const PAGE_SIZES = [25, 50, 100, 200];
-
-const METHOD_COLOR: Record<string, string> = {
-  DELETE: "bg-red-100 text-red-700",
-  GET: "bg-emerald-100 text-emerald-700",
-  HEAD: "bg-purple-100 text-purple-700",
-  OPTIONS: "bg-slate-100 text-slate-600",
-  PATCH: "bg-orange-100 text-orange-700",
-  POST: "bg-blue-100 text-blue-700",
-  PUT: "bg-amber-100 text-amber-700",
-};
-
-const TABS: { key: NewAssetType; label: string; icon: LucideIcon }[] = [
-  { key: "root_domain", label: t("Root domain"), icon: GlobeIcon },
-  { key: "ip", label: "IP", icon: NetworkIcon },
-  { key: "subdomain", label: t("Subdomain"), icon: GlobeIcon },
-  { key: "app", label: t("App"), icon: SmartphoneIcon },
-  { key: "service", label: t("Service"), icon: LayoutTemplateIcon },
-  { key: "endpoint", label: t("Endpoint"), icon: LinkIcon },
-];
-
-function firstText(values: Array<string | undefined>, fallback: string): string {
-  return values.find((value) => value?.trim()) ?? fallback;
-}
-
-function assetLabel(asset: Asset): string {
-  switch (asset.type) {
-    case "root_domain":
-    case "subdomain":
-      return firstText([asset.domain], `#${asset.id}`);
-    case "ip":
-      return firstText([asset.ip], `#${asset.id}`);
-    case "app":
-      return firstText([asset.app_name, asset.url], `#${asset.id}`);
-    case "service": {
-      const host = firstText([asset.ip, asset.domain], "");
-      const address = [host, asset.port].filter((value) => value !== undefined && value !== "").join(":");
-      return firstText([asset.url, address, asset.service_name], `#${asset.id}`);
-    }
-    case "endpoint":
-      return firstText([[asset.method, asset.url].filter(Boolean).join(" ")], `#${asset.id}`);
-  }
-}
-
-function MethodBadge({ method }: { method: string }) {
-  const normalized = method.toUpperCase();
-  return (
-    <span
-      className={cn(
-        "inline-block rounded px-1.5 py-0.5 font-mono font-semibold text-[10px] leading-none",
-        METHOD_COLOR[normalized] ?? "bg-muted text-muted-foreground",
-      )}
-    >
-      {normalized || "—"}
-    </span>
-  );
-}
-
-function statusTone(code: number) {
-  if (code >= 500) return "text-red-500";
-  if (code >= 400) return "text-amber-500";
-  if (code >= 300) return "text-blue-500";
-  if (code >= 200) return "text-emerald-500";
-  return "text-muted-foreground";
-}
-
-function fmtBytes(value?: number | null) {
-  if (!value || !Number.isFinite(value) || value <= 0) return "—";
-  const units = ["B", "KB", "MB"];
-  const index = Math.min(Math.floor(Math.log(value) / Math.log(1024)), units.length - 1);
-  return `${index === 0 ? value : (value / 1024 ** index).toFixed(1)} ${units[index]}`;
-}
-
-function Chips({ items, mono }: { items: string[]; mono?: boolean }) {
-  const clean = items.filter(Boolean);
-  if (clean.length === 0) return <span className="text-muted-foreground text-xs">—</span>;
-  return (
-    <div className="flex flex-wrap gap-1">
-      {clean.map((item) => (
-        <Badge key={item} variant="outline" className={cn(mono && "font-mono")}>
-          {item}
-        </Badge>
-      ))}
-    </div>
-  );
-}
-
-function SourceCell({ asset }: { asset: Asset }) {
-  const source = firstText([asset.task_source], "legacy");
-  const summary = firstText(
-    [asset.task_source_summary],
-    t("Migrated from a historical task's asset association; no more detailed source information"),
-  );
-  return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <Badge variant="outline" className="max-w-28 shrink-0 font-normal">
-          <span className="truncate">{taskAssetSourceLabel(source)}</span>
-        </Badge>
-      </TooltipTrigger>
-      <TooltipContent side="left" align="start" className="max-w-sm">
-        <div className="flex min-w-0 flex-col gap-1">
-          <span className="font-medium">{taskAssetSourceLabel(source)}</span>
-          <span className="[overflow-wrap:anywhere]">{summary}</span>
-          {asset.task_source_node_id ? (
-            <span className="font-mono opacity-80">{t("Source node #{id}", { id: asset.task_source_node_id })}</span>
-          ) : null}
-        </div>
-      </TooltipContent>
-    </Tooltip>
-  );
-}
-
-function AssetCard({
-  children,
-  cols,
-  loaded,
-  onPage,
-  onSize,
-  page,
-  size,
-  total,
-}: {
-  children: React.ReactNode;
-  cols: string[];
-  loaded: boolean;
-  onPage: (page: number) => void;
-  onSize: (size: number) => void;
-  page: number;
-  size: number;
-  total: number;
-}) {
-  const rows = React.Children.toArray(children);
-  const pageCount = Math.max(1, Math.ceil(total / size));
-  const start = total === 0 ? 0 : page * size + 1;
-  const end = Math.min(total, page * size + rows.length);
-  let tableRows: React.ReactNode;
-  if (!loaded) {
-    tableRows = (
-      <TableRow>
-        <TableCell colSpan={cols.length} className="py-14 text-center">
-          <Spinner className="mx-auto" />
-        </TableCell>
-      </TableRow>
-    );
-  } else if (rows.length > 0) {
-    tableRows = rows;
-  } else {
-    tableRows = (
-      <TableRow>
-        <TableCell colSpan={cols.length} className="py-10 text-center text-muted-foreground text-sm">
-          {t("No test assets in this category yet")}
-        </TableCell>
-      </TableRow>
-    );
-  }
-  return (
-    <Card className="flex min-h-0 flex-1 flex-col py-0">
-      <CardContent className="scrollbar-thin scrollbar-track-transparent min-h-0 flex-1 overflow-auto p-0">
-        <Table>
-          <TableHeader className="sticky top-0 z-10 bg-card">
-            <TableRow>
-              {cols.map((column) => (
-                <TableHead key={column}>{column}</TableHead>
-              ))}
-            </TableRow>
-          </TableHeader>
-          <TableBody>{tableRows}</TableBody>
-        </Table>
-      </CardContent>
-      {total > 0 ? (
-        <CardFooter className="gap-2 px-3 py-1.5 text-muted-foreground text-xs">
-          <Select
-            value={String(size)}
-            onValueChange={(value) => {
-              onSize(Number(value));
-              onPage(0);
-            }}
-          >
-            <SelectTrigger size="sm" className="w-24">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectGroup>
-                {PAGE_SIZES.map((value) => (
-                  <SelectItem key={value} value={String(value)}>
-                    {t("{count} / page", { count: value })}
-                  </SelectItem>
-                ))}
-              </SelectGroup>
-            </SelectContent>
-          </Select>
-          <span className="tabular-nums">
-            {start}–{end} / {total}
-          </span>
-          {pageCount > 1 ? (
-            <div className="ml-auto flex items-center gap-2">
-              <Button
-                variant="outline"
-                size="icon-sm"
-                disabled={page <= 0}
-                onClick={() => onPage(Math.max(0, page - 1))}
-                aria-label={t("Previous page")}
-              >
-                <ChevronLeftIcon />
-              </Button>
-              <span className="tabular-nums">
-                {page + 1} / {pageCount}
-              </span>
-              <Button
-                variant="outline"
-                size="icon-sm"
-                disabled={page + 1 >= pageCount}
-                onClick={() => onPage(Math.min(pageCount - 1, page + 1))}
-                aria-label={t("Next page")}
-              >
-                <ChevronRightIcon />
-              </Button>
-            </div>
-          ) : null}
-        </CardFooter>
-      ) : null}
-    </Card>
-  );
-}
-
-function AddTaskAssetsSheet({
-  onAttached,
-  onOpenChange,
-  open,
-  taskId,
-}: {
-  onAttached: () => void;
-  onOpenChange: (open: boolean) => void;
-  open: boolean;
-  taskId: string;
-}) {
-  const [scopeText, setScopeText] = React.useState("");
-  const [saving, setSaving] = React.useState(false);
-  const parsedScope = React.useMemo(() => parseCompanyScopeText(scopeText), [scopeText]);
-
-  React.useEffect(() => {
-    if (!open) return;
-    setScopeText("");
-  }, [open]);
-
-  const attach = async () => {
-    if (parsedScope.rules.length === 0 || parsedScope.errors.length > 0) return;
-    setSaving(true);
-    try {
-      const result = await api.registerTaskAssetScopes(taskId, parsedScope.rules);
-      const assetSummary = result.assets_linked + result.assets_existing;
-      toast.success(
-        t("Registered {scopes} scopes, linked {assets} domain/IP assets", {
-          scopes: result.requested,
-          assets: assetSummary,
-        }),
-      );
-      onAttached();
-      onOpenChange(false);
-    } catch (reason) {
-      toast.error(t("Failed to add: {error}", { error: String((reason as Error)?.message ?? reason) }));
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  return (
-    <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent className="w-full sm:max-w-xl">
-        <SheetHeader>
-          <SheetTitle>{t("Add test assets")}</SheetTitle>
-          <SheetDescription>
-            {t(
-              "Enter the test scope directly. Domains and IPs create or reuse global assets; CIDRs, ICP records, and keywords act as agent scope context.",
-            )}
-          </SheetDescription>
-        </SheetHeader>
-        <div className="flex min-h-0 flex-1 flex-col overflow-y-auto px-4">
-          <ScopeTextEditor
-            id="task-asset-scope"
-            value={scopeText}
-            onValueChange={setScopeText}
-            parsed={parsedScope}
-            label={t("Test assets and scope")}
-            description={t(
-              "One entry per line; domains, IPs, CIDRs, ICP records, and keywords are recognized automatically.",
-            )}
-          />
-        </div>
-        <SheetFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={saving}>
-            {t("Cancel")}
-          </Button>
-          <Button
-            onClick={() => void attach()}
-            disabled={saving || parsedScope.rules.length === 0 || parsedScope.errors.length > 0}
-          >
-            {saving ? <Spinner data-icon="inline-start" /> : <PlusIcon data-icon="inline-start" />}
-            {parsedScope.rules.length > 0
-              ? t("Register {count} entries", { count: parsedScope.rules.length })
-              : t("Register entries")}
-          </Button>
-        </SheetFooter>
-      </SheetContent>
-    </Sheet>
-  );
-}
+import { AddTaskAssetsSheet } from "./add-task-assets-sheet";
+import { AssetCard, Chips, fmtBytes, MethodBadge, SourceCell, statusTone, TABS } from "./assets-parts";
 
 export function AssetsTab({ taskId }: { taskId: string }) {
+  const canOperate = useCan("operate");
   const [rows, setRows] = React.useState<Asset[]>([]);
   const [total, setTotal] = React.useState(0);
   const [counts, setCounts] = React.useState<Record<string, number>>({});
@@ -464,17 +141,18 @@ export function AssetsTab({ taskId }: { taskId: string }) {
     }
   };
 
-  const removeButton = (asset: Asset) => (
-    <Button
-      variant="ghost"
-      size="icon-sm"
-      onClick={() => setRemoveTarget(asset)}
-      aria-label={t("Remove asset {label} from the task", { label: assetLabel(asset) })}
-      title={t("Remove from task")}
-    >
-      <Trash2Icon />
-    </Button>
-  );
+  const removeButton = (asset: Asset) =>
+    canOperate && (
+      <Button
+        variant="ghost"
+        size="icon-sm"
+        onClick={() => setRemoveTarget(asset)}
+        aria-label={t("Remove asset {label} from the task", { label: assetLabel(asset) })}
+        title={t("Remove from task")}
+      >
+        <Trash2Icon />
+      </Button>
+    );
 
   const commonCardProps = { loaded, onPage: setPage, onSize: setSize, page, size, total };
   const totalAll = TABS.reduce((sum, item) => sum + (counts[item.key] ?? 0), 0);
@@ -498,10 +176,12 @@ export function AssetsTab({ taskId }: { taskId: string }) {
             {t("This task is linked to {count} assets in total", { count: totalAll })}
           </p>
         </div>
-        <Button size="sm" onClick={() => setAddOpen(true)}>
-          <PlusIcon data-icon="inline-start" />
-          {t("Add test assets")}
-        </Button>
+        {canOperate && (
+          <Button size="sm" onClick={() => setAddOpen(true)}>
+            <PlusIcon data-icon="inline-start" />
+            {t("Add test assets")}
+          </Button>
+        )}
       </div>
 
       <Tabs

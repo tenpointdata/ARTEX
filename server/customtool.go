@@ -650,6 +650,10 @@ func (s *Server) httpProxyTransport(ctx context.Context, spec httpExec) *http.Tr
 		if tr := s.m.Traffic(); tr != nil && s.m.TrafficEnabled() {
 			proxyStr = proxyURLString(s.m.ScopedProxyAddr(ctx))
 			caFile = tr.CACertPath()
+		} else if s.m.remoteProxy != nil && s.m.TrafficEnabled() {
+			// Worker node: the control node's recording proxy, task-scoped.
+			proxyStr = proxyURLString(s.m.ScopedProxyAddr(ctx))
+			caFile = s.m.ProxyCACert()
 		} else if addr := proxyURLString(s.m.GlobalProxy()); addr != "" {
 			proxyStr = addr
 		}

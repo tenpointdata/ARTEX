@@ -6,8 +6,8 @@ import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { cn, copyText } from "@/lib/utils";
 import { t } from "@/i18n";
+import { cn, copyText } from "@/lib/utils";
 
 export function statusTone(status: number) {
   if (status >= 500) return "text-red-500";

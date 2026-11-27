@@ -1195,6 +1195,7 @@ func (s *ExplorationStore) FindingIntents() (map[int64]int64, error) {
 	rows, err := s.db.Query(`SELECT e.dst_id, e.src_id
 FROM exploration_edges e
 JOIN exploration_nodes n ON n.id = e.dst_id AND n.exploration_id = e.exploration_id
+JOIN exploration_nodes src ON src.id = e.src_id AND src.kind='intent'
 WHERE e.exploration_id=$1 AND e.rel=$2 AND n.kind='finding'`, s.expID, RelYields)
 	if err != nil {
 		return nil, err

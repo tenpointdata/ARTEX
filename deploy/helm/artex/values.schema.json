@@ -1,0 +1,92 @@
+{
+  "$schema": "https://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "properties": {
+    "image": {
+      "type": "object",
+      "required": ["repository"],
+      "properties": {
+        "repository": {"type": "string", "minLength": 1},
+        "tag": {"type": "string"},
+        "pullPolicy": {"enum": ["Always", "IfNotPresent", "Never"]}
+      }
+    },
+    "settings": {
+      "type": "object",
+      "properties": {
+        "noiseProfile": {"enum": ["", "off", "quiet", "balanced", "aggressive"]}
+      }
+    },
+    "controlTLS": {
+      "type": "object",
+      "properties": {
+        "enabled": {"type": "boolean"},
+        "source": {"enum": ["generate", "secret", "certManager"]},
+        "existingSecret": {"type": "string"},
+        "caKey": {"type": "string", "minLength": 1},
+        "generate": {"type": "object", "properties": {"validityDays": {"type": "integer", "minimum": 1}}},
+        "certManager": {
+          "type": "object",
+          "properties": {
+            "issuerRef": {
+              "type": "object",
+              "properties": {
+                "name": {"type": "string"},
+                "kind": {"enum": ["Issuer", "ClusterIssuer"]},
+                "group": {"type": "string"}
+              }
+            },
+            "duration": {"type": "string"},
+            "renewBefore": {"type": "string"}
+          }
+        },
+        "extraDnsNames": {"type": "array", "items": {"type": "string"}}
+      }
+    },
+    "control": {
+      "type": "object",
+      "properties": {
+        "localWorkers": {"type": "integer", "minimum": 0}
+      }
+    },
+    "worker": {
+      "type": "object",
+      "properties": {
+        "enabled": {"type": "boolean"},
+        "replicas": {"type": "integer", "minimum": 0},
+        "concurrency": {"type": "integer", "minimum": 1},
+        "antiAffinity": {"enum": ["hard", "soft", "none"]},
+        "healthPort": {"type": "integer", "minimum": 1, "maximum": 65535},
+        "terminationGracePeriodSeconds": {"type": "integer", "minimum": 0}
+      }
+    },
+    "postgresql": {
+      "type": "object",
+      "properties": {
+        "sslmode": {"enum": ["", "disable", "allow", "prefer", "require", "verify-ca", "verify-full"]},
+        "external": {
+          "type": "object",
+          "properties": {
+            "host": {"type": "string"},
+            "port": {"type": "integer", "minimum": 1, "maximum": 65535}
+          }
+        },
+        "bundled": {
+          "type": "object",
+          "properties": {"enabled": {"type": "boolean"}}
+        }
+      }
+    },
+    "egress": {
+      "type": "object",
+      "properties": {
+        "enabled": {"type": "boolean"},
+        "denyClusterServices": {"type": "boolean"},
+        "refreshSeconds": {"type": "integer", "minimum": 0},
+        "clusterCIDRs": {"type": "array", "items": {"type": "string"}},
+        "denyHosts": {"type": "string"},
+        "allowHosts": {"type": "string"}
+      }
+    }
+  }
+}
